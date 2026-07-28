@@ -307,6 +307,37 @@ def audit(limit: int = 50):
     _print(_call("GET", f"/api/audit?limit={limit}"))
 
 
+service_app = typer.Typer(help="開機/登入自動啟動：systemd (Linux)、launchd (macOS)、"
+                               "工作排程器 (Windows)，皆含自動重啟。")
+app.add_typer(service_app, name="service")
+
+
+@service_app.command("install")
+def service_install():
+    """Install + start the auto-restart service for `bastet serve`."""
+    from . import service
+
+    try:
+        typer.echo(service.install())
+    except RuntimeError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
+@service_app.command("uninstall")
+def service_uninstall():
+    from . import service
+
+    typer.echo(service.uninstall())
+
+
+@service_app.command("status")
+def service_status():
+    from . import service
+
+    typer.echo(service.status())
+
+
 @app.command()
 def gc():
     """Sweep worktrees left behind by finished jobs (branches survive)."""
