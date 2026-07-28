@@ -9,8 +9,10 @@ endpoints authenticate with run tokens instead.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -107,7 +109,10 @@ def create_app(home: Home) -> FastAPI:
     prices = PriceBook(home.root / "model_prices.json")
     cfg = home.config()
     gateway_url = f"http://127.0.0.1:{cfg.get('port', 8890)}"
-    orch = Orchestrator(db, home, prices, gateway_url)
+    from .events import EventBus
+    from .events import dumps as event_dumps
+    bus = EventBus()
+    orch = Orchestrator(db, home, prices, gateway_url, bus=bus)
     api_token = home.api_token()
 
     app = FastAPI(title="Bastet Agent OS", version="0.0.1.dev0", docs_url=None, redoc_url=None)
@@ -294,7 +299,8 @@ def create_app(home: Home) -> FastAPI:
         where, params = ("WHERE project_id=?", (project_id,)) if project_id else ("", ())
         return [dict(r) for r in db.query(
             "SELECT id, project_id, template_id, title, stage, status, priority, "
-            f"created_at, updated_at FROM jobs {where} ORDER BY updated_at DESC LIMIT ?",
+            "stages_snapshot_json, created_at, updated_at "
+            f"FROM jobs {where} ORDER BY updated_at DESC LIMIT ?",
             (*params, limit))]
 
     @app.get("/api/jobs/{job_id}", dependencies=[Depends(require_api_token)])
@@ -355,6 +361,53 @@ def create_app(home: Home) -> FastAPI:
         return [dict(r) for r in db.query(
             "SELECT at, actor, action, target_type, target_id, detail_json "
             "FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))]
+
+    # ---- WebSocket event stream (SPEC §5.10) --------------------------------
+    # Browser WebSocket clients can't set Authorization headers, so the first
+    # message must be {"token": "<api token>"} — never put the token in the URL.
+
+    from fastapi import WebSocket, WebSocketDisconnect
+
+    @app.websocket("/api/ws")
+    async def events_ws(ws: WebSocket):
+        if not _host_ok(ws.headers.get("host", "")):
+            await ws.close(code=4403)
+            return
+        origin = ws.headers.get("origin")
+        if origin:
+            from urllib.parse import urlparse
+            if not _host_ok(urlparse(origin).netloc):
+                await ws.close(code=4403)
+                return
+        await ws.accept()
+        try:
+            first = await asyncio.wait_for(ws.receive_json(), timeout=10)
+        except Exception:
+            await ws.close(code=4401)
+            return
+        if first.get("token") != api_token:
+            await ws.close(code=4401)
+            return
+        project_filter = first.get("project_id")
+        queue = bus.subscribe()
+        try:
+            await ws.send_json({"type": "hello", "filtered": bool(project_filter)})
+            while True:
+                event = await queue.get()
+                if project_filter and event.get("project_id") not in (project_filter, None):
+                    continue
+                await ws.send_text(event_dumps(event))
+        except WebSocketDisconnect:
+            pass
+        finally:
+            bus.unsubscribe(queue)
+
+    # ---- Kanban UI (built by `npm run build` in web/) -------------------------
+
+    ui_dist = Path(__file__).parent / "ui_dist"
+    if ui_dist.exists():
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/ui", StaticFiles(directory=str(ui_dist), html=True), name="ui")
 
     @app.get("/", response_class=HTMLResponse)
     def status_page():

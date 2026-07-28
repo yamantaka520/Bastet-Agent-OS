@@ -26,8 +26,18 @@ All notable changes to Bastet Agent OS. Format follows
   usage/audit/pricing-update/doctor.
 - CI: ubuntu/macos/windows × Python 3.11/3.12.
 
-### Added — M2 workflow engine (in progress)
+### Added — M2 workflow engine
 - Multi-stage workflow templates (YAML/JSON) with per-stage roles, isolation,
   retries.
 - Gate protocol: `auto`, `tests-pass` (deterministic command), `agent-review`
   (structured verdict channel — missing verdict rejects), `human-approve`.
+- Role-based agent routing (`project_agent_roles`), human approval flow
+  (`bastet approve` / `POST /api/jobs/{id}/approve`).
+
+### Added — M2 UI & events
+- Typed event bus (SPEC §5.10) + `/api/ws` WebSocket stream (token in the
+  first message — never in the URL; Host/Origin validated like HTTP).
+- Kanban web UI (Vite + React, served at `/ui`, built assets ship in the
+  package): stage columns, live board refresh over WS, job drawer with runs,
+  usage/cost per run, gate history, and in-browser approve/reject for
+  human-approve gates.

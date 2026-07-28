@@ -52,6 +52,17 @@ bastet audit                    # append-only audit trail
 bastet doctor                   # health checks
 ```
 
+The Kanban web UI lives at `http://127.0.0.1:8890/ui` — paste the token from
+`~/.bastet/api_token`, watch jobs move across stage columns live, and
+approve/reject `human-approve` gates from the job drawer. Multi-stage
+pipelines come from templates:
+
+```bash
+bastet template add standard-dev.yaml
+bastet role-assign myproj reviewer-agent reviewer
+bastet dispatch myproj "..." --agent cc-worker --template standard-dev
+```
+
 To meter traffic through the gateway instead of the subscription path,
 register an LLM resource + grant and pass `--resource`:
 
@@ -68,7 +79,7 @@ bastet dispatch myproj "..." --agent cc-worker --resource <resource_id>
 |---|---|---|
 | M0 | SPEC, data model, repo skeleton | ✅ done |
 | M1 | Resource pool + gateway + `claude-code` executor + CLI dispatch + minimal dashboard | ✅ done (final acceptance pending) |
-| M2 | Workflow templates, review gates, Kanban, worktree/container isolation | 🚧 engine done; Kanban UI next |
+| M2 | Workflow templates, review gates, Kanban UI, WS events | ✅ done |
 | M3 | Multi-project concurrency, resource arbitration, `bastet-lite` + full dynamic context | planned |
 | M4 | Telegram channel, media resource kinds, `codex`/`hermes` executors | planned |
 | M5 | Federation (multi-node) | planned |

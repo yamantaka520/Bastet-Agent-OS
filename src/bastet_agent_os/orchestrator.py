@@ -51,13 +51,19 @@ class DispatchRequest:
 
 
 class Orchestrator:
-    def __init__(self, db: Db, home: Home, prices: PriceBook, gateway_url: str):
+    def __init__(self, db: Db, home: Home, prices: PriceBook, gateway_url: str,
+                 bus=None):
         self.db = db
         self.home = home
         self.prices = prices
         self.gateway_url = gateway_url
+        self.bus = bus  # events.EventBus | None
         self._grant_slots: dict[str, asyncio.Semaphore] = {}
         self._tasks: set[asyncio.Task] = set()
+
+    def _emit(self, event_type: str, project_id: str | None, **payload) -> None:
+        if self.bus is not None:
+            self.bus.emit(event_type, project_id=project_id, **payload)
 
     # -- dispatch -------------------------------------------------------------
 
@@ -105,6 +111,8 @@ class Orchestrator:
                       {"project": req.project_id, "agent": req.agent_id,
                        "resource": req.resource_id, "template": req.template_id,
                        "title": req.title})
+        self._emit("job.created", req.project_id, job_id=job_id, title=req.title,
+                   stage=stages[0].name)
         self._spawn(self._drive_job(job_id, req))
         return job_id
 
@@ -151,6 +159,8 @@ class Orchestrator:
             self.db.audit("orchestrator", f"gate.{outcome.verdict}", "job", job_id,
                           {"stage": stage.name, "gate": stage.gate,
                            "detail": outcome.detail[:300]})
+            self._emit(f"gate.{outcome.verdict}", job["project_id"], job_id=job_id,
+                       stage=stage.name, gate=stage.gate, detail=outcome.detail[:200])
 
             if outcome.verdict == "pending":
                 self._block(job_id, f"stage {stage.name}: waiting for human approval")
@@ -163,9 +173,12 @@ class Orchestrator:
                 self.db.write("UPDATE jobs SET status='done', updated_at=? WHERE id=?",
                               (now(), job_id))
                 self.db.audit("orchestrator", "job.done", "job", job_id, {})
+                self._emit("job.done", job["project_id"], job_id=job_id)
                 return
             self.db.write("UPDATE jobs SET stage=?, updated_at=? WHERE id=?",
                           (stages[idx + 1].name, now(), job_id))
+            self._emit("job.stage_changed", job["project_id"], job_id=job_id,
+                       stage=stages[idx + 1].name)
 
     def _judge(self, stage: StageDef, workdir: str, result: RunResult) -> GateOutcome:
         if stage.gate == "human-approve":
@@ -249,6 +262,8 @@ class Orchestrator:
             token = run_tokens.issue(self.db, run_id, ttl_seconds=req.timeout_s + 300)
             self.db.write("UPDATE runs SET status='running', workdir=?, started_at=? WHERE id=?",
                           (workdir, now(), run_id))
+            self._emit("run.started", job["project_id"], job_id=job["id"], run_id=run_id,
+                       stage=stage.name, agent_id=agent["id"])
             spec = TaskSpec(
                 run_id=run_id,
                 prompt=self._stage_prompt(job, stage),
@@ -393,6 +408,10 @@ class Orchestrator:
         self.db.audit("orchestrator", "run.finished", "run", run_id,
                       {"status": result.status, "precision": precision,
                        "cost_usd": round(float(usage[4]), 6)})
+        row = self.db.one("SELECT project_id FROM jobs WHERE id=?", (job_id,))
+        self._emit("run.finished", row["project_id"] if row else None, job_id=job_id,
+                   run_id=run_id, status=result.status,
+                   cost_usd=round(float(usage[4]), 6))
 
     def _collect_diff(self, job_id: str, workdir: str) -> str | None:
         proc = subprocess.run(["git", "-C", workdir, "diff", "HEAD"],
@@ -420,3 +439,6 @@ class Orchestrator:
         self.db.write("UPDATE jobs SET status='blocked', updated_at=? WHERE id=?",
                       (now(), job_id))
         self.db.audit("orchestrator", "job.blocked", "job", job_id, {"reason": reason[:300]})
+        row = self.db.one("SELECT project_id, stage FROM jobs WHERE id=?", (job_id,))
+        self._emit("job.blocked", row["project_id"] if row else None, job_id=job_id,
+                   stage=row["stage"] if row else None, reason=reason[:200])
