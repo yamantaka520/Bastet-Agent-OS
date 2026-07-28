@@ -5,6 +5,19 @@ All notable changes to Bastet Agent OS. Format follows
 
 ## [Unreleased]
 
+### Added — grok & agy executors
+- `grok` executor (xAI Grok Build CLI): headless `-p` with streaming-json
+  events; review runs get a REAL read-only toolset (`--tools
+  read_file,grep,list_dir`) plus a schema-enforced verdict (`--json-schema`);
+  gateway path via `GROK_MODELS_BASE_URL` + run token in `XAI_API_KEY`
+  (the gateway now serves `/v1/models` for its startup probe). Headless
+  output has no usage — gateway metering or honest `estimated`.
+- `agy` executor (Google Antigravity CLI): `-p --output-format json`
+  envelope carries full usage (input/output/thinking/cache tokens →
+  `reported` precision); review runs rely on headless soft-denial (de-facto
+  read-only) plus `--json-schema` verdicts; no custom endpoint exists
+  upstream, so the gateway path is refused honestly.
+
 ### Added — M5
 - Federation org view (`GET /api/org`): the AMOS-converged teams / projects /
   members tree merged with local binding state; `POST /api/org/bind` attaches

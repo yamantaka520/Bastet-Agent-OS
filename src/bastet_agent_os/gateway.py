@@ -314,6 +314,21 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
     async def anthropic_endpoint(request: Request):
         return await proxy(request, "anthropic")
 
+    @router.get("/v1/models")
+    async def models(request: Request):
+        """OpenAI-style model listing for CLIs that probe it at startup
+        (grok fetches {base_url}/models before running)."""
+        run = _auth(ctx, request)
+        if run is None:
+            return JSONResponse({"error": "invalid or expired run token"}, status_code=401)
+        resource = ctx.db.one("SELECT * FROM resources WHERE id=?", (run["resource_id"],))
+        routing = json.loads((resource["routing_json"] if resource else None) or "{}")
+        names = routing.get("models") or []
+        if routing.get("default_model") and routing["default_model"] not in names:
+            names.insert(0, routing["default_model"])
+        return {"object": "list",
+                "data": [{"id": n, "object": "model"} for n in names]}
+
     @router.get("/v1/health")
     async def health():
         return {"ok": True}

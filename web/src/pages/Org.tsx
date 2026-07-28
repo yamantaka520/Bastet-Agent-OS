@@ -40,7 +40,7 @@ export default function OrgPage(props: { canOperate: boolean; refreshKey: number
             fields={[{ name: "id", placeholder: "agent id" },
                      { name: "name", placeholder: "display name" },
                      { name: "executor",
-                       placeholder: "claude-code|claude-sdk|codex|hermes|bastet-lite",
+                       placeholder: "claude-code|claude-sdk|codex|hermes|grok|agy|bastet-lite",
                        width: "20rem" }]}
             submit="add"
             onSubmit={async (v) => {

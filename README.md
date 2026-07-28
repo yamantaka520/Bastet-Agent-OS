@@ -3,10 +3,10 @@
 > ⚠️ Pre-alpha — design phase (M0 complete). See [SPEC.md](SPEC.md) for the full design.
 
 **A local-first operating system for AI-agent teams.** Bastet organizes the
-agents you already use — Claude Code, Codex CLI, Hermes, or any
-OpenAI/Claude-compatible endpoint — into teams with roles, gated workflows,
-and centrally governed resources, so multiple projects can run concurrently
-under control.
+agents you already use — Claude Code (headless or Agent SDK), Codex CLI,
+Hermes, Grok Build, Google Antigravity (`agy`), or any OpenAI/Claude-compatible
+endpoint — into teams with roles, gated workflows, and centrally governed
+resources, so multiple projects can run concurrently under control.
 
 Bastet is a **control plane, not another agent framework**: execution comes
 from orchestrating existing agents; its moat is governance and memory —
