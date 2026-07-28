@@ -29,12 +29,14 @@ def bastet_binary() -> str:
 
 
 def systemd_unit(binary: str) -> str:
+    # services get a minimal PATH — executor CLIs live in user dirs (%h = home)
     return f"""[Unit]
 Description=Bastet Agent OS control plane
 After=network-online.target
 
 [Service]
 ExecStart={binary} serve
+Environment="PATH=%h/.local/bin:%h/.grok/bin:/usr/local/bin:/usr/bin:/bin"
 Restart=always
 RestartSec=5
 
@@ -44,6 +46,9 @@ WantedBy=default.target
 
 
 def launchd_plist(binary: str, log_path: str) -> str:
+    home = str(Path.home())
+    path_value = (f"{home}/.local/bin:{home}/.grok/bin:"
+                  "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -52,6 +57,8 @@ def launchd_plist(binary: str, log_path: str) -> str:
   <key>Label</key><string>{LAUNCHD_LABEL}</string>
   <key>ProgramArguments</key>
   <array><string>{binary}</string><string>serve</string></array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>{path_value}</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>{log_path}</string>

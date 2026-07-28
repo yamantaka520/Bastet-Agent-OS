@@ -11,6 +11,23 @@ DEFAULT_HOME = Path(os.environ.get("BASTET_HOME", str(Path.home() / ".bastet")))
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8890
 
+# where the executor CLIs live; services (systemd/launchd) start with a
+# minimal PATH that misses these, breaking both detection and run spawning
+TOOL_DIRS = [
+    str(Path.home() / ".local/bin"),
+    str(Path.home() / ".grok/bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+]
+
+
+def augment_path() -> None:
+    """Make sure the well-known tool dirs are on PATH for this process."""
+    current = os.environ.get("PATH", "").split(os.pathsep)
+    missing = [d for d in TOOL_DIRS if d not in current and Path(d).is_dir()]
+    if missing:
+        os.environ["PATH"] = os.pathsep.join(missing + current)
+
 
 class Home:
     """Filesystem layout under ~/.bastet (override with BASTET_HOME)."""

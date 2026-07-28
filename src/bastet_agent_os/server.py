@@ -186,6 +186,9 @@ class BindIn(BaseModel):
 
 
 def create_app(home: Home) -> FastAPI:
+    from .config import augment_path
+
+    augment_path()  # services start with a minimal PATH; executors need theirs
     home.ensure()
     db = Db(home.db_path)
     prices = PriceBook(home.root / "model_prices.json")
