@@ -1,35 +1,41 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  api, getToken, setToken, openEventSocket,
-  Job, JobDetail, UsageRow,
-} from "./api";
+import { useCallback, useEffect, useState } from "react";
+import { api, getToken, setToken, openEventSocket, Me } from "./api";
+import AdminPage from "./pages/Admin";
+import AuditPage from "./pages/Audit";
+import BoardPage from "./pages/Board";
+import OrgPage from "./pages/Org";
+import ResourcesPage from "./pages/Resources";
+import TemplatesPage from "./pages/Templates";
 
-const STATUS_BADGE: Record<string, string> = {
-  in_progress: "🔵",
-  blocked: "🟠",
-  done: "✅",
-  cancelled: "⚪",
-  open: "⚪",
-};
+const ROLE_RANK: Record<string, number> = { viewer: 0, operator: 1, admin: 2 };
+
+type Tab = { key: string; label: string; minRole: string };
+const TABS: Tab[] = [
+  { key: "board", label: "看板", minRole: "viewer" },
+  { key: "resources", label: "資源", minRole: "viewer" },
+  { key: "org", label: "組織", minRole: "viewer" },
+  { key: "templates", label: "模板", minRole: "viewer" },
+  { key: "admin", label: "管理", minRole: "admin" },
+  { key: "audit", label: "稽核", minRole: "viewer" },
+];
 
 export default function App() {
-  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [me, setMe] = useState<Me | null | undefined>(undefined);
   useEffect(() => {
-    api("/api/projects").then(() => setAuthed(true)).catch(() => setAuthed(false));
+    api<Me>("/api/me").then(setMe).catch(() => setMe(null));
   }, []);
-  if (authed === null) return <div className="center">…</div>;
-  if (!authed) return <TokenGate onOk={() => setAuthed(true)} />;
-  return <Workbench />;
+  if (me === undefined) return <div className="center">…</div>;
+  if (me === null) return <TokenGate onOk={setMe} />;
+  return <Workbench me={me} />;
 }
 
-function TokenGate({ onOk }: { onOk: () => void }) {
+function TokenGate({ onOk }: { onOk: (me: Me) => void }) {
   const [value, setValue] = useState(getToken());
   const [error, setError] = useState("");
   const submit = async () => {
     setToken(value.trim());
     try {
-      await api("/api/projects");
-      onOk();
+      onOk(await api<Me>("/api/me"));
     } catch {
       setError("token rejected — check ~/.bastet/api_token");
     }
@@ -38,14 +44,10 @@ function TokenGate({ onOk }: { onOk: () => void }) {
     <div className="center">
       <div className="token-card">
         <h1>🐈 Bastet</h1>
-        <p>Paste your API token (<code>~/.bastet/api_token</code>):</p>
-        <input
-          type="password"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          autoFocus
-        />
+        <p>Paste your API token (<code>~/.bastet/api_token</code> or a user token):</p>
+        <input type="password" value={value} autoFocus
+               onChange={(e) => setValue(e.target.value)}
+               onKeyDown={(e) => e.key === "Enter" && submit()} />
         <button onClick={submit}>Connect</button>
         {error && <p className="error">{error}</p>}
       </div>
@@ -53,164 +55,68 @@ function TokenGate({ onOk }: { onOk: () => void }) {
   );
 }
 
-function Workbench() {
+function Workbench({ me }: { me: Me }) {
+  const [tab, setTab] = useState("board");
   const [projects, setProjects] = useState<{ id: string }[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [usage, setUsage] = useState<UsageRow[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [feed, setFeed] = useState<string[]>([]);
 
-  useEffect(() => {
+  const rank = ROLE_RANK[me.role] ?? 0;
+  const canOperate = rank >= 1;
+  const isAdmin = rank >= 2;
+
+  const loadProjects = useCallback(() => {
     api<{ id: string }[]>("/api/projects").then((rows) => {
       setProjects(rows);
-      if (rows.length && !projectId) setProjectId(rows[0].id);
+      setProjectId((current) => current ?? rows[0]?.id ?? null);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const refresh = useCallback(() => {
-    if (!projectId) return;
-    api<Job[]>(`/api/jobs?project_id=${projectId}&limit=100`).then(setJobs);
-    api<UsageRow[]>(`/api/usage?project_id=${projectId}`).then(setUsage);
-  }, [projectId]);
-
-  useEffect(refresh, [refresh]);
+  useEffect(loadProjects, [loadProjects, refreshKey]);
 
   useEffect(() => {
-    if (!projectId) return;
-    return openEventSocket(projectId, (event) => {
+    return openEventSocket(null, (event) => {
       if (event.type === "hello") return;
       setFeed((old) => [
-        `${String(event.at ?? "").slice(11, 19)} ${event.type} ${event.job_id ?? ""}`,
+        `${String(event.at ?? "").slice(11, 19)} ${event.type} ${event.job_id ?? event.run_id ?? ""}`,
         ...old.slice(0, 7),
       ]);
-      refresh();
+      setRefreshKey((k) => k + 1);
     });
-  }, [projectId, refresh]);
-
-  const totalCost = usage.reduce((sum, row) => sum + (row.cost_usd ?? 0), 0);
+  }, []);
 
   return (
     <div className="app">
       <header>
         <h1>🐈 Bastet Agent OS</h1>
-        <select value={projectId ?? ""} onChange={(e) => setProjectId(e.target.value)}>
-          {projects.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
-        </select>
-        <span className="cost">Σ ${totalCost.toFixed(4)}</span>
-        <button className="ghost" onClick={refresh}>↻</button>
+        <nav>
+          {TABS.filter((t) => rank >= ROLE_RANK[t.minRole]).map((t) => (
+            <button key={t.key} className={tab === t.key ? "tab active" : "tab"}
+                    onClick={() => setTab(t.key)}>{t.label}</button>
+          ))}
+        </nav>
+        {tab === "board" && (
+          <select value={projectId ?? ""} onChange={(e) => setProjectId(e.target.value)}>
+            {projects.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
+          </select>
+        )}
+        <span className="me">{me.name} · {me.role}</span>
+        <button className="ghost" onClick={() => setRefreshKey((k) => k + 1)}>↻</button>
       </header>
-      <Board jobs={jobs} onSelect={setSelected} />
+
+      {tab === "board" && (projectId
+        ? <BoardPage projectId={projectId} refreshKey={refreshKey} canOperate={canOperate} />
+        : <div className="page"><p className="muted">尚無專案 —
+            到「組織」頁建立第一個專案。</p></div>)}
+      {tab === "resources" && <ResourcesPage isAdmin={isAdmin} refreshKey={refreshKey} />}
+      {tab === "org" && <OrgPage canOperate={canOperate} refreshKey={refreshKey} />}
+      {tab === "templates" && <TemplatesPage canOperate={canOperate} refreshKey={refreshKey} />}
+      {tab === "admin" && isAdmin && <AdminPage refreshKey={refreshKey} />}
+      {tab === "audit" && <AuditPage refreshKey={refreshKey} />}
+
       <footer>
         {feed.map((line, i) => <div key={i} className="feed-line">{line}</div>)}
       </footer>
-      {selected && (
-        <JobDrawer jobId={selected} onClose={() => setSelected(null)} onChanged={refresh} />
-      )}
     </div>
-  );
-}
-
-function Board({ jobs, onSelect }: { jobs: Job[]; onSelect: (id: string) => void }) {
-  const columns = useMemo(() => {
-    const names: string[] = [];
-    for (const job of jobs) {
-      try {
-        for (const stage of JSON.parse(job.stages_snapshot_json) as { name: string }[]) {
-          if (!names.includes(stage.name)) names.push(stage.name);
-        }
-      } catch { /* skip bad snapshots */ }
-    }
-    return [...names, "done"];
-  }, [jobs]);
-
-  const inColumn = (col: string) =>
-    col === "done"
-      ? jobs.filter((j) => j.status === "done")
-      : jobs.filter((j) => j.stage === col && j.status !== "done");
-
-  return (
-    <main className="board">
-      {columns.map((col) => (
-        <section key={col} className="column">
-          <h2>{col} <span className="count">{inColumn(col).length}</span></h2>
-          {inColumn(col).map((job) => (
-            <article key={job.id} className={`card ${job.status}`}
-                     onClick={() => onSelect(job.id)}>
-              <div className="card-title">{STATUS_BADGE[job.status] ?? "⚪"} {job.title}</div>
-              <div className="card-meta">{job.id} · {job.template_id}</div>
-            </article>
-          ))}
-        </section>
-      ))}
-    </main>
-  );
-}
-
-function JobDrawer({ jobId, onClose, onChanged }:
-  { jobId: string; onClose: () => void; onChanged: () => void }) {
-  const [job, setJob] = useState<JobDetail | null>(null);
-  const [comment, setComment] = useState("");
-  const load = useCallback(() => { api<JobDetail>(`/api/jobs/${jobId}`).then(setJob); }, [jobId]);
-  useEffect(load, [load]);
-
-  if (!job) return null;
-  const lastGate = job.gates[job.gates.length - 1];
-  const waitingApproval = job.status === "blocked" && lastGate?.verdict === "pending";
-
-  const decide = async (approved: boolean) => {
-    await api(`/api/jobs/${jobId}/approve`, {
-      method: "POST",
-      body: JSON.stringify({ approved, comment }),
-    });
-    onChanged();
-    load();
-  };
-
-  return (
-    <aside className="drawer">
-      <button className="ghost close" onClick={onClose}>✕</button>
-      <h2>{job.title}</h2>
-      <p className="card-meta">{job.id} · stage <b>{job.stage}</b> · {job.status}</p>
-      <pre className="spec">{job.spec_md}</pre>
-
-      {waitingApproval && (
-        <div className="approval">
-          <h3>⏸ waiting for your approval</h3>
-          <input placeholder="comment (optional)" value={comment}
-                 onChange={(e) => setComment(e.target.value)} />
-          <div>
-            <button onClick={() => decide(true)}>Approve</button>
-            <button className="danger" onClick={() => decide(false)}>Reject</button>
-          </div>
-        </div>
-      )}
-
-      <h3>Runs</h3>
-      <table>
-        <thead><tr><th>stage</th><th>#</th><th>agent</th><th>status</th><th>cost</th></tr></thead>
-        <tbody>
-          {job.runs.map((r) => (
-            <tr key={r.id}>
-              <td>{r.stage}</td><td>{r.attempt}</td><td>{r.agent_id}</td>
-              <td>{r.status}</td>
-              <td>${r.cost_usd.toFixed(4)} <small>{r.accounting_precision ?? ""}</small></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h3>Gates</h3>
-      <ul className="gates">
-        {job.gates.map((g, i) => (
-          <li key={i}>
-            <b>{g.gate_type}</b> → {g.verdict}
-            <span className="card-meta"> by {g.reviewer_kind}:{g.reviewer_id}</span>
-            {g.detail_md && <div className="gate-detail">{g.detail_md}</div>}
-          </li>
-        ))}
-      </ul>
-    </aside>
   );
 }

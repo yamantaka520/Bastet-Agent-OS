@@ -438,6 +438,27 @@ def create_app(home: Home) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/runs/{run_id}/diff", dependencies=[Depends(require_role("viewer"))])
+    def run_diff(run_id: str):
+        row = db.one("SELECT artifacts_json FROM runs WHERE id=?", (run_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        diff_path = json.loads(row["artifacts_json"] or "{}").get("diff")
+        if not diff_path or not Path(diff_path).exists():
+            return {"diff": None}
+        return {"diff": Path(diff_path).read_text()[:200_000]}
+
+    @app.post("/api/resources/{resource_id}/enabled")
+    def set_resource_enabled(resource_id: str, e: UserEnabledIn,
+                             auth: Auth = Depends(require_role("admin"))):
+        cur = db.write("UPDATE resources SET enabled=?, updated_at=? WHERE id=?",
+                       (1 if e.enabled else 0, now(), resource_id))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail="resource not found")
+        db.audit(auth.actor, "resource.enabled" if e.enabled else "resource.disabled",
+                 "resource", resource_id, {})
+        return {"id": resource_id, "enabled": e.enabled}
+
     @app.get("/api/runs/{run_id}/interactions",
              dependencies=[Depends(require_role("viewer"))])
     def run_interactions(run_id: str):
