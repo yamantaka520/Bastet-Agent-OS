@@ -68,7 +68,7 @@ class Orchestrator:
 
     # -- dispatch -------------------------------------------------------------
 
-    def dispatch(self, req: DispatchRequest) -> str:
+    def dispatch(self, req: DispatchRequest, actor: str = "user") -> str:
         """Validate, create the job at its first stage, schedule the driver."""
         project = self.db.one("SELECT * FROM projects WHERE id=?", (req.project_id,))
         if project is None:
@@ -113,7 +113,7 @@ class Orchestrator:
              json.dumps(stages_raw), req.title, req.prompt, stages[0].name,
              "in_progress", req.agent_id, req.resource_id, ts, ts),
         )
-        self.db.audit("user", "job.dispatch", "job", job_id,
+        self.db.audit(actor, "job.dispatch", "job", job_id,
                       {"project": req.project_id, "agent": req.agent_id,
                        "resource": req.resource_id, "template": req.template_id,
                        "title": req.title})

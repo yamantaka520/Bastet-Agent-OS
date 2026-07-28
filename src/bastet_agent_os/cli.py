@@ -206,6 +206,36 @@ def job_show(job_id: str):
     _print(_call("GET", f"/api/jobs/{job_id}"))
 
 
+user_app = typer.Typer(help="Manage users (multi-user auth; admin only).")
+app.add_typer(user_app, name="user")
+
+
+@user_app.command("add")
+def user_add(name: str, role: str = typer.Option("operator", help="viewer|operator|admin")):
+    """Create a user; the token is printed ONCE — store it safely."""
+    _print(_call("POST", "/api/users", {"name": name, "role": role}))
+
+
+@user_app.command("list")
+def user_list():
+    _print(_call("GET", "/api/users"))
+
+
+@user_app.command("disable")
+def user_disable(user_id: str):
+    _print(_call("POST", f"/api/users/{user_id}/enabled", {"enabled": False}))
+
+
+@user_app.command("enable")
+def user_enable(user_id: str):
+    _print(_call("POST", f"/api/users/{user_id}/enabled", {"enabled": True}))
+
+
+@app.command()
+def whoami():
+    _print(_call("GET", "/api/me"))
+
+
 @app.command()
 def approve(job_id: str,
             reject: bool = typer.Option(False, help="reject instead of approve"),

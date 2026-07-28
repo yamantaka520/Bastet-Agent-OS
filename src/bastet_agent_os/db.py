@@ -185,6 +185,16 @@ CREATE TABLE IF NOT EXISTS audit_log (
   row_hash TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL DEFAULT 'operator',  -- viewer|operator|admin (D9, M3)
+  token_hash TEXT NOT NULL UNIQUE,        -- sha256; plaintext shown once at creation
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS channels (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,

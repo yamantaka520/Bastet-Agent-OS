@@ -106,6 +106,15 @@ class ApproveIn(BaseModel):
     comment: str = ""
 
 
+class UserIn(BaseModel):
+    name: str
+    role: str = "operator"
+
+
+class UserEnabledIn(BaseModel):
+    enabled: bool
+
+
 def create_app(home: Home) -> FastAPI:
     home.ensure()
     db = Db(home.db_path)
@@ -143,10 +152,23 @@ def create_app(home: Home) -> FastAPI:
                 return JSONResponse({"error": "bad origin"}, status_code=403)
         return await call_next(request)
 
-    def require_api_token(request: Request) -> None:
-        auth = request.headers.get("authorization", "")
-        if not (auth.lower().startswith("bearer ") and auth[7:].strip() == api_token):
+    from . import users as users_mod
+    from .users import Auth
+
+    def get_auth(request: Request) -> Auth:
+        header = request.headers.get("authorization", "")
+        token = header[7:].strip() if header.lower().startswith("bearer ") else ""
+        resolved = users_mod.verify(db, token, api_token)
+        if resolved is None:
             raise HTTPException(status_code=401, detail="invalid API token")
+        return resolved
+
+    def require_role(role: str):
+        def dep(auth: Auth = Depends(get_auth)) -> Auth:
+            if not auth.at_least(role):
+                raise HTTPException(status_code=403, detail=f"requires {role} role")
+            return auth
+        return dep
 
     # ---- gateway (run-token auth, mounted at /v1/*) ------------------------
 
@@ -164,8 +186,8 @@ def create_app(home: Home) -> FastAPI:
 
     # ---- endpoints ----------------------------------------------------------
 
-    @app.post("/api/projects", dependencies=[Depends(require_api_token)])
-    def create_project(p: ProjectIn):
+    @app.post("/api/projects")
+    def create_project(p: ProjectIn, auth: Auth = Depends(require_role("operator"))):
         team_id = p.team_id or f"team-{p.id}"
         client = amos_client()
         if client is not None:
@@ -180,15 +202,15 @@ def create_app(home: Home) -> FastAPI:
             "VALUES(?,?,?,?,?,?)",
             (p.id, team_id, p.repo_path, json.dumps(p.config), ts, ts),
         )
-        db.audit("user", "project.create", "project", p.id, {"team": team_id})
+        db.audit(auth.actor, "project.create", "project", p.id, {"team": team_id})
         return {"id": p.id, "team_id": team_id}
 
-    @app.get("/api/projects", dependencies=[Depends(require_api_token)])
+    @app.get("/api/projects", dependencies=[Depends(require_role("viewer"))])
     def list_projects():
         return [dict(r) for r in db.query("SELECT * FROM projects ORDER BY created_at")]
 
-    @app.post("/api/agents", dependencies=[Depends(require_api_token)])
-    def create_agent(a: AgentIn):
+    @app.post("/api/agents")
+    def create_agent(a: AgentIn, auth: Auth = Depends(require_role("operator"))):
         ts = now()
         amos_id = a.amos_agent_id or a.id
         client = amos_client()
@@ -202,15 +224,15 @@ def create_app(home: Home) -> FastAPI:
             "VALUES(?,?,?,?,?,?)",
             (a.id, amos_id, a.name, a.executor_type, ts, ts),
         )
-        db.audit("user", "agent.create", "agent", a.id, {"executor": a.executor_type})
+        db.audit(auth.actor, "agent.create", "agent", a.id, {"executor": a.executor_type})
         return {"id": a.id}
 
-    @app.get("/api/agents", dependencies=[Depends(require_api_token)])
+    @app.get("/api/agents", dependencies=[Depends(require_role("viewer"))])
     def list_agents():
         return [dict(r) for r in db.query("SELECT * FROM agents ORDER BY created_at")]
 
-    @app.post("/api/resources", dependencies=[Depends(require_api_token)])
-    def create_resource(r: ResourceIn):
+    @app.post("/api/resources")
+    def create_resource(r: ResourceIn, auth: Auth = Depends(require_role("admin"))):
         try:
             secrets_store.reject_secrets_in_config(r.config)
         except secrets_store.SecretError as exc:
@@ -223,20 +245,20 @@ def create_app(home: Home) -> FastAPI:
             (rid, r.kind, r.name, r.endpoint, r.api_flavor, r.secret_ref,
              json.dumps(r.config), ts, ts),
         )
-        db.audit("user", "resource.create", "resource", rid,
+        db.audit(auth.actor, "resource.create", "resource", rid,
                  {"kind": r.kind, "name": r.name,
                   "secret_scheme": (r.secret_ref or "").split(":", 1)[0]})
         return {"id": rid}
 
-    @app.get("/api/resources", dependencies=[Depends(require_api_token)])
+    @app.get("/api/resources", dependencies=[Depends(require_role("viewer"))])
     def list_resources():
         rows = [dict(r) for r in db.query("SELECT * FROM resources ORDER BY created_at")]
         for row in rows:
             row["secret_ref"] = (row["secret_ref"] or "").split(":", 1)[0] + ":…"  # never echo
         return rows
 
-    @app.post("/api/grants", dependencies=[Depends(require_api_token)])
-    def create_grant(g: GrantIn):
+    @app.post("/api/grants")
+    def create_grant(g: GrantIn, auth: Auth = Depends(require_role("admin"))):
         gid = new_id("grt")
         db.write(
             "INSERT INTO grants(id, resource_id, scope_type, scope_id, budget_usd, "
@@ -245,20 +267,20 @@ def create_app(home: Home) -> FastAPI:
             (gid, g.resource_id, g.scope_type, g.scope_id, g.budget_usd, g.budget_tokens,
              g.period, g.max_concurrency, g.on_exceed, now()),
         )
-        db.audit("user", "grant.create", "grant", gid,
+        db.audit(auth.actor, "grant.create", "grant", gid,
                  {"resource": g.resource_id, "scope": f"{g.scope_type}:{g.scope_id}",
                   "budget_usd": g.budget_usd, "max_concurrency": g.max_concurrency})
         return {"id": gid}
 
-    @app.get("/api/grants", dependencies=[Depends(require_api_token)])
+    @app.get("/api/grants", dependencies=[Depends(require_role("viewer"))])
     def list_grants():
         return [dict(r) for r in db.query("SELECT * FROM grants ORDER BY created_at")]
 
-    @app.post("/api/dispatch", dependencies=[Depends(require_api_token)])
-    async def dispatch(d: DispatchIn):
+    @app.post("/api/dispatch")
+    async def dispatch(d: DispatchIn, auth: Auth = Depends(require_role("operator"))):
         # async def: dispatch must run on the main event loop to spawn the run task
         try:
-            job_id = orch.dispatch(DispatchRequest(
+            job_id = orch.dispatch(actor=auth.actor, req=DispatchRequest(
                 project_id=d.project_id, prompt=d.prompt,
                 title=d.title or d.prompt[:60], agent_id=d.agent_id,
                 resource_id=d.resource_id, template_id=d.template_id,
@@ -270,8 +292,8 @@ def create_app(home: Home) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"job_id": job_id}
 
-    @app.post("/api/templates", dependencies=[Depends(require_api_token)])
-    def create_template(t: TemplateIn):
+    @app.post("/api/templates")
+    def create_template(t: TemplateIn, auth: Auth = Depends(require_role("operator"))):
         from .workflow import parse_stages
         try:
             parse_stages(t.stages)
@@ -281,23 +303,23 @@ def create_app(home: Home) -> FastAPI:
         version = (row["version"] + 1) if row else 1
         db.write("INSERT OR REPLACE INTO workflow_templates(id, name, version, stages_json) "
                  "VALUES(?,?,?,?)", (t.name, t.name, version, json.dumps(t.stages)))
-        db.audit("user", "template.upsert", "template", t.name, {"version": version})
+        db.audit(auth.actor, "template.upsert", "template", t.name, {"version": version})
         return {"id": t.name, "version": version}
 
-    @app.get("/api/templates", dependencies=[Depends(require_api_token)])
+    @app.get("/api/templates", dependencies=[Depends(require_role("viewer"))])
     def list_templates():
         return [dict(r) for r in db.query("SELECT * FROM workflow_templates ORDER BY id")]
 
-    @app.post("/api/roles", dependencies=[Depends(require_api_token)])
-    def assign_role(r: RoleIn):
+    @app.post("/api/roles")
+    def assign_role(r: RoleIn, auth: Auth = Depends(require_role("operator"))):
         db.write("INSERT OR REPLACE INTO project_agent_roles(project_id, agent_id, role, "
                  "preference) VALUES(?,?,?,?)",
                  (r.project_id, r.agent_id, r.role, r.preference))
-        db.audit("user", "role.assign", "project", r.project_id,
+        db.audit(auth.actor, "role.assign", "project", r.project_id,
                  {"agent": r.agent_id, "role": r.role})
         return {"ok": True}
 
-    @app.get("/api/jobs", dependencies=[Depends(require_api_token)])
+    @app.get("/api/jobs", dependencies=[Depends(require_role("viewer"))])
     def list_jobs(project_id: str | None = None, limit: int = 50):
         where, params = ("WHERE project_id=?", (project_id,)) if project_id else ("", ())
         return [dict(r) for r in db.query(
@@ -306,7 +328,7 @@ def create_app(home: Home) -> FastAPI:
             f"FROM jobs {where} ORDER BY updated_at DESC LIMIT ?",
             (*params, limit))]
 
-    @app.get("/api/jobs/{job_id}", dependencies=[Depends(require_api_token)])
+    @app.get("/api/jobs/{job_id}", dependencies=[Depends(require_role("viewer"))])
     def get_job(job_id: str):
         row = db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if row is None:
@@ -320,15 +342,16 @@ def create_app(home: Home) -> FastAPI:
             "WHERE r.job_id=? ORDER BY g.at", (job_id,))]
         return job
 
-    @app.post("/api/jobs/{job_id}/approve", dependencies=[Depends(require_api_token)])
-    async def approve_job(job_id: str, a: ApproveIn):
+    @app.post("/api/jobs/{job_id}/approve")
+    async def approve_job(job_id: str, a: ApproveIn,
+                          auth: Auth = Depends(require_role("operator"))):
         # async def: resuming the job driver needs the main event loop
         try:
-            return orch.approve(job_id, a.approved, a.comment)
+            return orch.approve(job_id, a.approved, a.comment, user=auth.name)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/api/runs/{run_id}", dependencies=[Depends(require_api_token)])
+    @app.get("/api/runs/{run_id}", dependencies=[Depends(require_role("viewer"))])
     def get_run(run_id: str):
         row = db.one("SELECT * FROM runs WHERE id=?", (run_id,))
         if row is None:
@@ -340,14 +363,14 @@ def create_app(home: Home) -> FastAPI:
             "FROM usage_ledger WHERE run_id=? ORDER BY at", (run_id,))]
         return run
 
-    @app.get("/api/runs", dependencies=[Depends(require_api_token)])
+    @app.get("/api/runs", dependencies=[Depends(require_role("viewer"))])
     def list_runs(limit: int = 50):
         return [dict(r) for r in db.query(
             "SELECT id, job_id, stage, agent_id, executor_type, status, cost_usd, "
             "accounting_precision, started_at, finished_at FROM runs "
             "ORDER BY started_at DESC LIMIT ?", (limit,))]
 
-    @app.get("/api/usage", dependencies=[Depends(require_api_token)])
+    @app.get("/api/usage", dependencies=[Depends(require_role("viewer"))])
     def usage(project_id: str | None = None):
         where, params = ("WHERE j.project_id=?", (project_id,)) if project_id else ("", ())
         rows = db.query(
@@ -359,11 +382,42 @@ def create_app(home: Home) -> FastAPI:
             "GROUP BY j.project_id, r.agent_id, r.accounting_precision", params)
         return [dict(r) for r in rows]
 
-    @app.get("/api/audit", dependencies=[Depends(require_api_token)])
+    @app.get("/api/audit", dependencies=[Depends(require_role("viewer"))])
     def audit_log(limit: int = 100):
         return [dict(r) for r in db.query(
             "SELECT at, actor, action, target_type, target_id, detail_json "
             "FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))]
+
+    # ---- users (multi-user auth, SPEC D9 / M3) --------------------------------
+
+    @app.get("/api/me")
+    def me(auth: Auth = Depends(get_auth)):
+        return {"user_id": auth.user_id, "name": auth.name, "role": auth.role}
+
+    @app.post("/api/users")
+    def create_user(u: UserIn, auth: Auth = Depends(require_role("admin"))):
+        try:
+            user_id, token = users_mod.create_user(db, u.name, u.role)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        db.audit(auth.actor, "user.create", "user", user_id, {"name": u.name, "role": u.role})
+        return {"id": user_id, "token": token,
+                "note": "store this token now — it is never shown again"}
+
+    @app.get("/api/users", dependencies=[Depends(require_role("admin"))])
+    def list_users():
+        return [dict(r) for r in db.query(
+            "SELECT id, name, role, enabled, created_at, last_used_at "
+            "FROM users ORDER BY created_at")]  # token_hash never leaves the DB
+
+    @app.post("/api/users/{user_id}/enabled")
+    def set_user_enabled(user_id: str, e: UserEnabledIn,
+                         auth: Auth = Depends(require_role("admin"))):
+        if not users_mod.set_enabled(db, user_id, e.enabled):
+            raise HTTPException(status_code=404, detail="user not found")
+        db.audit(auth.actor, "user.enabled" if e.enabled else "user.disabled",
+                 "user", user_id, {})
+        return {"id": user_id, "enabled": e.enabled}
 
     # ---- WebSocket event stream (SPEC §5.10) --------------------------------
     # Browser WebSocket clients can't set Authorization headers, so the first
@@ -388,7 +442,7 @@ def create_app(home: Home) -> FastAPI:
         except Exception:
             await ws.close(code=4401)
             return
-        if first.get("token") != api_token:
+        if users_mod.verify(db, str(first.get("token") or ""), api_token) is None:
             await ws.close(code=4401)
             return
         project_filter = first.get("project_id")

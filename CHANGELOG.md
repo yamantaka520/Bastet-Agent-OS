@@ -34,7 +34,11 @@ All notable changes to Bastet Agent OS. Format follows
 - Role-based agent routing (`project_agent_roles`), human approval flow
   (`bastet approve` / `POST /api/jobs/{id}/approve`).
 
-### Added — M3 (in progress)
+### Added — M3
+- Multi-user auth (D13): per-user tokens (hash-only at rest, shown once),
+  roles viewer < operator < admin, bootstrap file token stays the implicit
+  admin; audit and approvals attribute the acting user; `bastet user
+  add/list/disable/enable`, `bastet whoami`, `/api/me`.
 - `bastet-lite` built-in executor: gateway-only tool loop (anthropic + openai
   flavors) with workdir-jailed file tools, allow-listed shell, AMOS memory
   tools, and a native `submit_verdict` tool — the structured gate verdict
