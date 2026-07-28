@@ -155,6 +155,7 @@ class UserEnabledIn(BaseModel):
 
 class ChannelIn(BaseModel):
     kind: str = "telegram"
+    name: str = ""
     secret_ref: str
     config: dict[str, Any] = {}
 
@@ -663,9 +664,11 @@ def create_app(home: Home) -> FastAPI:
     def create_channel(c: ChannelIn, auth: Auth = Depends(require_role("admin"))):
         secrets_store.reject_secrets_in_config(c.config)
         cid = new_id("chn")
-        db.write("INSERT INTO channels(id, kind, config_json, secret_ref, enabled) "
-                 "VALUES(?,?,?,?,1)", (cid, c.kind, json.dumps(c.config), c.secret_ref))
-        db.audit(auth.actor, "channel.create", "channel", cid, {"kind": c.kind})
+        db.write("INSERT INTO channels(id, kind, name, config_json, secret_ref, enabled) "
+                 "VALUES(?,?,?,?,?,1)",
+                 (cid, c.kind, c.name or c.kind, json.dumps(c.config), c.secret_ref))
+        db.audit(auth.actor, "channel.create", "channel", cid,
+                 {"kind": c.kind, "name": c.name})
         return {"id": cid, "note": "restart `bastet serve` to start the channel"}
 
     @app.get("/api/channels", dependencies=[Depends(require_role("admin"))])

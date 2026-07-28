@@ -171,6 +171,8 @@ class TelegramChannel:
         self._save_config(config)
         self.db.audit(f"user:{payload['user_id']}", "channel.paired", "channel",
                       self.channel_id, {"telegram_id": telegram_id})
+        self.bus.emit("channel.paired", None, channel_id=self.channel_id,
+                      user=payload["name"])  # WS -> the admin page refreshes live
         await self._send(chat_id, f"✅ Paired as {payload['name']}. {HELP_TEXT}")
 
     async def _send_approval_card(self, chat_id: int, job_id: str) -> None:

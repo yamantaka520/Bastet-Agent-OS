@@ -1,17 +1,36 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { post } from "../api";
 import { DataTable, InlineForm, Section, useList } from "../ui";
 
 type User = { id: string; name: string; role: string; enabled: number;
               created_at: string; last_used_at: string | null };
-type Channel = { id: string; kind: string; secret_ref: string; enabled: number;
-                 paired_users: string[] };
+type Channel = { id: string; kind: string; name: string | null; secret_ref: string;
+                 enabled: number; paired_users: string[] };
 
 export default function AdminPage(props: { refreshKey: number }) {
-  const [users, reloadUsers] = useList<User>("/api/users");
-  const [channels, reloadChannels] = useList<Channel>("/api/channels");
+  const [users, reloadUsers] = useList<User>("/api/users", props.refreshKey);
+  const [channels, reloadChannels] = useList<Channel>("/api/channels", props.refreshKey);
   const [freshToken, setFreshToken] = useState<string | null>(null);
-  const [pairCode, setPairCode] = useState<string | null>(null);
+  const [pairing, setPairing] = useState<{ channelId: string; code: string;
+                                           baseline: number } | null>(null);
+
+  // pairing feedback: when the channel's paired list grows past the baseline,
+  // the /pair on Telegram worked (WS channel.paired bumps refreshKey for us)
+  const pairedChannel = pairing
+    ? channels.find((c) => c.id === pairing.channelId) : null;
+  const pairDone = !!(pairing && pairedChannel
+    && pairedChannel.paired_users.length > pairing.baseline);
+  useEffect(() => {
+    if (!pairing || pairDone) return;
+    const timer = setInterval(reloadChannels, 3000);  // WS 之外的保險輪詢
+    return () => clearInterval(timer);
+  }, [pairing, pairDone, reloadChannels]);
+
+  const startPair = async (channel: Channel) => {
+    const r = await post<{ code: string }>(`/api/channels/${channel.id}/pair`, {});
+    setPairing({ channelId: channel.id, code: r.code,
+                 baseline: channel.paired_users.length });
+  };
 
   return (
     <div className="page">
@@ -33,7 +52,7 @@ export default function AdminPage(props: { refreshKey: number }) {
           head={["id", "name", "role", "enabled", "last used", ""]}
           rows={users.map((u) => [
             u.id, u.name, u.role, u.enabled ? "✅" : "⛔", u.last_used_at ?? "—",
-            <button className="ghost" onClick={async () => {
+            <button key={u.id} className="ghost" onClick={async () => {
               await post(`/api/users/${u.id}/enabled`, { enabled: !u.enabled });
               reloadUsers();
             }}>{u.enabled ? "disable" : "enable"}</button>,
@@ -42,26 +61,32 @@ export default function AdminPage(props: { refreshKey: number }) {
 
       <Section title="Channels (Telegram)">
         <InlineForm
-          fields={[{ name: "secret_ref",
+          fields={[{ name: "name", placeholder: "名稱（例：值班通知）" },
+                   { name: "secret_ref",
                      placeholder: "bot token ref, e.g. keyring:bastet/tg-bot",
                      width: "22rem" }]}
           submit="add telegram"
           onSubmit={async (v) => {
-            await post("/api/channels", { kind: "telegram", secret_ref: v.secret_ref });
+            await post("/api/channels", { kind: "telegram", name: v.name,
+                                          secret_ref: v.secret_ref });
             reloadChannels();
           }} />
         <DataTable
-          head={["id", "kind", "secret", "enabled", "paired", ""]}
+          head={["名稱", "id", "kind", "secret", "enabled", "已配對", ""]}
           rows={channels.map((c) => [
-            c.id, c.kind, c.secret_ref, c.enabled ? "✅" : "⛔",
+            c.name ?? c.kind, c.id, c.kind, c.secret_ref, c.enabled ? "✅" : "⛔",
             c.paired_users.join(", ") || "—",
-            <button className="ghost" onClick={async () => {
-              const r = await post<{ code: string }>(`/api/channels/${c.id}/pair`, {});
-              setPairCode(r.code);
-            }}>pair…</button>,
+            <button key={c.id} className="ghost"
+                    onClick={() => startPair(c)}>pair…</button>,
           ])} />
-        {pairCode && (
-          <p className="notice">對 bot 傳：<code>/pair {pairCode}</code>（15 分鐘內有效）</p>
+        {pairing && !pairDone && (
+          <p className="notice">⏳ 對 bot 傳：<code>/pair {pairing.code}</code>
+            （15 分鐘內有效）— 等待配對中，完成會自動顯示…</p>
+        )}
+        {pairing && pairDone && (
+          <p className="notice">✅ 配對完成：{pairedChannel!.paired_users.join(", ")}
+            <button className="ghost" onClick={() => setPairing(null)}>知道了</button>
+          </p>
         )}
         <p className="muted">新增 channel 後需重啟 <code>bastet serve</code> 才會開始輪詢。</p>
       </Section>

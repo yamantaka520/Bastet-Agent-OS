@@ -20,6 +20,7 @@ EVENT_TYPES = {
     "gate.pending", "gate.passed", "gate.failed",
     "budget.warning", "budget.exceeded",
     "resource.health_changed",
+    "channel.paired",
 }
 
 QUEUE_LIMIT = 500  # slow subscribers drop oldest events rather than block the engine

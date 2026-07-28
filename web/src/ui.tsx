@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 
-/** Poll-free list loader with manual refresh. */
-export function useList<T>(path: string): [T[], () => void] {
+/** List loader; re-fetches when `refreshKey` changes (WS events bump it). */
+export function useList<T>(path: string, refreshKey?: number): [T[], () => void] {
   const [rows, setRows] = useState<T[]>([]);
   const reload = useCallback(() => {
     api<T[]>(path).then(setRows).catch(() => setRows([]));
   }, [path]);
-  useEffect(reload, [reload]);
+  useEffect(reload, [reload, refreshKey]);
   return [rows, reload];
 }
 

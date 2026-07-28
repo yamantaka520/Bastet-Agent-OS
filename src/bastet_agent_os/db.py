@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS channels (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,
+  name TEXT,
   config_json TEXT NOT NULL DEFAULT '{}',
   secret_ref TEXT,
   enabled INTEGER NOT NULL DEFAULT 1
@@ -266,6 +267,9 @@ class Db:
             agent_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(agents)")}
             if "account_id" not in agent_cols:
                 self._conn.execute("ALTER TABLE agents ADD COLUMN account_id TEXT")
+            channel_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(channels)")}
+            if "name" not in channel_cols:
+                self._conn.execute("ALTER TABLE channels ADD COLUMN name TEXT")
             self._conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
