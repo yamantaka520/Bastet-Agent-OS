@@ -3,6 +3,7 @@ import { api, getToken, setToken, openEventSocket, Me } from "./api";
 import AdminPage from "./pages/Admin";
 import AuditPage from "./pages/Audit";
 import BoardPage from "./pages/Board";
+import MemoryPage from "./pages/Memory";
 import OrgPage from "./pages/Org";
 import ResourcesPage from "./pages/Resources";
 import TemplatesPage from "./pages/Templates";
@@ -15,6 +16,7 @@ const TABS: Tab[] = [
   { key: "resources", label: "資源", minRole: "viewer" },
   { key: "org", label: "組織", minRole: "viewer" },
   { key: "templates", label: "模板", minRole: "viewer" },
+  { key: "memory", label: "記憶", minRole: "viewer" },
   { key: "admin", label: "管理", minRole: "admin" },
   { key: "audit", label: "稽核", minRole: "viewer" },
 ];
@@ -111,6 +113,7 @@ function Workbench({ me }: { me: Me }) {
       {tab === "resources" && <ResourcesPage isAdmin={isAdmin} refreshKey={refreshKey} />}
       {tab === "org" && <OrgPage canOperate={canOperate} refreshKey={refreshKey} />}
       {tab === "templates" && <TemplatesPage canOperate={canOperate} refreshKey={refreshKey} />}
+      {tab === "memory" && <MemoryPage />}
       {tab === "admin" && isAdmin && <AdminPage refreshKey={refreshKey} />}
       {tab === "audit" && <AuditPage refreshKey={refreshKey} />}
 

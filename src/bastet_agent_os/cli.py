@@ -67,9 +67,17 @@ def init():
 @app.command()
 def serve(host: str = "127.0.0.1", port: int = 0):
     """Run the control plane + gateway (binds 127.0.0.1 only by default)."""
+    import logging
+
     import uvicorn
 
     from .server import create_app
+
+    logging.basicConfig(level=logging.INFO,
+                        format="%(levelname)s: %(name)s: %(message)s")
+    # httpx logs full request URLs at INFO — Telegram bot tokens live in the
+    # URL path, so that logger must never speak below WARNING (SPEC §5.8)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     home = Home()
     home.ensure()

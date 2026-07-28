@@ -10,6 +10,10 @@ type OrgView = {
   teams: { id: string; name: string; members: string[];
            projects: { id: string; members: string[]; bound: boolean }[] }[];
 };
+type Executor = { kind: string; name: string; installed: boolean;
+                  supports_accounts: boolean; auth_note: string };
+type Account = { id: string; executor_type: string; name: string; status: string;
+                 login_instruction: string };
 
 export default function OrgPage(props: { canOperate: boolean; refreshKey: number }) {
   const [projects, reloadProjects] = useList<Project>("/api/projects");
@@ -34,25 +38,8 @@ export default function OrgPage(props: { canOperate: boolean; refreshKey: number
                    rows={projects.map((p) => [p.id, p.team_id, p.repo_path ?? "—"])} />
       </Section>
 
-      <Section title="Agents (executor bindings)">
-        {props.canOperate && (
-          <InlineForm
-            fields={[{ name: "id", placeholder: "agent id" },
-                     { name: "name", placeholder: "display name" },
-                     { name: "executor",
-                       placeholder: "claude-code|claude-sdk|codex|hermes|grok|agy|bastet-lite",
-                       width: "20rem" }]}
-            submit="add"
-            onSubmit={async (v) => {
-              await post("/api/agents", { id: v.id, name: v.name || v.id,
-                                          executor_type: v.executor || "claude-code" });
-              reloadAgents();
-            }} />
-        )}
-        <DataTable head={["id", "name", "executor", "enabled"]}
-                   rows={agents.map((a) => [a.id, a.name, a.executor_type,
-                                            a.enabled ? "✅" : "⛔"])} />
-      </Section>
+      <AgentsSection canOperate={props.canOperate} agents={agents}
+                     reloadAgents={reloadAgents} />
 
       <FederationSection canOperate={props.canOperate} onBound={reloadProjects} />
 
@@ -73,6 +60,120 @@ export default function OrgPage(props: { canOperate: boolean; refreshKey: number
           agent holding that role in the project; otherwise the job's default agent runs.</p>
       </Section>
     </div>
+  );
+}
+
+function AgentsSection({ canOperate, agents, reloadAgents }:
+  { canOperate: boolean; agents: Agent[]; reloadAgents: () => void }) {
+  const [executors, setExecutors] = useState<Executor[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [form, setForm] = useState({ id: "", name: "", executor: "claude-code",
+                                     account: "" });
+  const [newAccountName, setNewAccountName] = useState("");
+  const [created, setCreated] = useState<{ login_instruction: string } | null>(null);
+  const [error, setError] = useState("");
+
+  const loadAccounts = useCallback(() => {
+    api<Account[]>("/api/executor-accounts").then(setAccounts).catch(() => {});
+  }, []);
+  useEffect(() => {
+    api<Executor[]>("/api/executors").then(setExecutors).catch(() => {});
+    loadAccounts();
+  }, [loadAccounts]);
+
+  const selected = executors.find((e) => e.kind === form.executor);
+  const typeAccounts = accounts.filter((a) => a.executor_type === form.executor);
+
+  const addAgent = async () => {
+    setError("");
+    try {
+      await post("/api/agents", { id: form.id, name: form.name || form.id,
+                                  executor_type: form.executor,
+                                  account_id: form.account || null });
+      setForm({ ...form, id: "", name: "", account: "" });
+      reloadAgents();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
+  const addAccount = async () => {
+    setError("");
+    try {
+      const result = await post<{ login_instruction: string }>(
+        "/api/executor-accounts",
+        { executor_type: form.executor, name: newAccountName });
+      setCreated(result);
+      setNewAccountName("");
+      loadAccounts();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
+  const accountName = (id: string | null) =>
+    accounts.find((a) => a.id === id)?.name ?? "—";
+
+  return (
+    <Section title="Agents (executor bindings)">
+      {canOperate && (
+        <>
+          <div className="inline-form">
+            <input placeholder="agent id" value={form.id}
+                   onChange={(e) => setForm({ ...form, id: e.target.value })} />
+            <input placeholder="display name" value={form.name}
+                   onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <select value={form.executor}
+                    onChange={(e) => setForm({ ...form, executor: e.target.value,
+                                               account: "" })}>
+              {executors.map((e) => (
+                <option key={e.kind} value={e.kind}>
+                  {e.name}{e.installed ? "" : "（未安裝）"}
+                </option>
+              ))}
+            </select>
+            {selected?.supports_accounts && (
+              <select value={form.account}
+                      onChange={(e) => setForm({ ...form, account: e.target.value })}>
+                <option value="">全域登入（預設）</option>
+                {typeAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}（{a.status}）</option>
+                ))}
+              </select>
+            )}
+            <button onClick={addAgent} disabled={!form.id}>add</button>
+          </div>
+          {selected?.supports_accounts && (
+            <div className="inline-form">
+              <input placeholder={`新增 ${form.executor} 帳號名稱`} value={newAccountName}
+                     onChange={(e) => setNewAccountName(e.target.value)} />
+              <button className="ghost" onClick={addAccount}
+                      disabled={!newAccountName}>＋ 帳號</button>
+            </div>
+          )}
+          {selected && !selected.supports_accounts && (
+            <p className="muted">{selected.auth_note === "global-only"
+              ? "此 executor 僅支援全域登入（單一帳號）。"
+              : "此 executor 的憑證來自資源池，不需要帳號。"}</p>
+          )}
+          {created && (
+            <p className="notice">在你的終端執行完成登入：
+              <code>{created.login_instruction}</code></p>
+          )}
+          {error && <p className="error">{error}</p>}
+        </>
+      )}
+      <DataTable head={["id", "name", "executor", "account", "enabled"]}
+                 rows={agents.map((a) => [a.id, a.name, a.executor_type,
+                                          accountName((a as Agent & {account_id?: string})
+                                                      .account_id ?? null),
+                                          a.enabled ? "✅" : "⛔"])} />
+      {accounts.length > 0 && (
+        <>
+          <h3>Executor 帳號</h3>
+          <DataTable head={["name", "executor", "status", "登入指令"]}
+                     rows={accounts.map((a) => [a.name, a.executor_type, a.status,
+                                                <code key={a.id} className="detail">
+                                                  {a.login_instruction}</code>])} />
+        </>
+      )}
+    </Section>
   );
 }
 

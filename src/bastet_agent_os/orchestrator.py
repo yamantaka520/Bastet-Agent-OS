@@ -320,6 +320,14 @@ class Orchestrator:
                 routing = json.loads(resource["routing_json"] or "{}")
                 llm = {"flavor": resource["api_flavor"],
                        "model": agent_cfg.get("model") or routing.get("default_model")}
+            extra_env: dict[str, str] = {}
+            account_id = agent["account_id"] if "account_id" in agent.keys() else None
+            if account_id:
+                from .executors.accounts import account_env
+                account = self.db.one("SELECT * FROM executor_accounts WHERE id=?",
+                                      (account_id,))
+                if account is not None:
+                    extra_env = account_env(agent["executor_type"], account["home_dir"])
             spec = TaskSpec(
                 run_id=run_id,
                 prompt=self._stage_prompt(job, stage),
@@ -331,6 +339,7 @@ class Orchestrator:
                 gateway_url=self.gateway_url if job["resource_id"] else None,
                 run_token=token if job["resource_id"] else None,
                 llm=llm,
+                extra_env=extra_env,
                 isolation=stage.isolation,
                 container_image=json.loads(
                     self.db.one("SELECT config_json FROM projects WHERE id=?",

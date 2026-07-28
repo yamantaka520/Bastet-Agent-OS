@@ -185,6 +185,15 @@ CREATE TABLE IF NOT EXISTS audit_log (
   row_hash TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS executor_accounts (
+  id TEXT PRIMARY KEY,
+  executor_type TEXT NOT NULL,
+  name TEXT NOT NULL,
+  home_dir TEXT NOT NULL,          -- exported as the CLI's home/config env var per run
+  config_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS run_interactions (
   id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL REFERENCES runs(id),
@@ -254,6 +263,9 @@ class Db:
             for col, decl in [("default_agent_id", "TEXT"), ("resource_id", "TEXT")]:
                 if col not in existing:
                     self._conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {decl}")
+            agent_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(agents)")}
+            if "account_id" not in agent_cols:
+                self._conn.execute("ALTER TABLE agents ADD COLUMN account_id TEXT")
             self._conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
                 (str(SCHEMA_VERSION),),

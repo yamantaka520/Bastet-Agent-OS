@@ -56,6 +56,12 @@ class AgentIn(BaseModel):
     name: str
     executor_type: str = "claude-code"
     amos_agent_id: str | None = None
+    account_id: str | None = None
+
+
+class AccountIn(BaseModel):
+    executor_type: str
+    name: str
 
 
 class ResourceIn(BaseModel):
@@ -320,9 +326,9 @@ def create_app(home: Home) -> FastAPI:
             except Exception as exc:
                 log.warning("AMOS agent register failed: %s", exc)
         db.write(
-            "INSERT INTO agents(id, amos_agent_id, name, executor_type, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?)",
-            (a.id, amos_id, a.name, a.executor_type, ts, ts),
+            "INSERT INTO agents(id, amos_agent_id, name, executor_type, account_id, "
+            "created_at, updated_at) VALUES(?,?,?,?,?,?,?)",
+            (a.id, amos_id, a.name, a.executor_type, a.account_id, ts, ts),
         )
         db.audit(auth.actor, "agent.create", "agent", a.id, {"executor": a.executor_type})
         return {"id": a.id}
@@ -330,6 +336,61 @@ def create_app(home: Home) -> FastAPI:
     @app.get("/api/agents", dependencies=[Depends(require_role("viewer"))])
     def list_agents():
         return [dict(r) for r in db.query("SELECT * FROM agents ORDER BY created_at")]
+
+    # ---- executors & accounts (multi-login per executor) -----------------------
+
+    from .executors import accounts as accounts_mod
+
+    @app.get("/api/executors", dependencies=[Depends(require_role("viewer"))])
+    def list_executors():
+        return accounts_mod.catalog_with_availability()
+
+    @app.get("/api/executor-accounts", dependencies=[Depends(require_role("viewer"))])
+    def list_executor_accounts():
+        rows = []
+        for r in db.query("SELECT * FROM executor_accounts ORDER BY created_at"):
+            row = dict(r)
+            row["status"] = accounts_mod.profile_status(r["executor_type"], r["home_dir"])
+            row["login_instruction"] = accounts_mod.login_instruction(
+                r["executor_type"], r["home_dir"])
+            rows.append(row)
+        return rows
+
+    @app.post("/api/executor-accounts")
+    def create_executor_account(a: AccountIn,
+                                auth: Auth = Depends(require_role("operator"))):
+        if a.executor_type not in accounts_mod.HOME_ENV:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{a.executor_type} does not support per-account profiles "
+                       "(global login or resource-based)")
+        account_id = new_id("acct")
+        home_dir = accounts_mod.ensure_profile_dir(home.root, account_id)
+        db.write("INSERT INTO executor_accounts(id, executor_type, name, home_dir, "
+                 "created_at) VALUES(?,?,?,?,?)",
+                 (account_id, a.executor_type, a.name, home_dir, now()))
+        db.audit(auth.actor, "account.create", "account", account_id,
+                 {"executor": a.executor_type, "name": a.name})
+        return {"id": account_id, "home_dir": home_dir,
+                "login_instruction": accounts_mod.login_instruction(a.executor_type,
+                                                                    home_dir),
+                "note": "在你自己的終端執行上面的指令完成登入（OAuth 需要瀏覽器）"}
+
+    # ---- AMOS memory view -------------------------------------------------------
+
+    @app.get("/api/memory/search", dependencies=[Depends(require_role("viewer"))])
+    def memory_search(q: str, limit: int = 20):
+        client = amos_client()
+        if client is None:
+            raise HTTPException(status_code=502, detail="AMOS unavailable")
+        try:
+            hits = client.search(q, limit=min(limit, 50))
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"AMOS search failed: "
+                                f"{type(exc).__name__}") from exc
+        return [{"id": h.get("id"), "score": h.get("score"),
+                 "content": h.get("content"), "scope": h.get("scope"),
+                 "type": h.get("type")} for h in hits]
 
     @app.post("/api/resources")
     def create_resource(r: ResourceIn, auth: Auth = Depends(require_role("admin"))):
@@ -609,12 +670,14 @@ def create_app(home: Home) -> FastAPI:
     @app.websocket("/api/ws")
     async def events_ws(ws: WebSocket):
         if not _host_ok(ws.headers.get("host", "")):
+            log.warning("ws rejected: bad host %r", ws.headers.get("host"))
             await ws.close(code=4403)
             return
         origin = ws.headers.get("origin")
         if origin:
             from urllib.parse import urlparse
             if not _host_ok(urlparse(origin).netloc):
+                log.warning("ws rejected: bad origin %r", origin)
                 await ws.close(code=4403)
                 return
         await ws.accept()

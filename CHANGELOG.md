@@ -5,6 +5,24 @@ All notable changes to Bastet Agent OS. Format follows
 
 ## [Unreleased]
 
+### Added — one-click install, executor accounts, memory view
+- `install.sh`: one-click installer (macOS/Linux) — Bastet + latest Agent
+  Memory OS + claude-agent-sdk into ~/.bastet/venv, plus the executor CLIs
+  via their OFFICIAL installers (Claude Code, Codex, Grok Build, Antigravity,
+  Hermes); idempotent, `--minimal` / `--executors` / `--upgrade` flags,
+  ends with `bastet doctor` and per-tool login guidance.
+- Executor accounts: multiple logins per executor via isolated profile
+  dirs (~/.bastet/executor-profiles/<id>) exported as CLAUDE_CONFIG_DIR /
+  CODEX_HOME / GROK_HOME per run; `/api/executors` catalog (installed /
+  supports_accounts), `/api/executor-accounts` CRUD returning the exact
+  interactive login command; agents bind an account_id. agy is global-login
+  only (upstream limitation), bastet-lite needs none.
+- Org page: executor dropdown (with 未安裝 markers), account picker, inline
+  account creation with login instructions and profile status.
+- 記憶 tab: AMOS search view backed by `/api/memory/search` (ACL-filtered).
+- Fixes: uvicorn[standard] (WebSocket 403 root cause), httpx logger forced
+  to WARNING (bot tokens live in Telegram URLs), WS rejection reasons logged.
+
 ### Added — grok & agy executors
 - `grok` executor (xAI Grok Build CLI): headless `-p` with streaming-json
   events; review runs get a REAL read-only toolset (`--tools
