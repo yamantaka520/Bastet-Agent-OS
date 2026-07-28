@@ -109,7 +109,10 @@ def install() -> str:
         unit_path.parent.mkdir(parents=True, exist_ok=True)
         unit_path.write_text(systemd_unit(binary))
         for cmd in (["systemctl", "--user", "daemon-reload"],
-                    ["systemctl", "--user", "enable", "--now", SERVICE_NAME]):
+                    ["systemctl", "--user", "enable", SERVICE_NAME],
+                    # restart, not enable --now: a unit rewrite must reach the
+                    # already-running process too
+                    ["systemctl", "--user", "restart", SERVICE_NAME]):
             ok, out = _run(cmd)
             if not ok:
                 raise RuntimeError(f"{' '.join(cmd)} failed: {out}")
