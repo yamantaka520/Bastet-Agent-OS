@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -905,8 +905,6 @@ def create_app(home: Home) -> FastAPI:
     # ---- WebSocket event stream (SPEC §5.10) --------------------------------
     # Browser WebSocket clients can't set Authorization headers, so the first
     # message must be {"token": "<api token>"} — never put the token in the URL.
-
-    from fastapi import WebSocket, WebSocketDisconnect
 
     @app.websocket("/api/ws")
     async def events_ws(ws: WebSocket):
