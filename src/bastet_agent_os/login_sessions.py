@@ -42,7 +42,10 @@ class LoginSessionManager:
     def start(self, kind: str, env: dict[str, str], argv: list[str]) -> LoginSession:
         if sys.platform == "win32":
             raise RuntimeError("WebUI 登入精靈暫不支援 Windows — 請在終端執行登入指令")
+        import fcntl
         import pty
+        import struct
+        import termios
 
         pid, master_fd = pty.fork()
         if pid == 0:  # child: exec the login command in the PTY
@@ -52,6 +55,13 @@ class LoginSessionManager:
                 os.execvp(argv[0], argv)
             finally:
                 os._exit(127)
+
+        # full-screen TUIs need a window size or they stall/render blind
+        winsize = struct.pack("HHHH", 30, 100, 0, 0)
+        try:
+            fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+        except OSError:
+            pass
 
         session = LoginSession(id=new_id("lgn"), kind=kind, pid=pid,
                                master_fd=master_fd)

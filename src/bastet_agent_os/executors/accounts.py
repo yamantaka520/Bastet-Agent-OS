@@ -74,7 +74,10 @@ def login_command(kind: str, home_dir: str | None) -> tuple[dict[str, str], list
     if kind == "grok":
         return env, ["grok", "login", "--device-auth"]
     if kind == "agy":
-        return {}, ["agy"]  # global Google OAuth; prints URL + paste-back over SSH
+        # TERM=dumb coaxes agy out of its full-screen TUI (which stalls on
+        # terminal-capability queries our web bridge can't answer) into the
+        # plain URL + paste-back login flow it uses over SSH
+        return {"TERM": "dumb"}, ["agy"]
     if kind == "hermes":
         return env, ["hermes", "setup"]
     return None
