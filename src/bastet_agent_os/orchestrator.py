@@ -314,12 +314,15 @@ class Orchestrator:
                                                  skip=frozenset({"spec"}))
             self.db.audit("orchestrator", "context.assembled", "run", run_id,
                           report.to_dict())
-            llm = None
+            # model: agent config > resource routing default > official default
+            agent_cfg = json.loads(agent["config_json"] or "{}")
+            model = agent_cfg.get("model")
+            flavor = None
             if resource is not None:
-                agent_cfg = json.loads(agent["config_json"] or "{}")
                 routing = json.loads(resource["routing_json"] or "{}")
-                llm = {"flavor": resource["api_flavor"],
-                       "model": agent_cfg.get("model") or routing.get("default_model")}
+                model = model or routing.get("default_model")
+                flavor = resource["api_flavor"]
+            llm = {"flavor": flavor, "model": model} if (model or flavor) else None
             extra_env: dict[str, str] = {}
             account_id = agent["account_id"] if "account_id" in agent.keys() else None
             if account_id:

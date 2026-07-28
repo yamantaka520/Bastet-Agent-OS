@@ -91,6 +91,27 @@ export const put = <T,>(path: string, body: unknown) =>
 
 export const del = <T,>(path: string) => api<T>(path, { method: "DELETE" });
 
+export function openLoginSocket(
+  sessionId: string,
+  onOutput: (text: string) => void,
+  onDone: (exitCode: number | null) => void,
+): { send: (input: string) => void; close: () => void } {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/api/login-sessions/${sessionId}/ws`);
+  ws.onopen = () => ws.send(JSON.stringify({ token: getToken() }));
+  ws.onmessage = (msg) => {
+    try {
+      const data = JSON.parse(msg.data);
+      if (data.output) onOutput(data.output);
+      if (data.done) onDone(data.exit_code ?? null);
+    } catch { /* ignore */ }
+  };
+  return {
+    send: (input: string) => ws.send(JSON.stringify({ input })),
+    close: () => ws.close(),
+  };
+}
+
 export function openEventSocket(
   projectId: string | null,
   onEvent: (event: Record<string, unknown>) => void,

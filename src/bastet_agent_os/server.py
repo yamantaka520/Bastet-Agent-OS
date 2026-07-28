@@ -89,6 +89,7 @@ class AgentIn(BaseModel):
     executor_type: str = "claude-code"
     amos_agent_id: str | None = None
     account_id: str | None = None
+    model: str | None = None       # empty/None = the executor's official default
 
 
 class AccountIn(BaseModel):
@@ -101,6 +102,7 @@ class AgentUpdateIn(BaseModel):
     executor_type: str | None = None
     account_id: str | None = None
     enabled: int | None = None
+    model: str | None = None       # "" resets to the official default
 
 
 class RenameIn(BaseModel):
@@ -183,6 +185,16 @@ class RespondIn(BaseModel):
 class BindIn(BaseModel):
     project_id: str
     repo_path: str
+
+
+class LoginStartIn(BaseModel):
+    executor_type: str = ""
+    account_id: str | None = None
+
+
+class TeamIn(BaseModel):
+    id: str
+    name: str = ""
 
 
 def create_app(home: Home) -> FastAPI:
@@ -310,6 +322,15 @@ def create_app(home: Home) -> FastAPI:
     def list_projects():
         return [dict(r) for r in db.query("SELECT * FROM projects ORDER BY created_at")]
 
+    @app.post("/api/teams")
+    def create_team(t: TeamIn, auth: Auth = Depends(require_role("operator"))):
+        client = amos_client()
+        if client is None:
+            raise HTTPException(status_code=502, detail="AMOS unavailable")
+        client.create_team(t.id, name=t.name or t.id)
+        db.audit(auth.actor, "team.create", "team", t.id, {"name": t.name})
+        return {"id": t.id}
+
     # ---- federation org view (M5) ---------------------------------------------
     # AMOS federation converges teams/projects/members across nodes; Bastet
     # surfaces that shared org and lets an operator BIND a synced project to a
@@ -374,10 +395,12 @@ def create_app(home: Home) -> FastAPI:
                 client.register_agent(amos_id)
             except Exception as exc:
                 log.warning("AMOS agent register failed: %s", exc)
+        config = {"model": a.model} if a.model else {}
         db.write(
             "INSERT INTO agents(id, amos_agent_id, name, executor_type, account_id, "
-            "created_at, updated_at) VALUES(?,?,?,?,?,?,?)",
-            (a.id, amos_id, a.name, a.executor_type, a.account_id, ts, ts),
+            "config_json, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+            (a.id, amos_id, a.name, a.executor_type, a.account_id,
+             json.dumps(config), ts, ts),
         )
         db.audit(auth.actor, "agent.create", "agent", a.id, {"executor": a.executor_type})
         return {"id": a.id}
@@ -395,6 +418,13 @@ def create_app(home: Home) -> FastAPI:
         fields = {k: v for k, v in a.model_dump().items() if v is not None}
         if fields.get("account_id") == "":
             fields["account_id"] = None  # "" clears the binding (global login)
+        if "model" in fields:            # model lives inside config_json
+            config = json.loads(row["config_json"] or "{}")
+            if fields.pop("model"):
+                config["model"] = a.model
+            else:
+                config.pop("model", None)  # "" resets to official default
+            fields["config_json"] = json.dumps(config)
         if not fields:
             return dict(row)
         sets = ", ".join(f"{k}=?" for k in fields)
@@ -434,6 +464,18 @@ def create_app(home: Home) -> FastAPI:
             row["status"] = accounts_mod.profile_status(r["executor_type"], r["home_dir"])
             row["login_instruction"] = accounts_mod.login_instruction(
                 r["executor_type"], r["home_dir"])
+            # Bastet-side usage attributed through the agents bound to this account
+            for key, since in (("usage_today", "start of day"),
+                               ("usage_7d", "-7 days")):
+                agg = db.one(
+                    "SELECT COUNT(*) runs, COALESCE(SUM(r.tokens_in+r.cache_read),0) tin, "
+                    "COALESCE(SUM(r.tokens_out),0) tout, COALESCE(SUM(r.cost_usd),0) cost "
+                    "FROM runs r JOIN agents a ON a.id = r.agent_id "
+                    "WHERE a.account_id=? AND r.started_at >= datetime('now', ?)",
+                    (r["id"], since))
+                row[key] = {"runs": agg["runs"], "tokens_in": agg["tin"],
+                            "tokens_out": agg["tout"],
+                            "cost_usd": round(float(agg["cost"]), 4)}
             rows.append(row)
         return rows
 
@@ -456,6 +498,22 @@ def create_app(home: Home) -> FastAPI:
                 "login_instruction": accounts_mod.login_instruction(a.executor_type,
                                                                     home_dir),
                 "note": "在你自己的終端執行上面的指令完成登入（OAuth 需要瀏覽器）"}
+
+    @app.get("/api/executor-accounts/{account_id}/quota",
+             dependencies=[Depends(require_role("viewer"))])
+    def account_quota(account_id: str):
+        from .executors.quota import fetch_quota
+        row = db.one("SELECT * FROM executor_accounts WHERE id=?", (account_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="account not found")
+        return fetch_quota(row["executor_type"], row["home_dir"])
+
+    @app.get("/api/executors/{kind}/quota",
+             dependencies=[Depends(require_role("viewer"))])
+    def global_quota(kind: str):
+        """Quota for the executor's GLOBAL (default-profile) login."""
+        from .executors.quota import fetch_quota
+        return fetch_quota(kind, None)
 
     @app.put("/api/executor-accounts/{account_id}")
     def rename_executor_account(account_id: str, r: RenameIn,
@@ -484,6 +542,44 @@ def create_app(home: Home) -> FastAPI:
         return {"deleted": account_id,
                 "note": f"profile 目錄保留（可能含登入憑證）：{row['home_dir']} — "
                         "確認不需要後自行刪除"}
+
+    # ---- WebUI login wizard (PTY over WS) -----------------------------------------
+
+    from .login_sessions import LoginSessionManager
+
+    login_manager = LoginSessionManager()
+
+    @app.post("/api/login-sessions")
+    def start_login_session(req: LoginStartIn,
+                            auth: Auth = Depends(require_role("operator"))):
+        home_dir = None
+        if req.account_id:
+            account = db.one("SELECT * FROM executor_accounts WHERE id=?",
+                             (req.account_id,))
+            if account is None:
+                raise HTTPException(status_code=404, detail="account not found")
+            home_dir = account["home_dir"]
+            kind = account["executor_type"]
+        else:
+            kind = req.executor_type
+        command = accounts_mod.login_command(kind, home_dir)
+        if command is None:
+            raise HTTPException(status_code=400,
+                                detail="此 executor 不需要登入（憑證來自資源池）")
+        env, argv = command
+        try:
+            session = login_manager.start(kind, env, argv)
+        except (RuntimeError, OSError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        db.audit(auth.actor, "login_session.start", "executor", kind,
+                 {"account": req.account_id, "argv": argv[0]})
+        return {"id": session.id, "command": " ".join(argv)}
+
+    @app.delete("/api/login-sessions/{session_id}")
+    def kill_login_session(session_id: str,
+                           auth: Auth = Depends(require_role("operator"))):
+        login_manager.kill(session_id)
+        return {"killed": session_id}
 
     # ---- AMOS memory view -------------------------------------------------------
 
@@ -846,6 +942,48 @@ def create_app(home: Home) -> FastAPI:
             pass
         finally:
             bus.unsubscribe(queue)
+
+    @app.websocket("/api/login-sessions/{session_id}/ws")
+    async def login_session_ws(ws: WebSocket, session_id: str):
+        if not _host_ok(ws.headers.get("host", ""), allowed_hosts):
+            await ws.close(code=4403)
+            return
+        await ws.accept()
+        try:
+            first = await asyncio.wait_for(ws.receive_json(), timeout=10)
+        except Exception:
+            await ws.close(code=4401)
+            return
+        who = users_mod.verify(db, str(first.get("token") or ""), api_token)
+        if who is None or not who.at_least("operator"):
+            await ws.close(code=4401)
+            return
+        try:
+            session, queue = login_manager.subscribe(session_id)
+        except KeyError:
+            await ws.close(code=4404)
+            return
+
+        async def pump_output():
+            while True:
+                chunk = await queue.get()
+                if chunk is None:
+                    await ws.send_json({"done": True,
+                                        "exit_code": session.exit_code})
+                    return
+                await ws.send_json({"output": chunk.decode(errors="replace")})
+
+        pump = asyncio.get_running_loop().create_task(pump_output())
+        try:
+            while True:
+                message = await ws.receive_json()
+                if "input" in message:
+                    login_manager.write(session_id, str(message["input"]))
+        except Exception:
+            pass
+        finally:
+            pump.cancel()
+            login_manager.unsubscribe(session_id, queue)
 
     # ---- Kanban UI (built by `npm run build` in web/) -------------------------
 

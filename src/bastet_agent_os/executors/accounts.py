@@ -28,39 +28,75 @@ GLOBAL_AUTH_ONLY = {"agy"}
 # kinds that never need an account (credentials come from Bastet resources)
 NO_ACCOUNT = {"bastet-lite"}
 
+# model lists: curated from each tool's current lineup; the empty choice means
+# "official default" (no --model flag passed)
 EXECUTOR_CATALOG = [
     {"kind": "claude-code", "name": "Claude Code (headless)", "binary": "claude",
-     "config_dir": "~/.claude"},
+     "config_dir": "~/.claude",
+     "models": ["sonnet", "opus", "haiku"]},
     {"kind": "claude-sdk", "name": "Claude Code (Agent SDK, in-run approvals)",
-     "binary": "claude", "config_dir": "~/.claude"},
+     "binary": "claude", "config_dir": "~/.claude",
+     "models": ["sonnet", "opus", "haiku"]},
     {"kind": "codex", "name": "OpenAI Codex CLI", "binary": "codex",
-     "config_dir": "~/.codex"},
+     "config_dir": "~/.codex",
+     "models": ["gpt-5.1-codex", "gpt-5.1-codex-mini"]},
     {"kind": "hermes", "name": "NousResearch Hermes", "binary": "hermes",
-     "config_dir": "~/.hermes"},
+     "config_dir": "~/.hermes",
+     "models": []},   # model comes from the gateway resource routing
     {"kind": "grok", "name": "xAI Grok Build", "binary": "grok",
-     "config_dir": "~/.grok"},
+     "config_dir": "~/.grok",
+     "models": ["grok-code-fast-1", "grok-4", "grok-4-1-fast", "grok-3"]},
     {"kind": "agy", "name": "Google Antigravity", "binary": "agy",
-     "config_dir": "~/.gemini"},
+     "config_dir": "~/.gemini",
+     "models": ["gemini-3.6-flash-high", "gemini-3.6-flash-medium",
+                "gemini-3.6-flash-low", "gemini-3.1-pro-high",
+                "gemini-3.1-pro-low", "claude-sonnet-4-6",
+                "claude-opus-4-6-thinking", "gpt-oss-120b-medium"]},
     {"kind": "bastet-lite", "name": "bastet-lite (built-in)", "binary": None,
-     "config_dir": None},
+     "config_dir": None,
+     "models": []},   # model comes from the gateway resource routing
 ]
 
 
-def login_instruction(kind: str, home_dir: str) -> str:
-    """The exact terminal command that logs this profile in (verified against
-    each tool's official docs — interactive by design, never automated)."""
+def login_command(kind: str, home_dir: str | None) -> tuple[dict[str, str], list[str]] | None:
+    """(env, argv) that runs this executor's login flow — device-code /
+    URL-paste variants preferred so the flow survives a web terminal.
+    home_dir=None means the global (default-profile) login."""
+    env = {}
+    if home_dir and kind in HOME_ENV:
+        env = {HOME_ENV[kind]: home_dir}
     if kind in ("claude-code", "claude-sdk"):
-        return f'CLAUDE_CONFIG_DIR="{home_dir}" claude  # 進入後輸入 /login'
+        return env, ["claude", "/login"]
     if kind == "codex":
-        return f'CODEX_HOME="{home_dir}" codex login'
+        # verified against codex 0.145.0: the flag is --device-auth
+        # (docs still say --device-code, which the binary rejects)
+        return env, ["codex", "login", "--device-auth"]
     if kind == "grok":
-        return f'GROK_HOME="{home_dir}" grok  # 首次執行自動開瀏覽器認證'
-    if kind == "hermes":
-        return (f'HERMES_HOME="{home_dir}" hermes setup  '
-                "# 或直接把 provider keys 寫進該目錄的 config.yaml")
+        return env, ["grok", "login", "--device-auth"]
     if kind == "agy":
-        return "agy  # Antigravity 只有全域 Google 登入，不支援多帳號目錄"
-    return "（此 executor 不需要帳號 — 憑證來自 Bastet 資源池）"
+        return {}, ["agy"]  # global Google OAuth; prints URL + paste-back over SSH
+    if kind == "hermes":
+        return env, ["hermes", "setup"]
+    return None
+
+
+def login_instruction(kind: str, home_dir: str | None) -> str:
+    """Human-readable command line for running the login in a terminal."""
+    command = login_command(kind, home_dir)
+    if command is None:
+        return "（此 executor 不需要帳號 — 憑證來自 Bastet 資源池）"
+    env, argv = command
+    prefix = " ".join(f'{k}="{v}"' for k, v in env.items())
+    line = (prefix + " " if prefix else "") + " ".join(argv)
+    notes = {
+        "codex": "  # device code：用手機或任何瀏覽器輸入代碼即可",
+        "grok": "  # device auth：無需本機瀏覽器",
+        "agy": "  # 全域 Google OAuth（Antigravity 不支援多帳號目錄）",
+        "hermes": "  # 供應商/模型設定精靈",
+    }
+    if kind in ("claude-code", "claude-sdk"):
+        return line.replace(" /login", "") + "  # 進入後輸入 /login"
+    return line + notes.get(kind, "")
 
 
 def profile_status(kind: str, home_dir: str) -> str:
