@@ -538,6 +538,7 @@ M2 起 WS 推播支撐 Kanban 即時更新，M4 起 channel 訂閱。
 | D9 | 2026-07-28 | Web UI 認證 M1 單使用者 token，多使用者排 M3+ | 先形成閉環；安全細則見 §4/§5.9 |
 | D10 | 2026-07-28 | bastet-lite 最小工具集：read/write file、白名單 shell、AMOS 記憶操作 | 能力受限是特性不是缺陷 |
 | D11 | 2026-07-28 | 品牌與 AMOS 貓 logo 同系列視覺 | 產品家族識別一致 |
+| D14 | 2026-07-29 | M5 org 視圖：Bastet 呈現 AMOS 收斂後的 org（/api/org），federation 同步來的專案以 bind 動作綁本機 repo；Bastet 自有狀態刻意 per-node | 綁定是本機語意（兩節點可綁各自 repo 副本、各自計費）；AMOS 刪除傳播後本機歷史保留為 local-only |
 | D13 | 2026-07-28 | 多使用者認證（M3 實作）：`users` 表 token 只存 hash、三級角色 viewer < operator < admin（viewer 唯讀；operator 派工/批准/template/role；admin 管 resources/grants/users）；`~/.bastet/api_token` 保留為 bootstrap admin（root）；audit actor 記到個人（user:<id>） | 單人情境零遷移成本；權限面以「工作 vs 結構與金錢」切分 |
 | D12 | 2026-07-28 | v1.1 審查修訂：gate verdict 結構化協議、executor 雙向互動介面、run token 完整規格、逐請求 usage ledger（含 cache）、配額兩段式執行、SQLite 併發策略、威脅模型誠實聲明、worktree 屬 job、audit/佇列移入 M1、M1 內建 single-stage template、container 排 M3、事件模型、M5 判準降格 | 三方獨立審查（架構/資料模型/安全）共 13 high 發現全數落地 |
 

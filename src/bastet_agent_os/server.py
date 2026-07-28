@@ -130,6 +130,11 @@ class RespondIn(BaseModel):
     reply: dict[str, Any]
 
 
+class BindIn(BaseModel):
+    project_id: str
+    repo_path: str
+
+
 def create_app(home: Home) -> FastAPI:
     home.ensure()
     db = Db(home.db_path)
@@ -249,6 +254,60 @@ def create_app(home: Home) -> FastAPI:
     @app.get("/api/projects", dependencies=[Depends(require_role("viewer"))])
     def list_projects():
         return [dict(r) for r in db.query("SELECT * FROM projects ORDER BY created_at")]
+
+    # ---- federation org view (M5) ---------------------------------------------
+    # AMOS federation converges teams/projects/members across nodes; Bastet
+    # surfaces that shared org and lets an operator BIND a synced project to a
+    # local repo. Bastet-local state (resources/grants/jobs) stays per-node.
+
+    @app.get("/api/org", dependencies=[Depends(require_role("viewer"))])
+    def org_view():
+        local = {r["id"] for r in db.query("SELECT id FROM projects")}
+        client = amos_client()
+        if client is None:
+            return {"amos": False, "teams": [],
+                    "local_only": sorted(local)}
+        try:
+            teams = client.list_teams()
+            projects = {p["id"]: p for p in client.list_projects()}
+        except Exception as exc:
+            log.warning("AMOS org read failed: %s", exc)
+            return {"amos": False, "teams": [], "local_only": sorted(local)}
+        view = []
+        for team in teams:
+            view.append({
+                "id": team["id"], "name": team.get("name") or team["id"],
+                "members": team.get("members") or [],
+                "projects": [{
+                    "id": pid,
+                    "members": (projects.get(pid) or {}).get("members") or [],
+                    "bound": pid in local,
+                } for pid in (team.get("projects") or [])],
+            })
+        amos_ids = set(projects)
+        return {"amos": True, "teams": view,
+                "local_only": sorted(local - amos_ids)}
+
+    @app.post("/api/org/bind")
+    def bind_project(b: BindIn, auth: Auth = Depends(require_role("operator"))):
+        """Attach a federation-synced AMOS project to a local repo."""
+        client = amos_client()
+        if client is None:
+            raise HTTPException(status_code=502, detail="AMOS unavailable")
+        amos_project = next((p for p in client.list_projects()
+                             if p["id"] == b.project_id), None)
+        if amos_project is None:
+            raise HTTPException(status_code=404, detail="AMOS project not found")
+        if db.one("SELECT id FROM projects WHERE id=?", (b.project_id,)) is not None:
+            raise HTTPException(status_code=409, detail="project already bound")
+        ts = now()
+        db.write(
+            "INSERT INTO projects(id, team_id, repo_path, config_json, created_at, "
+            "updated_at) VALUES(?,?,?,?,?,?)",
+            (b.project_id, amos_project["team_id"], b.repo_path, "{}", ts, ts))
+        db.audit(auth.actor, "project.bind", "project", b.project_id,
+                 {"team": amos_project["team_id"], "repo": b.repo_path})
+        return {"id": b.project_id, "team_id": amos_project["team_id"]}
 
     @app.post("/api/agents")
     def create_agent(a: AgentIn, auth: Auth = Depends(require_role("operator"))):

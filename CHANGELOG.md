@@ -5,6 +5,21 @@ All notable changes to Bastet Agent OS. Format follows
 
 ## [Unreleased]
 
+### Added — M5
+- Federation org view (`GET /api/org`): the AMOS-converged teams / projects /
+  members tree merged with local binding state; `POST /api/org/bind` attaches
+  a project synced from another node to a local repo. Org page grows a
+  Federation section (🔗 bound / ◌ unbound, inline bind). Local-only
+  projects (AMOS record gone) stay listed with their history. See
+  docs/FEDERATION.md for what converges (org + memory, via AMOS) and what
+  stays per-node (resources, grants, jobs).
+
+### Added — WebUI management console
+- Tabbed, role-aware SPA: board with dispatch modal + in-run Allow/Deny +
+  inline diff; resources/grants with budget burn bars; org & templates
+  management; admin page (users with show-once tokens, Telegram pairing);
+  audit view; WS auto-reconnect.
+
 ### Added — M1 core skeleton
 - SPEC v1.1: design finalized after a three-perspective review (architecture,
   data model, security); all high findings folded in (design log D12).
