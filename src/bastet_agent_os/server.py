@@ -115,6 +115,16 @@ class UserEnabledIn(BaseModel):
     enabled: bool
 
 
+class ChannelIn(BaseModel):
+    kind: str = "telegram"
+    secret_ref: str
+    config: dict[str, Any] = {}
+
+
+class PairIn(BaseModel):
+    user_id: str | None = None
+
+
 def create_app(home: Home) -> FastAPI:
     home.ensure()
     db = Db(home.db_path)
@@ -127,9 +137,35 @@ def create_app(home: Home) -> FastAPI:
     orch = Orchestrator(db, home, prices, gateway_url, bus=bus)
     api_token = home.api_token()
 
-    app = FastAPI(title="Bastet Agent OS", version="0.0.1.dev0", docs_url=None, redoc_url=None)
+    channels: list = []
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        from .channels.telegram import TelegramChannel
+        tasks = []
+        for row in db.query("SELECT * FROM channels WHERE enabled=1 AND kind='telegram'"):
+            try:
+                bot_token = secrets_store.resolve(row["secret_ref"])
+            except secrets_store.SecretError as exc:
+                log.warning("channel %s: credential error (%s); not started", row["id"], exc)
+                continue
+            channel = TelegramChannel(db, orch, bus, row["id"], bot_token)
+            channels.append(channel)
+            tasks.append(asyncio.get_running_loop().create_task(channel.run()))
+            log.info("telegram channel %s started (long polling)", row["id"])
+        yield
+        for channel in channels:
+            channel.stop()
+        for task in tasks:
+            task.cancel()
+
+    app = FastAPI(title="Bastet Agent OS", version="0.0.1.dev0", docs_url=None,
+                  redoc_url=None, lifespan=lifespan)
     app.state.db = db
     app.state.orchestrator = orch
+    app.state.channels = channels
 
     # crash recovery (SPEC §5.1.1): runs left non-terminal by a previous
     # process cannot be re-attached in M1 — mark them orphaned, kill tokens
@@ -418,6 +454,44 @@ def create_app(home: Home) -> FastAPI:
         db.audit(auth.actor, "user.enabled" if e.enabled else "user.disabled",
                  "user", user_id, {})
         return {"id": user_id, "enabled": e.enabled}
+
+    # ---- channels (SPEC §5.7) ---------------------------------------------------
+
+    @app.post("/api/channels")
+    def create_channel(c: ChannelIn, auth: Auth = Depends(require_role("admin"))):
+        secrets_store.reject_secrets_in_config(c.config)
+        cid = new_id("chn")
+        db.write("INSERT INTO channels(id, kind, config_json, secret_ref, enabled) "
+                 "VALUES(?,?,?,?,1)", (cid, c.kind, json.dumps(c.config), c.secret_ref))
+        db.audit(auth.actor, "channel.create", "channel", cid, {"kind": c.kind})
+        return {"id": cid, "note": "restart `bastet serve` to start the channel"}
+
+    @app.get("/api/channels", dependencies=[Depends(require_role("admin"))])
+    def list_channels():
+        rows = [dict(r) for r in db.query("SELECT * FROM channels")]
+        for row in rows:
+            row["secret_ref"] = (row["secret_ref"] or "").split(":", 1)[0] + ":…"
+            config = json.loads(row.pop("config_json") or "{}")
+            row["paired_users"] = [b.get("name") for b in
+                                   config.get("bindings", {}).values()]
+        return rows
+
+    @app.post("/api/channels/{channel_id}/pair")
+    def pair_channel(channel_id: str, p: PairIn,
+                     auth: Auth = Depends(require_role("admin"))):
+        from .channels.telegram import issue_pairing_code
+        if db.one("SELECT id FROM channels WHERE id=?", (channel_id,)) is None:
+            raise HTTPException(status_code=404, detail="channel not found")
+        target_user, target_name = auth.user_id, auth.name
+        if p.user_id:
+            row = db.one("SELECT * FROM users WHERE id=? AND enabled=1", (p.user_id,))
+            if row is None:
+                raise HTTPException(status_code=404, detail="user not found")
+            target_user, target_name = row["id"], row["name"]
+        code = issue_pairing_code(db, target_user, target_name)
+        db.audit(auth.actor, "channel.pair_code", "channel", channel_id,
+                 {"for_user": target_user})
+        return {"code": code, "note": f"send `/pair {code}` to the bot within 15 minutes"}
 
     # ---- WebSocket event stream (SPEC §5.10) --------------------------------
     # Browser WebSocket clients can't set Authorization headers, so the first

@@ -34,6 +34,15 @@ All notable changes to Bastet Agent OS. Format follows
 - Role-based agent routing (`project_agent_roles`), human approval flow
   (`bastet approve` / `POST /api/jobs/{id}/approve`).
 
+### Added — M4 (in progress)
+- Telegram channel (SPEC §5.7): long polling only (no public webhook),
+  numeric-user-id allowlist bound to Bastet users via one-time pairing codes
+  (`bastet channel pair` → `/pair <code>`), group messages ignored, `/status`
+  `/jobs` `/approve`, inline Approve/Reject buttons referencing the concrete
+  job id, gate.pending / job.done / budget notifications pushed from the
+  event bus; approvals attributed to the bound user. Channels API/CLI
+  (admin-only), started via app lifespan.
+
 ### Added — M3
 - Multi-user auth (D13): per-user tokens (hash-only at rest, shown once),
   roles viewer < operator < admin, bootstrap file token stays the implicit

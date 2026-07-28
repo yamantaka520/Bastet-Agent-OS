@@ -236,6 +236,28 @@ def whoami():
     _print(_call("GET", "/api/me"))
 
 
+channel_app = typer.Typer(help="Chat channels (Telegram first; admin only).")
+app.add_typer(channel_app, name="channel")
+
+
+@channel_app.command("add")
+def channel_add(kind: str = typer.Argument("telegram"),
+                secret_ref: str = typer.Option(..., help="bot token ref, e.g. keyring:bastet/tg-bot")):
+    _print(_call("POST", "/api/channels", {"kind": kind, "secret_ref": secret_ref}))
+
+
+@channel_app.command("list")
+def channel_list():
+    _print(_call("GET", "/api/channels"))
+
+
+@channel_app.command("pair")
+def channel_pair(channel_id: str, user_id: str = typer.Option(None,
+                 help="bastet user to bind (default: you)")):
+    """Generate a one-time pairing code; send `/pair <code>` to the bot."""
+    _print(_call("POST", f"/api/channels/{channel_id}/pair", {"user_id": user_id}))
+
+
 @app.command()
 def approve(job_id: str,
             reject: bool = typer.Option(False, help="reject instead of approve"),
