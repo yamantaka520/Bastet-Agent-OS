@@ -100,6 +100,25 @@ def test_sse_accumulator_openai_final_chunk():
     assert (acc.usage.tokens_in, acc.usage.tokens_out) == (7, 3)
 
 
+def test_responses_usage_splits_cached_tokens():
+    from bastet_agent_os.usage_extract import responses_usage
+
+    u = responses_usage({"usage": {"input_tokens": 100, "output_tokens": 30,
+                                   "input_tokens_details": {"cached_tokens": 70}}})
+    assert (u.tokens_in, u.tokens_out, u.cache_read) == (30, 30, 70)
+
+
+def test_sse_accumulator_responses_stream():
+    acc = SseUsageAccumulator("openai-responses")
+    acc.feed_line('data: {"type":"response.output_text.delta","delta":"hi"}')
+    assert not acc.complete
+    acc.feed_line('data: {"type":"response.completed","response":{"model":"gpt-x",'
+                  '"usage":{"input_tokens":9,"output_tokens":4,'
+                  '"input_tokens_details":{"cached_tokens":5}}}}')
+    assert acc.complete and acc.model == "gpt-x"
+    assert (acc.usage.tokens_in, acc.usage.tokens_out, acc.usage.cache_read) == (4, 4, 5)
+
+
 def test_inject_stream_options_only_when_streaming():
     assert inject_stream_options({"stream": True})["stream_options"] == {"include_usage": True}
     assert "stream_options" not in inject_stream_options({"stream": False})

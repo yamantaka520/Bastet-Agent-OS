@@ -525,6 +525,12 @@ def create_app(home: Home) -> FastAPI:
             "SELECT request_id, kind, payload_json, status, created_at, answered_at "
             "FROM run_interactions WHERE run_id=? ORDER BY created_at", (run_id,))]
 
+    @app.post("/api/gc")
+    def gc(auth: Auth = Depends(require_role("admin"))):
+        removed = orch.gc_worktrees()
+        db.audit(auth.actor, "gc.worktrees", "server", "gc", {"removed": removed})
+        return {"worktrees_removed": removed}
+
     # ---- users (multi-user auth, SPEC D9 / M3) --------------------------------
 
     @app.get("/api/me")

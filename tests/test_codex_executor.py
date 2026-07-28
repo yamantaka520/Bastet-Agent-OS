@@ -100,7 +100,25 @@ async def test_review_uses_output_schema_verdict(fake_codex, tmp_path, monkeypat
     assert "--sandbox read-only" in args and "--output-schema" in args
 
 
-async def test_gateway_path_is_refused_for_now(tmp_path):
-    with pytest.raises(ValueError, match="Responses API"):
+async def test_gateway_path_wires_responses_provider(fake_codex, tmp_path):
+    set_events, log = fake_codex
+    set_events([
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}},
+        {"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}},
+    ])
+    result = await drive(spec(tmp_path, gateway_url="http://127.0.0.1:8890",
+                              run_token="brt_secret",
+                              llm={"flavor": "openai", "model": "gpt-5.1-codex"}))
+    assert result.status == "succeeded"
+    args = log.read_text()
+    assert 'model_providers.bastet.base_url="http://127.0.0.1:8890/v1"' in args
+    assert 'model_providers.bastet.wire_api="responses"' in args
+    assert 'model_provider="bastet"' in args
+    assert "brt_secret" not in args  # run token travels via env, never argv
+
+
+async def test_gateway_path_needs_openai_flavor(tmp_path):
+    with pytest.raises(ValueError, match="openai-flavor"):
         await CodexExecutor().start(spec(tmp_path, gateway_url="http://gw",
-                                         run_token="brt_x"))
+                                         run_token="brt_x",
+                                         llm={"flavor": "anthropic", "model": "x"}))

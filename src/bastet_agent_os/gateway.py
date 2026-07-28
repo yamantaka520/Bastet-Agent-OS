@@ -24,13 +24,16 @@ from .usage_extract import (
     anthropic_usage,
     inject_stream_options,
     openai_usage,
+    responses_usage,
 )
 
 log = logging.getLogger("bastet.gateway")
 
-FLAVOR_PATHS = {
-    "openai": "/v1/chat/completions",
-    "anthropic": "/v1/messages",
+# wire => (upstream path, resource api_flavor that can serve it)
+WIRES = {
+    "openai": ("/v1/chat/completions", "openai"),
+    "openai-responses": ("/v1/responses", "openai"),  # codex's wire API
+    "anthropic": ("/v1/messages", "anthropic"),
 }
 # Hop-by-hop / auth headers we never forward from the client.
 STRIP_REQUEST_HEADERS = {
@@ -91,7 +94,8 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
     router = APIRouter()
     client = httpx.AsyncClient(timeout=httpx.Timeout(600, connect=15), transport=upstream_transport)
 
-    async def proxy(request: Request, flavor: str) -> Response:
+    async def proxy(request: Request, wire: str) -> Response:
+        upstream_path, want_flavor = WIRES[wire]
         run = _auth(ctx, request)
         if run is None:
             return JSONResponse({"error": "invalid or expired run token"}, status_code=401)
@@ -105,9 +109,9 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
         )
         if resource is None or resource["kind"] != "llm":
             return JSONResponse({"error": "resource unavailable"}, status_code=403)
-        if resource["api_flavor"] != flavor:
+        if resource["api_flavor"] != want_flavor:
             return JSONResponse(
-                {"error": f"resource speaks {resource['api_flavor']}, not {flavor}"},
+                {"error": f"resource speaks {resource['api_flavor']}, not {want_flavor}"},
                 status_code=400,
             )
 
@@ -126,7 +130,7 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
         except json.JSONDecodeError:
             ctx.reservations.settle(grant)
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
-        if flavor == "openai":
+        if wire == "openai":
             body = inject_stream_options(body)
 
         try:
@@ -137,14 +141,14 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
         ctx.db.audit(f"run:{run['id']}", "secret.resolve", "resource", resource["id"],
                      {"ref_scheme": (resource["secret_ref"] or "").split(":", 1)[0]})
 
-        upstream_url = resource["endpoint"].rstrip("/") + FLAVOR_PATHS[flavor]
+        upstream_url = resource["endpoint"].rstrip("/") + upstream_path
         headers = {k: v for k, v in request.headers.items()
                    if k.lower() not in STRIP_REQUEST_HEADERS}
-        if flavor == "openai":
-            headers["Authorization"] = f"Bearer {api_key}"
-        else:
+        if wire == "anthropic":
             headers["x-api-key"] = api_key
             headers.setdefault("anthropic-version", "2023-06-01")
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         streaming = bool(body.get("stream"))
         req = client.build_request("POST", upstream_url, json=body, headers=headers)
@@ -159,7 +163,10 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
             try:
                 if resp.status_code == 200:
                     payload = resp.json()
-                    usage = openai_usage(payload) if flavor == "openai" else anthropic_usage(payload)
+                    extract = {"openai": openai_usage,
+                               "openai-responses": responses_usage,
+                               "anthropic": anthropic_usage}[wire]
+                    usage = extract(payload)
                     _record(ctx, run, resource, payload.get("model"), usage,
                             payload.get("id"), complete=True)
             finally:
@@ -169,7 +176,7 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
             return Response(resp.content, status_code=resp.status_code, headers=content_headers)
 
         async def stream_body():
-            acc = SseUsageAccumulator(flavor)
+            acc = SseUsageAccumulator(wire)
             buffer = ""
             try:
                 resp = await client.send(req, stream=True)
@@ -298,6 +305,10 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
     @router.post("/v1/chat/completions")
     async def openai_endpoint(request: Request):
         return await proxy(request, "openai")
+
+    @router.post("/v1/responses")
+    async def responses_endpoint(request: Request):
+        return await proxy(request, "openai-responses")
 
     @router.post("/v1/messages")
     async def anthropic_endpoint(request: Request):

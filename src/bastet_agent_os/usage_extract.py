@@ -25,6 +25,21 @@ def openai_usage(payload: dict) -> Usage:
     )
 
 
+def responses_usage(payload: dict) -> Usage:
+    """Usage from an OpenAI Responses API response object (codex's wire API).
+
+    Responses counts cached tokens INSIDE input_tokens (details block) and
+    reasoning tokens INSIDE output_tokens — no double counting here."""
+    u = payload.get("usage") or {}
+    cached = int((u.get("input_tokens_details") or {}).get("cached_tokens") or 0)
+    return Usage(
+        tokens_in=max(0, int(u.get("input_tokens") or 0) - cached),
+        tokens_out=int(u.get("output_tokens") or 0),
+        cache_read=cached,
+        cache_write=0,
+    )
+
+
 def anthropic_usage(payload: dict) -> Usage:
     """Usage from a non-stream Anthropic response body."""
     u = payload.get("usage") or {}
@@ -64,6 +79,8 @@ class SseUsageAccumulator:
             return
         if self.flavor == "openai":
             self._feed_openai(obj)
+        elif self.flavor == "openai-responses":
+            self._feed_responses(obj)
         else:
             self._feed_anthropic(obj)
 
@@ -72,6 +89,16 @@ class SseUsageAccumulator:
             self.model = obj["model"]
         if obj.get("usage"):
             self.usage = openai_usage(obj)
+            self.complete = True
+
+    def _feed_responses(self, obj: dict) -> None:
+        # Responses SSE: the final `response.completed` event carries the
+        # full response object, usage included
+        if obj.get("type") == "response.completed":
+            response = obj.get("response") or {}
+            if response.get("model"):
+                self.model = response["model"]
+            self.usage = responses_usage(response)
             self.complete = True
 
     def _feed_anthropic(self, obj: dict) -> None:

@@ -5,10 +5,11 @@
 cached/cache-write splits), failures as `turn.failed`.
 
 Accounting: current Codex only speaks the Responses API (`wire_api =
-"responses"`; chat completions was removed upstream in early 2026), and the
-Bastet gateway doesn't implement Responses yet — so codex runs use the
-DIRECT path (`reported` precision from turn.completed usage). Gateway-metered
-codex is blocked on a Responses passthrough (SPEC §8).
+"responses"`; chat completions was removed upstream in early 2026). The
+gateway proxies `/v1/responses`, so a gateway path is fully metered: we
+inject a model provider via `-c` overrides pointing at the gateway, with the
+run token travelling through an env var (never argv or a config file).
+Without a resource, codex uses its own auth (`reported` precision).
 
 Review runs: codex's read-only sandbox cannot write the verdict file, so the
 structured verdict travels via `--output-schema` instead — the CLI forces the
@@ -66,11 +67,9 @@ class CodexExecutor:
     capabilities = {"code", "review"}
 
     async def start(self, task: TaskSpec) -> CodexHandle:
-        if task.gateway_url:
-            raise ValueError(
-                "codex requires the Responses API, which the Bastet gateway does not "
-                "proxy yet — omit the resource to use codex's own auth (reported "
-                "precision)")
+        if task.gateway_url and (not task.llm or task.llm.get("flavor") != "openai"):
+            raise ValueError("codex's gateway path needs an openai-flavor resource "
+                             "(the gateway serves /v1/responses for it)")
         handle = CodexHandle(task=task)
         meta_dir = Path(task.workdir) / "._bastet"
         meta_dir.mkdir(parents=True, exist_ok=True)
@@ -92,12 +91,22 @@ class CodexExecutor:
             schema_path = meta_dir / "verdict-schema.json"
             schema_path.write_text(json.dumps(VERDICT_SCHEMA))
             cmd += ["--output-schema", str(schema_path)]
+        env = {**os.environ, **task.extra_env}
+        if task.gateway_url:
+            # route inference through the gateway: Responses wire, token via env
+            cmd += [
+                "-c", f'model_providers.bastet.base_url="{task.gateway_url}/v1"',
+                "-c", 'model_providers.bastet.env_key="BASTET_RUN_TOKEN"',
+                "-c", 'model_providers.bastet.wire_api="responses"',
+                "-c", 'model_provider="bastet"',
+            ]
+            env["BASTET_RUN_TOKEN"] = task.run_token or ""
         if task.llm and task.llm.get("model"):
             cmd += ["-m", task.llm["model"]]
         cmd.append(prompt)
 
         handle.process = await asyncio.create_subprocess_exec(
-            *cmd, cwd=task.workdir, env={**os.environ, **task.extra_env},
+            *cmd, cwd=task.workdir, env=env,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=(sys.platform != "win32"))
         return handle

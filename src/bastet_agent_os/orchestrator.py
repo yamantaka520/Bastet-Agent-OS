@@ -181,6 +181,7 @@ class Orchestrator:
                               (now(), job_id))
                 self.db.audit("orchestrator", "job.done", "job", job_id, {})
                 self._emit("job.done", job["project_id"], job_id=job_id)
+                self.cleanup_worktree(job_id)
                 return
             self.db.write("UPDATE jobs SET stage=?, updated_at=? WHERE id=?",
                           (stages[idx + 1].name, now(), job_id))
@@ -256,6 +257,7 @@ class Orchestrator:
         if idx + 1 >= len(stages):
             self.db.write("UPDATE jobs SET status='done', updated_at=? WHERE id=?",
                           (now(), job_id))
+            self.cleanup_worktree(job_id)
             return {"job_id": job_id, "status": "done"}
         self.db.write("UPDATE jobs SET stage=?, status='in_progress', updated_at=? WHERE id=?",
                       (names[idx + 1], now(), job_id))
@@ -455,6 +457,44 @@ class Orchestrator:
         self.db.write("UPDATE jobs SET worktree_path=?, updated_at=? WHERE id=?",
                       (wt_path, now(), job["id"]))
         return wt_path
+
+    # -- worktree lifecycle (SPEC §5.4.3) ----------------------------------------------
+
+    def cleanup_worktree(self, job_id: str) -> bool:
+        """Remove a terminal job's worktree. The bastet/<job> branch and the
+        diff artifact survive — only the checkout directory goes. Projects can
+        opt out with config_json {"keep_worktrees": true}."""
+        job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job is None or not job["worktree_path"]:
+            return False
+        project = self.db.one("SELECT * FROM projects WHERE id=?", (job["project_id"],))
+        if project is None:
+            return False
+        if json.loads(project["config_json"] or "{}").get("keep_worktrees"):
+            return False
+        proc = subprocess.run(
+            ["git", "-C", project["repo_path"], "worktree", "remove", "--force",
+             job["worktree_path"]],
+            capture_output=True, text=True)
+        if proc.returncode != 0:
+            log.warning("worktree remove failed for %s: %s", job_id,
+                        proc.stderr.strip()[:200])
+            return False
+        self.db.write("UPDATE jobs SET worktree_path=NULL, updated_at=? WHERE id=?",
+                      (now(), job_id))
+        self.db.audit("orchestrator", "worktree.removed", "job", job_id,
+                      {"path": job["worktree_path"]})
+        return True
+
+    def gc_worktrees(self) -> int:
+        """Sweep worktrees left behind by terminal jobs (crashes, old versions)."""
+        removed = 0
+        for row in self.db.query(
+                "SELECT id FROM jobs WHERE status IN ('done','cancelled') "
+                "AND worktree_path IS NOT NULL"):
+            if self.cleanup_worktree(row["id"]):
+                removed += 1
+        return removed
 
     # -- persistence helpers -----------------------------------------------------------
 

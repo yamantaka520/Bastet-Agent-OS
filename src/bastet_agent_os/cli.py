@@ -290,6 +290,12 @@ def audit(limit: int = 50):
     _print(_call("GET", f"/api/audit?limit={limit}"))
 
 
+@app.command()
+def gc():
+    """Sweep worktrees left behind by finished jobs (branches survive)."""
+    _print(_call("POST", "/api/gc"))
+
+
 @app.command("pricing-update")
 def pricing_update():
     """Refresh the local model price table from the public LiteLLM JSON."""
