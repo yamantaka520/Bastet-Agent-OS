@@ -550,8 +550,9 @@ def create_app(home: Home) -> FastAPI:
     login_manager = LoginSessionManager()
 
     @app.post("/api/login-sessions")
-    def start_login_session(req: LoginStartIn,
-                            auth: Auth = Depends(require_role("operator"))):
+    async def start_login_session(req: LoginStartIn,
+                                  auth: Auth = Depends(require_role("operator"))):
+        # async def: the PTY reader registers on the main event loop
         home_dir = None
         if req.account_id:
             account = db.one("SELECT * FROM executor_accounts WHERE id=?",
