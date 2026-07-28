@@ -74,10 +74,7 @@ def login_command(kind: str, home_dir: str | None) -> tuple[dict[str, str], list
     if kind == "grok":
         return env, ["grok", "login", "--device-auth"]
     if kind == "agy":
-        # TERM=dumb coaxes agy out of its full-screen TUI (which stalls on
-        # terminal-capability queries our web bridge can't answer) into the
-        # plain URL + paste-back login flow it uses over SSH
-        return {"TERM": "dumb"}, ["agy"]
+        return {}, ["agy"]  # full TUI — the wizard is a real terminal (xterm.js)
     if kind == "hermes":
         return env, ["hermes", "setup"]
     return None

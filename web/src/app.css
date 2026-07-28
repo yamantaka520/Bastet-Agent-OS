@@ -105,3 +105,4 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
             font: .78rem/1.45 ui-monospace, monospace; height: 20rem; overflow-y: auto;
             white-space: pre-wrap; overflow-wrap: anywhere; }
 .terminal a { color: #8ab4ff; }
+.xterm-host { background: #0c0f13; border-radius: 8px; padding: .4rem; }
