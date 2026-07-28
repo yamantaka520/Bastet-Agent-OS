@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import signal
+import subprocess
 import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -63,8 +64,25 @@ class ClaudeCodeExecutor:
             "--allowedTools", ",".join(tools),
         ]
         env = {**os.environ, **task.extra_env}
-        if task.gateway_url:
-            env["ANTHROPIC_BASE_URL"] = task.gateway_url
+        gateway_url = task.gateway_url
+        if task.isolation == "container":
+            from .. import container
+
+            container.ensure_available()  # fail loudly, never downgrade
+            gateway_url = container.rewrite_gateway_url(gateway_url) if gateway_url else None
+            git_common = subprocess.run(
+                ["git", "-C", task.workdir, "rev-parse", "--path-format=absolute",
+                 "--git-common-dir"], capture_output=True, text=True)
+            cmd = container.wrap_command(cmd, container.ContainerSpec(
+                workdir=task.workdir,
+                image=task.container_image or container.DEFAULT_IMAGE,
+                git_common_dir=(git_common.stdout.strip()
+                                if git_common.returncode == 0 else None),
+                env={"ANTHROPIC_BASE_URL": gateway_url or "",
+                     "ANTHROPIC_AUTH_TOKEN": task.run_token or ""},
+            ))
+        if gateway_url:
+            env["ANTHROPIC_BASE_URL"] = gateway_url
             env["ANTHROPIC_AUTH_TOKEN"] = task.run_token or ""
             env.pop("ANTHROPIC_API_KEY", None)
         handle.process = await asyncio.create_subprocess_exec(

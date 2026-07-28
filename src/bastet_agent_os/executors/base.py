@@ -25,6 +25,9 @@ class TaskSpec:
     context_text: str = ""               # assembled context pack (§5.6)
     gateway_url: str | None = None       # None => subscription/direct path ("reported")
     run_token: str | None = None
+    llm: dict | None = None              # {"flavor": "anthropic|openai", "model": ...} for in-process executors
+    isolation: str = "worktree"          # worktree|container (SPEC §5.4.3)
+    container_image: str | None = None   # image for isolation=container
     extra_env: dict[str, str] = field(default_factory=dict)
 
 

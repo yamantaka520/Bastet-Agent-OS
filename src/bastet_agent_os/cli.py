@@ -317,6 +317,13 @@ def doctor():
         else:
             bad(f"{tool} not found on PATH — needed for {why}")
 
+    from .container import docker_available
+    if docker_available():
+        ok("docker daemon running (container isolation available)")
+    else:
+        typer.echo("  · docker unavailable — isolation=container runs will fail loudly "
+                   "(worktree isolation unaffected)")
+
     prices = home.root / "model_prices.json"
     if prices.exists():
         ok("local model price table present")

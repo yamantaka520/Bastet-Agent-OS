@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import run_tokens
 from .config import Home
+from .context_engine import build_context
 from .db import Db, new_id, now
 from .executors.base import RunResult, TaskSpec, get_executor
 from .governance import GrantView, QuotaError, dispatch_check, resolve_grant
@@ -86,7 +87,12 @@ class Orchestrator:
             grant = resolve_grant(self.db, req.resource_id, req.project_id, req.agent_id)
             if grant is None:
                 raise QuotaError(f"no grant covers resource {req.resource_id} for this run")
-            dispatch_check(self.db, grant)
+            try:
+                dispatch_check(self.db, grant)
+            except QuotaError as exc:
+                if exc.policy != "queue":
+                    raise
+                # queue policy: accept the job; the stage runner waits its turn
 
         if req.template_id:
             row = self.db.one("SELECT * FROM workflow_templates WHERE id=?", (req.template_id,))
@@ -242,11 +248,13 @@ class Orchestrator:
                          attempt: int) -> tuple[RunResult, str]:
         agent = self._agent_for_stage(job, stage)
         grant: GrantView | None = None
+        resource = None
         if job["resource_id"]:
+            resource = self.db.one("SELECT * FROM resources WHERE id=?", (job["resource_id"],))
             grant = resolve_grant(self.db, job["resource_id"], job["project_id"], agent["id"])
             if grant is None:
                 raise QuotaError(f"no grant covers resource {job['resource_id']}")
-            dispatch_check(self.db, grant)
+            await self._await_grant(grant, timeout_s=req.timeout_s)
 
         run_id = new_id("run")
         self.db.write(
@@ -264,6 +272,16 @@ class Orchestrator:
                           (workdir, now(), run_id))
             self._emit("run.started", job["project_id"], job_id=job["id"], run_id=run_id,
                        stage=stage.name, agent_id=agent["id"])
+            context_text, report = build_context(self.db, job, stage.name,
+                                                 skip=frozenset({"spec"}))
+            self.db.audit("orchestrator", "context.assembled", "run", run_id,
+                          report.to_dict())
+            llm = None
+            if resource is not None:
+                agent_cfg = json.loads(agent["config_json"] or "{}")
+                routing = json.loads(resource["routing_json"] or "{}")
+                llm = {"flavor": resource["api_flavor"],
+                       "model": agent_cfg.get("model") or routing.get("default_model")}
             spec = TaskSpec(
                 run_id=run_id,
                 prompt=self._stage_prompt(job, stage),
@@ -271,8 +289,15 @@ class Orchestrator:
                 timeout_s=req.timeout_s,
                 allowed_tools=req.allowed_tools or ["Read", "Edit", "Write", "Bash"],
                 read_only=stage.read_only,
+                context_text=context_text,
                 gateway_url=self.gateway_url if job["resource_id"] else None,
                 run_token=token if job["resource_id"] else None,
+                llm=llm,
+                isolation=stage.isolation,
+                container_image=json.loads(
+                    self.db.one("SELECT config_json FROM projects WHERE id=?",
+                                (job["project_id"],))["config_json"] or "{}"
+                ).get("container_image"),
             )
             executor = get_executor(agent["executor_type"])
             handle = await executor.start(spec)
@@ -303,19 +328,32 @@ class Orchestrator:
             self._grant_slots[grant.id] = asyncio.Semaphore(grant.max_concurrency or 1_000)
         return self._grant_slots[grant.id]
 
+    # polling interval for queued grants; tests shrink this
+    queue_poll_s: float = 5.0
+
+    async def _await_grant(self, grant: GrantView, timeout_s: int) -> None:
+        """Phase-1 check with queue semantics: `queue` waits FIFO-ish for
+        budget/concurrency to free up; `block`/`degrade` raise immediately."""
+        waited = 0.0
+        while True:
+            try:
+                dispatch_check(self.db, grant)
+                return
+            except QuotaError as exc:
+                if exc.policy != "queue":
+                    raise
+                if waited >= timeout_s:
+                    raise QuotaError(f"grant {grant.id}: queued past timeout "
+                                     f"({timeout_s}s)", policy="queue") from exc
+                await asyncio.sleep(self.queue_poll_s)
+                waited += self.queue_poll_s
+
     # -- prompt assembly (task-layer context, SPEC §5.6 minimal) --------------------
 
     def _stage_prompt(self, job, stage: StageDef) -> str:
+        # pipeline history / deps / memory travel via TaskSpec.context_text
+        # (context engine, §5.6); the prompt carries only the spec + scaffold
         parts = [f"# Task: {job['title']}", job["spec_md"]]
-        history = self.db.query(
-            "SELECT r.stage, r.artifacts_json, g.verdict, g.detail_md FROM runs r "
-            "LEFT JOIN gate_results g ON g.run_id = r.id "
-            "WHERE r.job_id=? AND r.stage != ? AND r.status='succeeded' "
-            "ORDER BY r.finished_at", (job["id"], stage.name))
-        feedback = [f"- stage {h['stage']}: gate {h['verdict'] or 'n/a'} {h['detail_md'] or ''}"
-                    for h in history]
-        if feedback:
-            parts.append("## Pipeline history\n" + "\n".join(feedback[-5:]))
         if stage.gate == "agent-review":
             parts.append(REVIEW_INSTRUCTIONS)
             diff = self._job_diff(job)

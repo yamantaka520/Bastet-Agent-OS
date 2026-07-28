@@ -34,6 +34,22 @@ All notable changes to Bastet Agent OS. Format follows
 - Role-based agent routing (`project_agent_roles`), human approval flow
   (`bastet approve` / `POST /api/jobs/{id}/approve`).
 
+### Added — M3 (in progress)
+- `bastet-lite` built-in executor: gateway-only tool loop (anthropic + openai
+  flavors) with workdir-jailed file tools, allow-listed shell, AMOS memory
+  tools, and a native `submit_verdict` tool — the structured gate verdict
+  without the file side-channel. In-loop transcript budget elides old tool
+  output instead of overflowing.
+- Dynamic context engine (SPEC §5.6 outer allocator): budgeted buckets for
+  job spec, pipeline history, dependency conclusions, and the AMOS context
+  pack; every include/exclude decision is audited (`context.assembled`).
+- Queue policy: `on_exceed: queue` now waits for budget/concurrency instead
+  of failing; `block` keeps failing fast.
+- Container isolation plumbing (SPEC §5.4.3): docker-run wrapper with
+  read-only main-.git mount, non-root user, no-new-privileges, host-gateway
+  alias; missing Docker fails loudly, never a silent downgrade. `bastet
+  doctor` reports daemon availability.
+
 ### Added — M2 UI & events
 - Typed event bus (SPEC §5.10) + `/api/ws` WebSocket stream (token in the
   first message — never in the URL; Host/Origin validated like HTTP).

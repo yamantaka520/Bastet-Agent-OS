@@ -1,6 +1,10 @@
 import pytest
+from fake_executor import SCRIPT  # registers the "fake" executor builtin
 
+from bastet_agent_os.config import Home
 from bastet_agent_os.db import Db, now
+from bastet_agent_os.orchestrator import Orchestrator
+from bastet_agent_os.pricing import PriceBook
 
 
 @pytest.fixture
@@ -33,3 +37,15 @@ def seeded(db):
          "VALUES('run1','job1','work','ag1','claude-code','res1','running')", ()),
     ])
     return db
+
+
+@pytest.fixture
+def orch(seeded, tmp_path):
+    """Orchestrator wired to the seeded DB + the scripted fake executor."""
+    SCRIPT.clear()
+    home = Home(tmp_path / "home")
+    home.ensure()
+    seeded.write("INSERT INTO agents(id, amos_agent_id, name, executor_type, created_at, "
+                 "updated_at) VALUES('fakebot','fakebot','Fake','fake',datetime('now'),"
+                 "datetime('now'))")
+    return Orchestrator(seeded, home, PriceBook(), "http://127.0.0.1:0")
