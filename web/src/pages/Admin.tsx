@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react";
-import { post } from "../api";
+import { del, post } from "../api";
 import { DataTable, InlineForm, Section, useList } from "../ui";
+
+const CHANNEL_STATUS: Record<string, string> = {
+  polling: "🟢 輪詢中",
+  credential_error: "🔴 憑證錯誤",
+  restart_needed: "🟡 待重啟",
+  disabled: "⚪ 已停用",
+};
 
 type User = { id: string; name: string; role: string; enabled: number;
               created_at: string; last_used_at: string | null };
 type Channel = { id: string; kind: string; name: string | null; secret_ref: string;
-                 enabled: number; paired_users: string[] };
+                 enabled: number; paired_users: string[]; status: string };
 
 export default function AdminPage(props: { refreshKey: number }) {
   const [users, reloadUsers] = useList<User>("/api/users", props.refreshKey);
@@ -63,8 +70,8 @@ export default function AdminPage(props: { refreshKey: number }) {
         <InlineForm
           fields={[{ name: "name", placeholder: "名稱（例：值班通知）" },
                    { name: "secret_ref",
-                     placeholder: "bot token ref, e.g. keyring:bastet/tg-bot",
-                     width: "22rem" }]}
+                     placeholder: "bot token（可直接貼原文，會自動安全存放）",
+                     width: "24rem" }]}
           submit="add telegram"
           onSubmit={async (v) => {
             await post("/api/channels", { kind: "telegram", name: v.name,
@@ -72,12 +79,22 @@ export default function AdminPage(props: { refreshKey: number }) {
             reloadChannels();
           }} />
         <DataTable
-          head={["名稱", "id", "kind", "secret", "enabled", "已配對", ""]}
+          head={["名稱", "kind", "secret", "狀態", "已配對", ""]}
           rows={channels.map((c) => [
-            c.name ?? c.kind, c.id, c.kind, c.secret_ref, c.enabled ? "✅" : "⛔",
+            c.name ?? c.kind, c.kind, c.secret_ref,
+            CHANNEL_STATUS[c.status] ?? c.status,
             c.paired_users.join(", ") || "—",
-            <button key={c.id} className="ghost"
-                    onClick={() => startPair(c)}>pair…</button>,
+            <span key={c.id} className="row-ops">
+              <button className="ghost" onClick={() => startPair(c)}>pair…</button>
+              <button className="ghost" onClick={async () => {
+                await post(`/api/channels/${c.id}/enabled`, { enabled: !c.enabled });
+                reloadChannels();
+              }}>{c.enabled ? "停用" : "啟用"}</button>
+              <button className="ghost danger-text" onClick={async () => {
+                await del(`/api/channels/${c.id}`);
+                reloadChannels();
+              }}>刪除</button>
+            </span>,
           ])} />
         {pairing && !pairDone && (
           <p className="notice">⏳ 對 bot 傳：<code>/pair {pairing.code}</code>

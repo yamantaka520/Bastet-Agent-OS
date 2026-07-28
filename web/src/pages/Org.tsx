@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, post } from "../api";
+import { api, del, post, put } from "../api";
 import { DataTable, InlineForm, Section, useList } from "../ui";
 
 type Project = { id: string; team_id: string; repo_path: string | null };
-type Agent = { id: string; name: string; executor_type: string; enabled: number };
+type Agent = { id: string; name: string; executor_type: string; enabled: number;
+               account_id?: string | null };
 type OrgView = {
   amos: boolean;
   local_only: string[];
@@ -110,6 +111,50 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
   const accountName = (id: string | null) =>
     accounts.find((a) => a.id === id)?.name ?? "—";
 
+  const [editing, setEditing] = useState<string | null>(null);
+
+  const saveEdit = async (agentId: string) => {
+    setError("");
+    try {
+      await put(`/api/agents/${agentId}`, {
+        name: (document.getElementById(`edit-name-${agentId}`) as HTMLInputElement).value,
+        executor_type: (document.getElementById(`edit-exec-${agentId}`) as HTMLSelectElement).value,
+        account_id: (document.getElementById(`edit-acct-${agentId}`) as HTMLSelectElement).value,
+      });
+      setEditing(null);
+      reloadAgents();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
+  const toggleAgent = async (a: Agent) => {
+    await put(`/api/agents/${a.id}`, { enabled: a.enabled ? 0 : 1 });
+    reloadAgents();
+  };
+
+  const removeAgent = async (agentId: string) => {
+    setError("");
+    try {
+      await del(`/api/agents/${agentId}`);
+      reloadAgents();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
+  const renameAccount = async (a: Account) => {
+    const name = window.prompt("新名稱", a.name);
+    if (!name) return;
+    await put(`/api/executor-accounts/${a.id}`, { name });
+    loadAccounts();
+  };
+
+  const removeAccount = async (accountId: string) => {
+    setError("");
+    try {
+      const r = await del<{ note: string }>(`/api/executor-accounts/${accountId}`);
+      window.alert(r.note);
+      loadAccounts();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
   return (
     <Section title="Agents (executor bindings)">
       {canOperate && (
@@ -159,18 +204,52 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
           {error && <p className="error">{error}</p>}
         </>
       )}
-      <DataTable head={["id", "name", "executor", "account", "enabled"]}
-                 rows={agents.map((a) => [a.id, a.name, a.executor_type,
-                                          accountName((a as Agent & {account_id?: string})
-                                                      .account_id ?? null),
-                                          a.enabled ? "✅" : "⛔"])} />
+      <DataTable head={["id", "name", "executor", "account", "enabled", ""]}
+                 rows={agents.map((a) => (
+        editing === a.id ? [
+          a.id,
+          <input key="n" defaultValue={a.name} id={`edit-name-${a.id}`} />,
+          <select key="e" defaultValue={a.executor_type} id={`edit-exec-${a.id}`}>
+            {executors.map((e) => <option key={e.kind} value={e.kind}>{e.kind}</option>)}
+          </select>,
+          <select key="a" defaultValue={a.account_id ?? ""} id={`edit-acct-${a.id}`}>
+            <option value="">全域登入</option>
+            {accounts.filter((x) => x.executor_type === a.executor_type)
+                     .map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>,
+          a.enabled ? "✅" : "⛔",
+          <span key="ops" className="row-ops">
+            <button onClick={() => saveEdit(a.id)}>存</button>
+            <button className="ghost" onClick={() => setEditing(null)}>✕</button>
+          </span>,
+        ] : [
+          a.id, a.name, a.executor_type, accountName(a.account_id ?? null),
+          a.enabled ? "✅" : "⛔",
+          canOperate ? (
+            <span key="ops" className="row-ops">
+              <button className="ghost" onClick={() => setEditing(a.id)}>編輯</button>
+              <button className="ghost" onClick={() => toggleAgent(a)}>
+                {a.enabled ? "停用" : "啟用"}</button>
+              <button className="ghost danger-text"
+                      onClick={() => removeAgent(a.id)}>刪除</button>
+            </span>
+          ) : null,
+        ]))} />
       {accounts.length > 0 && (
         <>
           <h3>Executor 帳號</h3>
-          <DataTable head={["name", "executor", "status", "登入指令"]}
+          <DataTable head={["name", "executor", "status", "登入指令", ""]}
                      rows={accounts.map((a) => [a.name, a.executor_type, a.status,
                                                 <code key={a.id} className="detail">
-                                                  {a.login_instruction}</code>])} />
+                                                  {a.login_instruction}</code>,
+                       canOperate ? (
+                         <span key="ops" className="row-ops">
+                           <button className="ghost" onClick={() => renameAccount(a)}>
+                             改名</button>
+                           <button className="ghost danger-text"
+                                   onClick={() => removeAccount(a.id)}>刪除</button>
+                         </span>
+                       ) : null])} />
         </>
       )}
     </Section>

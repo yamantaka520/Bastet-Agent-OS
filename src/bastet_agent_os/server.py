@@ -96,6 +96,17 @@ class AccountIn(BaseModel):
     name: str
 
 
+class AgentUpdateIn(BaseModel):
+    name: str | None = None
+    executor_type: str | None = None
+    account_id: str | None = None
+    enabled: int | None = None
+
+
+class RenameIn(BaseModel):
+    name: str
+
+
 class ResourceIn(BaseModel):
     name: str
     kind: str = "llm"
@@ -372,6 +383,38 @@ def create_app(home: Home) -> FastAPI:
     def list_agents():
         return [dict(r) for r in db.query("SELECT * FROM agents ORDER BY created_at")]
 
+    @app.put("/api/agents/{agent_id}")
+    def update_agent(agent_id: str, a: AgentUpdateIn,
+                     auth: Auth = Depends(require_role("operator"))):
+        row = db.one("SELECT * FROM agents WHERE id=?", (agent_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="agent not found")
+        fields = {k: v for k, v in a.model_dump().items() if v is not None}
+        if fields.get("account_id") == "":
+            fields["account_id"] = None  # "" clears the binding (global login)
+        if not fields:
+            return dict(row)
+        sets = ", ".join(f"{k}=?" for k in fields)
+        db.write(f"UPDATE agents SET {sets}, updated_at=? WHERE id=?",
+                 (*fields.values(), now(), agent_id))
+        db.audit(auth.actor, "agent.update", "agent", agent_id, fields)
+        return dict(db.one("SELECT * FROM agents WHERE id=?", (agent_id,)))
+
+    @app.delete("/api/agents/{agent_id}")
+    def delete_agent(agent_id: str, auth: Auth = Depends(require_role("operator"))):
+        runs = db.one("SELECT COUNT(*) AS n FROM runs WHERE agent_id=?", (agent_id,))
+        if runs["n"] > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=f"agent has {runs['n']} runs of history — disable it instead "
+                       "(PUT enabled=0) to keep the audit trail intact")
+        db.write("DELETE FROM project_agent_roles WHERE agent_id=?", (agent_id,))
+        cur = db.write("DELETE FROM agents WHERE id=?", (agent_id,))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail="agent not found")
+        db.audit(auth.actor, "agent.delete", "agent", agent_id, {})
+        return {"deleted": agent_id}
+
     # ---- executors & accounts (multi-login per executor) -----------------------
 
     from .executors import accounts as accounts_mod
@@ -411,6 +454,34 @@ def create_app(home: Home) -> FastAPI:
                                                                     home_dir),
                 "note": "在你自己的終端執行上面的指令完成登入（OAuth 需要瀏覽器）"}
 
+    @app.put("/api/executor-accounts/{account_id}")
+    def rename_executor_account(account_id: str, r: RenameIn,
+                                auth: Auth = Depends(require_role("operator"))):
+        cur = db.write("UPDATE executor_accounts SET name=? WHERE id=?",
+                       (r.name, account_id))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail="account not found")
+        db.audit(auth.actor, "account.rename", "account", account_id, {"name": r.name})
+        return {"id": account_id, "name": r.name}
+
+    @app.delete("/api/executor-accounts/{account_id}")
+    def delete_executor_account(account_id: str,
+                                auth: Auth = Depends(require_role("operator"))):
+        used_by = [r["id"] for r in db.query(
+            "SELECT id FROM agents WHERE account_id=?", (account_id,))]
+        if used_by:
+            raise HTTPException(status_code=409,
+                                detail=f"account is bound to agents: {used_by} — "
+                                       "unbind or delete them first")
+        row = db.one("SELECT * FROM executor_accounts WHERE id=?", (account_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="account not found")
+        db.write("DELETE FROM executor_accounts WHERE id=?", (account_id,))
+        db.audit(auth.actor, "account.delete", "account", account_id, {})
+        return {"deleted": account_id,
+                "note": f"profile 目錄保留（可能含登入憑證）：{row['home_dir']} — "
+                        "確認不需要後自行刪除"}
+
     # ---- AMOS memory view -------------------------------------------------------
 
     @app.get("/api/memory/search", dependencies=[Depends(require_role("viewer"))])
@@ -435,10 +506,11 @@ def create_app(home: Home) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         rid = new_id("res")
         ts = now()
+        secret_ref = secrets_store.ensure_ref(r.secret_ref or "", home.root, rid) or None
         db.write(
             "INSERT INTO resources(id, kind, name, endpoint, api_flavor, secret_ref, "
             "config_json, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-            (rid, r.kind, r.name, r.endpoint, r.api_flavor, r.secret_ref,
+            (rid, r.kind, r.name, r.endpoint, r.api_flavor, secret_ref,
              json.dumps(r.config), ts, ts),
         )
         db.audit(auth.actor, "resource.create", "resource", rid,
@@ -664,22 +736,54 @@ def create_app(home: Home) -> FastAPI:
     def create_channel(c: ChannelIn, auth: Auth = Depends(require_role("admin"))):
         secrets_store.reject_secrets_in_config(c.config)
         cid = new_id("chn")
+        # raw tokens pasted into the ref field get secured into <home>/secrets
+        secret_ref = secrets_store.ensure_ref(c.secret_ref, home.root, cid)
         db.write("INSERT INTO channels(id, kind, name, config_json, secret_ref, enabled) "
                  "VALUES(?,?,?,?,?,1)",
-                 (cid, c.kind, c.name or c.kind, json.dumps(c.config), c.secret_ref))
+                 (cid, c.kind, c.name or c.kind, json.dumps(c.config), secret_ref))
         db.audit(auth.actor, "channel.create", "channel", cid,
-                 {"kind": c.kind, "name": c.name})
+                 {"kind": c.kind, "name": c.name,
+                  "secret_scheme": secret_ref.split(":", 1)[0]})
         return {"id": cid, "note": "restart `bastet serve` to start the channel"}
 
     @app.get("/api/channels", dependencies=[Depends(require_role("admin"))])
     def list_channels():
         rows = [dict(r) for r in db.query("SELECT * FROM channels")]
+        running = {ch.channel_id for ch in app.state.channels}
         for row in rows:
+            try:
+                secrets_store.resolve(row["secret_ref"])
+                credential = "ok"
+            except secrets_store.SecretError:
+                credential = "error"
             row["secret_ref"] = (row["secret_ref"] or "").split(":", 1)[0] + ":…"
             config = json.loads(row.pop("config_json") or "{}")
             row["paired_users"] = [b.get("name") for b in
                                    config.get("bindings", {}).values()]
+            row["status"] = ("polling" if row["id"] in running
+                             else "credential_error" if credential == "error"
+                             else "restart_needed" if row["enabled"] else "disabled")
         return rows
+
+    @app.post("/api/channels/{channel_id}/enabled")
+    def set_channel_enabled(channel_id: str, e: UserEnabledIn,
+                            auth: Auth = Depends(require_role("admin"))):
+        cur = db.write("UPDATE channels SET enabled=? WHERE id=?",
+                       (1 if e.enabled else 0, channel_id))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail="channel not found")
+        db.audit(auth.actor, "channel.enabled" if e.enabled else "channel.disabled",
+                 "channel", channel_id, {})
+        return {"id": channel_id, "enabled": e.enabled,
+                "note": "重啟 bastet serve 生效"}
+
+    @app.delete("/api/channels/{channel_id}")
+    def delete_channel(channel_id: str, auth: Auth = Depends(require_role("admin"))):
+        cur = db.write("DELETE FROM channels WHERE id=?", (channel_id,))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail="channel not found")
+        db.audit(auth.actor, "channel.delete", "channel", channel_id, {})
+        return {"deleted": channel_id, "note": "重啟 bastet serve 停止輪詢"}
 
     @app.post("/api/channels/{channel_id}/pair")
     def pair_channel(channel_id: str, p: PairIn,

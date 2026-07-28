@@ -53,6 +53,31 @@ def store_keyring(service: str, name: str, value: str) -> str:
     return f"keyring:{service}/{name}"
 
 
+KNOWN_SCHEMES = ("env:", "file:", "keyring:")
+
+
+def ensure_ref(value: str, home_root, hint: str) -> str:
+    """Accept either a proper secret ref or a RAW secret value.
+
+    People paste tokens straight into ref fields; failing silently at
+    channel/resource startup is worse than securing the value for them:
+    raw input lands in <home>/secrets/<hint> (0600) and a file: ref is
+    returned. Real refs pass through untouched."""
+    import secrets as _secrets
+    from pathlib import Path
+
+    value = (value or "").strip()
+    if not value or value.startswith(KNOWN_SCHEMES):
+        return value
+    secrets_dir = Path(home_root) / "secrets"
+    secrets_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(secrets_dir, 0o700)
+    path = secrets_dir / f"{hint}-{_secrets.token_hex(4)}"
+    path.write_text(value)
+    os.chmod(path, 0o600)
+    return f"file:{path}"
+
+
 def mask(value: str) -> str:
     """Mask a secret for logs/errors: never echo more than a hint."""
     if len(value) <= 8:

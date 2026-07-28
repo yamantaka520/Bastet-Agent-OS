@@ -98,3 +98,5 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
 .gate-detail { color: var(--muted); font-size: .8rem; white-space: pre-wrap; }
 .memory-hit { border: 1px solid var(--line); border-radius: 8px; padding: .5rem .7rem;
               margin: .4rem 0; background: var(--bg); }
+.row-ops { display: inline-flex; gap: .2rem; white-space: nowrap; }
+.danger-text { color: var(--danger); }
