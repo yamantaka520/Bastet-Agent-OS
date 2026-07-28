@@ -70,6 +70,15 @@ if "$VENV/bin/pip" install -q --upgrade "$REPO" 'agent-memory-os[full]' \
      claude-agent-sdk keyring; then
   ln -sf "$VENV/bin/bastet" "$BIN_DIR/bastet"
   ln -sf "$VENV/bin/agent-memory" "$BIN_DIR/agent-memory" 2>/dev/null || true
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) ;;
+    *)  # make sure ~/.local/bin is on PATH for future shells
+        for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+          [ -f "$rc" ] && ! grep -q '\.local/bin' "$rc" \
+            && printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc"
+        done
+        skip "已把 ~/.local/bin 加入 PATH（重開 shell 或 source ~/.bashrc 生效）" ;;
+  esac
   ok "bastet $("$VENV/bin/bastet" --help >/dev/null 2>&1 && echo ok) + agent-memory-os $("$VENV/bin/pip" show agent-memory-os 2>/dev/null | awk '/^Version/{print $2}')"
 else
   fail "Bastet/AMOS pip 安裝失敗"; exit 1

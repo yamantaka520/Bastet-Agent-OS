@@ -76,8 +76,21 @@ Write-Output 'installed'
 """
 
 
+def _systemd_env() -> dict:
+    """systemctl --user needs the session bus; SSH/su shells often lack the
+    env vars even though the bus exists — reconstruct them from the uid."""
+    import os
+
+    env = dict(os.environ)
+    env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS",
+                   f"unix:path={env['XDG_RUNTIME_DIR']}/bus")
+    return env
+
+
 def _run(cmd: list[str]) -> tuple[bool, str]:
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    env = _systemd_env() if cmd and cmd[0] in ("systemctl", "loginctl") else None
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
     output = (proc.stdout + proc.stderr).strip()
     return proc.returncode == 0, output
 
