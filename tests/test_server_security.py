@@ -22,6 +22,14 @@ def test_bad_host_is_rejected(client):
     assert resp.status_code == 403  # DNS-rebinding defence
 
 
+def test_docker_internal_host_is_allowed(client):
+    # container runs reach the gateway with Host: host.docker.internal
+    # (SPEC §5.4.3); ".internal" is ICANN-reserved so this survives the
+    # DNS-rebinding threat model
+    resp = client.get("/v1/health", headers={"Host": "host.docker.internal:8890"})
+    assert resp.status_code == 200
+
+
 def test_bad_origin_is_rejected(client):
     resp = client.get("/api/projects", headers={"Origin": "https://evil.example.com",
                                                 "Authorization": f"Bearer {client.token}"})

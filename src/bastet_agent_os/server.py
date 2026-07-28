@@ -29,7 +29,10 @@ from .pricing import PriceBook
 
 log = logging.getLogger("bastet.server")
 
-ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+# host.docker.internal lets container runs reach the gateway (SPEC §5.4.3);
+# it is safe against DNS rebinding — ".internal" is ICANN-reserved, so no
+# attacker-controlled public domain can present that Host header.
+ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "host.docker.internal"}
 
 
 def _host_ok(value: str) -> bool:
