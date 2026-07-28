@@ -12,6 +12,8 @@
 #   --minimal            Bastet + AMOS only, skip executor CLIs
 #   --executors "a,b"    only these executors (claude,codex,grok,agy,hermes)
 #   --upgrade            re-run installers even when a tool already exists
+#   --no-service         don't install the boot/login auto-restart service
+#   --lan                bind 0.0.0.0 (LAN access; Host guard stays on)
 #   BASTET_REPO          override the pip source (default: GitHub main)
 set -euo pipefail
 
@@ -21,12 +23,16 @@ VENV="$BASTET_HOME/venv"
 BIN_DIR="$HOME/.local/bin"
 MINIMAL=0
 UPGRADE=0
+SERVICE=1
+LAN=0
 ONLY_EXECUTORS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --minimal) MINIMAL=1 ;;
     --upgrade) UPGRADE=1 ;;
+    --no-service) SERVICE=0 ;;
+    --lan) LAN=1 ;;
     --executors) ONLY_EXECUTORS="$2"; shift ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
@@ -108,6 +114,29 @@ install_tool grok   grok   curl_bash https://x.ai/cli/install.sh
 install_tool agy    agy    curl_bash https://antigravity.google/cli/install.sh
 install_tool hermes hermes curl_bash https://hermes-agent.nousresearch.com/install.sh
 
+# ---- LAN mode + service ---------------------------------------------------------
+
+if [ "$LAN" = 1 ]; then
+  "$VENV/bin/python" - <<'PYEOF'
+import json, os
+p = os.path.expanduser(os.environ.get("BASTET_HOME", "~/.bastet")) + "/config.json"
+cfg = json.load(open(p)); cfg["host"] = "0.0.0.0"
+json.dump(cfg, open(p, "w"), indent=2)
+PYEOF
+  ok "LAN 模式（bind 0.0.0.0，Host/Origin 防護仍啟用）"
+fi
+
+if [ "$SERVICE" = 1 ]; then
+  note "安裝開機自啟服務（自動重啟）"
+  if "$VENV/bin/bastet" service install; then
+    ok "服務常駐（bastet service status 查看）"
+  else
+    fail "服務安裝失敗 — 可稍後手動執行 bastet service install"
+  fi
+else
+  skip "服務常駐（--no-service）"
+fi
+
 # ---- summary -------------------------------------------------------------------
 
 note "健康檢查"
@@ -116,8 +145,8 @@ note "健康檢查"
 printf '\n\033[1m安裝結果\033[0m%b\n\n' "$RESULTS"
 cat <<'NEXT'
 下一步：
-  1. 啟動：        bastet serve
-  2. Web UI：      http://127.0.0.1:8890/ui   （token: cat ~/.bastet/api_token | pbcopy）
+  1. 服務已常駐（bastet service status）；未裝服務時手動：bastet serve
+  2. Web UI：      http://<本機IP>:8890/ui   （token 在 ~/.bastet/api_token）
   3. 登入各 executor（互動式，需瀏覽器）：
        claude          → 執行 claude 後輸入 /login
        codex login     → ChatGPT OAuth（無頭環境：codex login --device-code）
