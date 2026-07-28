@@ -81,5 +81,5 @@ bastet dispatch myproj "..." --agent cc-worker --resource <resource_id>
 | M1 | Resource pool + gateway + `claude-code` executor + CLI dispatch + minimal dashboard | ✅ done (final acceptance pending) |
 | M2 | Workflow templates, review gates, Kanban UI, WS events | ✅ done |
 | M3 | Multi-project concurrency, queueing, container isolation, `bastet-lite` + full dynamic context, multi-user auth | ✅ done |
-| M4 | Telegram channel, media resource kinds, `codex`/`hermes` executors | 🚧 Telegram done |
+| M4 | Telegram channel, media resources, in-run interactions, `claude-sdk`/`codex`/`hermes` executors | ✅ done |
 | M5 | Federation (multi-node) | planned |

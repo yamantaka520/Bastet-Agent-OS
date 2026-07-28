@@ -198,6 +198,103 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
 
         return StreamingResponse(stream_body(), media_type="text/event-stream")
 
+    # ---- media endpoints (SPEC §5.3: image/tts/stt resource kinds, M4) --------
+    # A run's token is bound to ONE llm resource; media calls pick their
+    # resource per request via the X-Bastet-Resource header (id or name).
+    # Governance is identical: grant required, flat per-call cost from the
+    # resource's config_json.cost_per_call lands in the ledger.
+
+    MEDIA_ENDPOINTS = {
+        "/v1/images/generations": "image",
+        "/v1/audio/speech": "tts",
+        "/v1/audio/transcriptions": "stt",
+    }
+
+    async def media_proxy(request: Request, path: str) -> Response:
+        run = _auth(ctx, request)
+        if run is None:
+            return JSONResponse({"error": "invalid or expired run token"}, status_code=401)
+        if run["status"] not in ("queued", "running", "waiting_input"):
+            return JSONResponse({"error": "run is not active"}, status_code=401)
+
+        want_kind = MEDIA_ENDPOINTS[path]
+        ref = request.headers.get("x-bastet-resource", "").strip()
+        if not ref:
+            return JSONResponse({"error": "X-Bastet-Resource header required"},
+                                status_code=400)
+        resource = ctx.db.one(
+            "SELECT * FROM resources WHERE (id=? OR name=?) AND kind=? AND enabled=1",
+            (ref, ref, want_kind))
+        if resource is None:
+            return JSONResponse({"error": f"no enabled {want_kind} resource {ref!r}"},
+                                status_code=403)
+
+        grant = resolve_grant(ctx.db, resource["id"], run["project_id"], run["agent_id"])
+        if grant is None:
+            return JSONResponse({"error": "no grant covers this resource"}, status_code=403)
+        try:
+            ctx.reservations.admit(ctx.db, grant)
+        except QuotaError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=429)
+
+        try:
+            api_key = secrets_store.resolve(resource["secret_ref"])
+        except secrets_store.SecretError as exc:
+            ctx.reservations.settle(grant)
+            return JSONResponse({"error": f"resource credential error: {exc}"}, status_code=502)
+        ctx.db.audit(f"run:{run['id']}", "secret.resolve", "resource", resource["id"],
+                     {"ref_scheme": (resource["secret_ref"] or "").split(":", 1)[0]})
+
+        body_bytes = await request.body()
+        headers = {"Authorization": f"Bearer {api_key}"}
+        if request.headers.get("content-type"):
+            headers["Content-Type"] = request.headers["content-type"]
+        try:
+            resp = await client.post(resource["endpoint"].rstrip("/") + path,
+                                     content=body_bytes, headers=headers)
+        except httpx.HTTPError as exc:
+            ctx.reservations.settle(grant)
+            return JSONResponse({"error": f"upstream error: {type(exc).__name__}"},
+                                status_code=502)
+        try:
+            if resp.status_code == 200:
+                config = json.loads(resource["config_json"] or "{}")
+                calls = 1
+                model = None
+                if "json" in (request.headers.get("content-type") or ""):
+                    try:
+                        payload = json.loads(body_bytes)
+                        calls = int(payload.get("n") or 1)
+                        model = payload.get("model")
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                cost = float(config.get("cost_per_call") or 0) * calls
+                ctx.db.write(
+                    "INSERT INTO usage_ledger(id, run_id, resource_id, model, cost_usd, at) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (new_id("ldg"), run["id"], resource["id"],
+                     model or resource["name"], cost, now()))
+                ctx.db.audit(f"run:{run['id']}", "gateway.request", "resource",
+                             resource["id"], {"media": want_kind, "calls": calls,
+                                              "cost_usd": round(cost, 6)})
+        finally:
+            ctx.reservations.settle(grant)
+        content_headers = {k: v for k, v in resp.headers.items()
+                           if k.lower() not in STRIP_RESPONSE_HEADERS}
+        return Response(resp.content, status_code=resp.status_code, headers=content_headers)
+
+    @router.post("/v1/images/generations")
+    async def images_endpoint(request: Request):
+        return await media_proxy(request, "/v1/images/generations")
+
+    @router.post("/v1/audio/speech")
+    async def speech_endpoint(request: Request):
+        return await media_proxy(request, "/v1/audio/speech")
+
+    @router.post("/v1/audio/transcriptions")
+    async def transcription_endpoint(request: Request):
+        return await media_proxy(request, "/v1/audio/transcriptions")
+
     @router.post("/v1/chat/completions")
     async def openai_endpoint(request: Request):
         return await proxy(request, "openai")

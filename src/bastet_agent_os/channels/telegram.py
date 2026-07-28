@@ -193,21 +193,28 @@ class TelegramChannel:
         chat_id = ((callback.get("message") or {}).get("chat") or {}).get("id")
         await self._client.post("/answerCallbackQuery",
                                 json={"callback_query_id": callback.get("id", "")})
-        if binding is None or not data.startswith("apv:"):
+        if binding is None:
             return
-        _, job_id, decision = data.split(":", 2)
-        approved = decision == "yes"
         try:
-            outcome = self.orch.approve(job_id, approved,
-                                        comment=f"via telegram by {binding['name']}",
-                                        user=binding["name"])
+            if data.startswith("apv:"):
+                _, job_id, decision = data.split(":", 2)
+                approved = decision == "yes"
+                outcome = self.orch.approve(job_id, approved,
+                                            comment=f"via telegram by {binding['name']}",
+                                            user=binding["name"])
+                if chat_id:
+                    verdict = "approved ✅" if approved else "rejected ❌"
+                    await self._send(chat_id, f"{job_id} {verdict} → {outcome['status']}")
+            elif data.startswith("itx:"):
+                _, run_id, request_id, decision = data.split(":", 3)
+                reply = {"behavior": "allow" if decision == "yes" else "deny"}
+                await self.orch.respond(run_id, request_id, reply, user=binding["name"])
+                if chat_id:
+                    await self._send(chat_id,
+                                     f"{run_id} → {reply['behavior']} ✔️")
         except ValueError as exc:
             if chat_id:
                 await self._send(chat_id, f"⚠️ {exc}")
-            return
-        if chat_id:
-            verdict = "approved ✅" if approved else "rejected ❌"
-            await self._send(chat_id, f"{job_id} {verdict} → {outcome['status']}")
 
     # -- outbound -------------------------------------------------------------------
 
@@ -219,6 +226,15 @@ class TelegramChannel:
             keyboard = {"inline_keyboard": [[
                 {"text": "✅ Approve", "callback_data": f"apv:{event.get('job_id')}:yes"},
                 {"text": "❌ Reject", "callback_data": f"apv:{event.get('job_id')}:no"},
+            ]]}
+        elif etype == "run.waiting_input":
+            text = (f"✋ run {event.get('run_id')} asks: {event.get('kind')}\n"
+                    f"{event.get('summary') or ''}")
+            keyboard = {"inline_keyboard": [[
+                {"text": "✅ Allow",
+                 "callback_data": f"itx:{event.get('run_id')}:{event.get('request_id')}:yes"},
+                {"text": "❌ Deny",
+                 "callback_data": f"itx:{event.get('run_id')}:{event.get('request_id')}:no"},
             ]]}
         elif etype in ("job.done", "job.blocked", "budget.exceeded", "budget.warning"):
             icon = {"job.done": "✅", "job.blocked": "🟠",

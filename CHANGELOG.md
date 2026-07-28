@@ -34,7 +34,29 @@ All notable changes to Bastet Agent OS. Format follows
 - Role-based agent routing (`project_agent_roles`), human approval flow
   (`bastet approve` / `POST /api/jobs/{id}/approve`).
 
-### Added — M4 (in progress)
+### Added — M4
+- Media resource governance: gateway endpoints for `/v1/images/generations`,
+  `/v1/audio/speech`, `/v1/audio/transcriptions` with per-request resource
+  selection (`X-Bastet-Resource`), grants enforced, flat per-call cost
+  (`config_json.cost_per_call`) in the ledger; bastet-lite gains
+  `generate_image` / `text_to_speech` tools (workdir-jailed output).
+- In-run interactions: `interaction_request` events park the run in
+  `waiting_input` (persisted in `run_interactions`), answered via
+  `POST /api/runs/{id}/respond`, the UI-facing events stream, or Telegram
+  Allow/Deny buttons; replies attributed to the acting user.
+- `claude-sdk` executor: Claude Code via the Agent SDK — `can_use_tool`
+  pauses on permission requests and resumes on the human's allow/deny;
+  unattended fallback denies after a timeout. (`pip install
+  bastet-agent-os[sdk]`; API-key/gateway path only — the SDK does not do
+  Max-subscription auth.)
+- `codex` executor: `codex exec --json` JSONL driver with cached/reasoning
+  token splits; review runs get a schema-enforced JSON verdict via
+  `--output-schema` (read-only sandbox can't write the verdict file).
+  Direct path only until the gateway learns the Responses API.
+- `hermes` executor: oneshot (`hermes -z`) driver with a Bastet-managed
+  HERMES_HOME profile routing inference through the gateway (run token via
+  env, never argv/disk); read-only review runs refused honestly (oneshot is
+  hard-wired YOLO upstream).
 - Telegram channel (SPEC §5.7): long polling only (no public webhook),
   numeric-user-id allowlist bound to Bastet users via one-time pairing codes
   (`bastet channel pair` → `/pair <code>`), group messages ignored, `/status`

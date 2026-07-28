@@ -30,6 +30,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio", "ruff"]
+sdk = ["claude-agent-sdk"]     # claude-sdk executor (in-run interactions)
+keyring = ["keyring"]
 
 [project.scripts]
 bastet = "bastet_agent_os.cli:app"

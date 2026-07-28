@@ -125,6 +125,11 @@ class PairIn(BaseModel):
     user_id: str | None = None
 
 
+class RespondIn(BaseModel):
+    request_id: str
+    reply: dict[str, Any]
+
+
 def create_app(home: Home) -> FastAPI:
     home.ensure()
     db = Db(home.db_path)
@@ -423,6 +428,22 @@ def create_app(home: Home) -> FastAPI:
         return [dict(r) for r in db.query(
             "SELECT at, actor, action, target_type, target_id, detail_json "
             "FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))]
+
+    @app.post("/api/runs/{run_id}/respond")
+    async def respond_run(run_id: str, r: RespondIn,
+                          auth: Auth = Depends(require_role("operator"))):
+        # async def: executor.respond resolves a future on the main event loop
+        try:
+            return await orch.respond(run_id, r.request_id, r.reply, user=auth.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/runs/{run_id}/interactions",
+             dependencies=[Depends(require_role("viewer"))])
+    def run_interactions(run_id: str):
+        return [dict(r) for r in db.query(
+            "SELECT request_id, kind, payload_json, status, created_at, answered_at "
+            "FROM run_interactions WHERE run_id=? ORDER BY created_at", (run_id,))]
 
     # ---- users (multi-user auth, SPEC D9 / M3) --------------------------------
 

@@ -550,7 +550,9 @@ M2 起 WS 推播支撐 Kanban 即時更新，M4 起 channel 訂閱。
 - 多使用者權限模型的細節（M3 前，D9 預留）
 - Job 相依（`job_deps.effect`）對排程的完整語意（M2 前）
 - 非 OpenAI/Claude 相容上游的支援方式（若需求出現，以 gateway backend 介面接 LiteLLM，D8 預留）
-- `codex` / `hermes` executor 的 headless 介面調研（M4 前）
+- **Gateway 的 Responses API 透傳**：現行 codex 只支援 `wire_api="responses"`
+  （chat completions 已被上游移除），codex 因此暫走直連路徑（reported 精度）；
+  gateway 補上 `/v1/responses` 透傳後即可計量 codex 流量
 - **Bastet 自有狀態（resources/grants/jobs）的跨節點同步機制**（M5 前；AMOS
   federation 只同步記憶 + org，「資源視圖」同步需自建或借 AMOS bundle 通道）
 - Federation 下資源 grant 的跨節點語意（M5 前）

@@ -61,6 +61,7 @@ class Orchestrator:
         self.bus = bus  # events.EventBus | None
         self._grant_slots: dict[str, asyncio.Semaphore] = {}
         self._tasks: set[asyncio.Task] = set()
+        self._live: dict[str, tuple] = {}  # run_id -> (executor, handle) while streaming
 
     def _emit(self, event_type: str, project_id: str | None, **payload) -> None:
         if self.bus is not None:
@@ -191,6 +192,41 @@ class Orchestrator:
             return GateOutcome("pending", "waiting for human approval")
         return evaluate_gate(stage, workdir, result.structured_verdict)
 
+    # -- in-run interactions (SPEC §5.1.1 interaction_request) ---------------------
+
+    def _record_interaction(self, job, run_id: str, data: dict) -> None:
+        request_id = str(data.get("request_id") or new_id("itx"))
+        self.db.write(
+            "INSERT INTO run_interactions(id, run_id, request_id, kind, payload_json, "
+            "created_at) VALUES(?,?,?,?,?,?)",
+            (new_id("itx"), run_id, request_id, data.get("kind"),
+             json.dumps(data.get("payload") or {}), now()))
+        self.db.write("UPDATE runs SET status='waiting_input' WHERE id=? AND status='running'",
+                      (run_id,))
+        self.db.audit("orchestrator", "run.interaction_request", "run", run_id,
+                      {"request_id": request_id, "kind": data.get("kind")})
+        self._emit("run.waiting_input", job["project_id"], job_id=job["id"], run_id=run_id,
+                   request_id=request_id, kind=data.get("kind"),
+                   summary=str(data.get("payload") or {})[:200])
+
+    async def respond(self, run_id: str, request_id: str, reply: dict,
+                      user: str = "user") -> dict:
+        """Answer a pending in-run interaction (permission request etc.)."""
+        pair = self._live.get(run_id)
+        if pair is None:
+            raise ValueError(f"run {run_id} is not live (finished or not interactive)")
+        executor, handle = pair
+        await executor.respond(handle, request_id, reply)
+        self.db.write(
+            "UPDATE run_interactions SET status='answered', reply_json=?, answered_at=? "
+            "WHERE run_id=? AND request_id=? AND status='pending'",
+            (json.dumps(reply), now(), run_id, request_id))
+        self.db.write("UPDATE runs SET status='running' WHERE id=? AND status='waiting_input'",
+                      (run_id,))
+        self.db.audit(f"user:{user}", "run.interaction_reply", "run", run_id,
+                      {"request_id": request_id, "reply": reply})
+        return {"run_id": run_id, "request_id": request_id, "status": "answered"}
+
     # -- human approval (SPEC §5.4.2) --------------------------------------------
 
     def approve(self, job_id: str, approved: bool, comment: str, user: str = "user") -> dict:
@@ -303,9 +339,15 @@ class Orchestrator:
             handle = await executor.start(spec)
             self.db.write("UPDATE runs SET executor_handle_json=? WHERE id=?",
                           (json.dumps(handle.state()), run_id))
-            async for event in executor.stream(handle):
-                if event.type == "progress":
-                    log.info("run %s: %s", run_id, event.data.get("text", "")[:120])
+            self._live[run_id] = (executor, handle)
+            try:
+                async for event in executor.stream(handle):
+                    if event.type == "progress":
+                        log.info("run %s: %s", run_id, event.data.get("text", "")[:120])
+                    elif event.type == "interaction_request":
+                        self._record_interaction(job, run_id, event.data)
+            finally:
+                self._live.pop(run_id, None)
             result = await executor.result(handle)
             self._finalize_run(job["id"], run_id, workdir, result)
             return result

@@ -185,6 +185,18 @@ CREATE TABLE IF NOT EXISTS audit_log (
   row_hash TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS run_interactions (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  request_id TEXT NOT NULL,
+  kind TEXT,                       -- permission_request|plan_approval|question
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending|answered|expired
+  reply_json TEXT,
+  created_at TEXT NOT NULL,
+  answered_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,

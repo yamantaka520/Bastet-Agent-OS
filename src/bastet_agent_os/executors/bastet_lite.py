@@ -56,6 +56,24 @@ TOOLS = [
     {"name": "memory_add", "description": "Save a durable fact to AMOS team memory.",
      "input_schema": {"type": "object", "properties": {"content": {"type": "string"}},
                       "required": ["content"]}},
+    {"name": "generate_image",
+     "description": "Generate an image via a granted image resource; saves it "
+                    "into the workdir and returns the path.",
+     "input_schema": {"type": "object",
+                      "properties": {"prompt": {"type": "string"},
+                                     "path": {"type": "string"},
+                                     "resource": {"type": "string",
+                                                  "description": "image resource name"}},
+                      "required": ["prompt", "path", "resource"]}},
+    {"name": "text_to_speech",
+     "description": "Synthesize speech via a granted tts resource; saves audio "
+                    "into the workdir and returns the path.",
+     "input_schema": {"type": "object",
+                      "properties": {"text": {"type": "string"},
+                                     "path": {"type": "string"},
+                                     "resource": {"type": "string"},
+                                     "voice": {"type": "string"}},
+                      "required": ["text", "path", "resource"]}},
     {"name": "submit_verdict",
      "description": "Submit the structured review verdict (reviewers must call this once).",
      "input_schema": {"type": "object",
@@ -197,6 +215,10 @@ class BastetLiteExecutor:
             return f"wrote {len(args['content'])} chars to {args['path']}"
         if name == "run_shell":
             return await _run_shell(task, args["command"])
+        if name == "generate_image":
+            return await _generate_image(task, args, self.upstream_transport)
+        if name == "text_to_speech":
+            return await _text_to_speech(task, args, self.upstream_transport)
         if name == "memory_search":
             return _memory_search(args["query"])
         if name == "memory_add":
@@ -238,6 +260,52 @@ async def _run_shell(task: TaskSpec, command: str) -> str:
         raise ToolError(f"command timed out after {SHELL_TIMEOUT_S}s") from None
     text = out.decode(errors="replace")
     return text[-TOOL_OUTPUT_LIMIT:] + (f"\n[exit {proc.returncode}]" if proc.returncode else "")
+
+
+async def _media_post(task: TaskSpec, path: str, payload: dict,
+                      resource: str, transport) -> httpx.Response:
+    async with httpx.AsyncClient(
+        base_url=task.gateway_url,
+        headers={"Authorization": f"Bearer {task.run_token}",
+                 "X-Bastet-Resource": resource},
+        timeout=httpx.Timeout(300, connect=15),
+        transport=transport,
+    ) as client:
+        resp = await client.post(path, json=payload)
+    if resp.status_code != 200:
+        raise ToolError(f"media gateway returned {resp.status_code}: {resp.text[:200]}")
+    return resp
+
+
+async def _generate_image(task: TaskSpec, args: dict, transport) -> str:
+    if task.read_only:
+        raise ToolError("generate_image is disabled for read-only runs")
+    out = _safe_path(task.workdir, args["path"], must_exist=False)
+    resp = await _media_post(task, "/v1/images/generations",
+                             {"prompt": args["prompt"], "n": 1,
+                              "response_format": "b64_json"},
+                             args["resource"], transport)
+    data = (resp.json().get("data") or [{}])[0]
+    if not data.get("b64_json"):
+        raise ToolError("upstream returned no image data")
+    import base64
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(base64.b64decode(data["b64_json"]))
+    return f"image saved to {args['path']} ({out.stat().st_size} bytes)"
+
+
+async def _text_to_speech(task: TaskSpec, args: dict, transport) -> str:
+    if task.read_only:
+        raise ToolError("text_to_speech is disabled for read-only runs")
+    out = _safe_path(task.workdir, args["path"], must_exist=False)
+    resp = await _media_post(task, "/v1/audio/speech",
+                             {"input": args["text"], "voice": args.get("voice", "alloy"),
+                              "model": "tts-1"},
+                             args["resource"], transport)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(resp.content)
+    return f"audio saved to {args['path']} ({len(resp.content)} bytes)"
 
 
 def _memory_search(query: str) -> str:
