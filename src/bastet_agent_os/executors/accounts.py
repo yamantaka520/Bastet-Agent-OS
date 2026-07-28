@@ -29,14 +29,20 @@ GLOBAL_AUTH_ONLY = {"agy"}
 NO_ACCOUNT = {"bastet-lite"}
 
 EXECUTOR_CATALOG = [
-    {"kind": "claude-code", "name": "Claude Code (headless)", "binary": "claude"},
+    {"kind": "claude-code", "name": "Claude Code (headless)", "binary": "claude",
+     "config_dir": "~/.claude"},
     {"kind": "claude-sdk", "name": "Claude Code (Agent SDK, in-run approvals)",
-     "binary": "claude"},
-    {"kind": "codex", "name": "OpenAI Codex CLI", "binary": "codex"},
-    {"kind": "hermes", "name": "NousResearch Hermes", "binary": "hermes"},
-    {"kind": "grok", "name": "xAI Grok Build", "binary": "grok"},
-    {"kind": "agy", "name": "Google Antigravity", "binary": "agy"},
-    {"kind": "bastet-lite", "name": "bastet-lite (built-in)", "binary": None},
+     "binary": "claude", "config_dir": "~/.claude"},
+    {"kind": "codex", "name": "OpenAI Codex CLI", "binary": "codex",
+     "config_dir": "~/.codex"},
+    {"kind": "hermes", "name": "NousResearch Hermes", "binary": "hermes",
+     "config_dir": "~/.hermes"},
+    {"kind": "grok", "name": "xAI Grok Build", "binary": "grok",
+     "config_dir": "~/.grok"},
+    {"kind": "agy", "name": "Google Antigravity", "binary": "agy",
+     "config_dir": "~/.gemini"},
+    {"kind": "bastet-lite", "name": "bastet-lite (built-in)", "binary": None,
+     "config_dir": None},
 ]
 
 
@@ -70,10 +76,20 @@ def profile_status(kind: str, home_dir: str) -> str:
 def catalog_with_availability() -> list[dict]:
     rows = []
     for entry in EXECUTOR_CATALOG:
+        installed = bool(entry["binary"] is None or shutil.which(entry["binary"]))
+        # "configured" = the CLI's default config/auth dir exists with content;
+        # the one-click installer installs everything, so login/setup state is
+        # the signal users actually need
+        config_dir = entry.get("config_dir")
+        if config_dir is None:
+            configured = True  # bastet-lite: credentials come from resources
+        else:
+            path = Path(config_dir).expanduser()
+            configured = path.exists() and any(path.iterdir())
         rows.append({
             **entry,
-            "installed": bool(entry["binary"] is None
-                              or shutil.which(entry["binary"])),
+            "installed": installed,
+            "configured": installed and configured,
             "supports_accounts": entry["kind"] in HOME_ENV,
             "auth_note": ("global-only" if entry["kind"] in GLOBAL_AUTH_ONLY
                           else "resource" if entry["kind"] in NO_ACCOUNT

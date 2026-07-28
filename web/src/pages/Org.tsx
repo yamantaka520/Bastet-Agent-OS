@@ -12,7 +12,8 @@ type OrgView = {
            projects: { id: string; members: string[]; bound: boolean }[] }[];
 };
 type Executor = { kind: string; name: string; installed: boolean;
-                  supports_accounts: boolean; auth_note: string };
+                  configured: boolean; supports_accounts: boolean;
+                  auth_note: string };
 type Account = { id: string; executor_type: string; name: string; status: string;
                  login_instruction: string };
 
@@ -169,7 +170,8 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
                                                account: "" })}>
               {executors.map((e) => (
                 <option key={e.kind} value={e.kind}>
-                  {e.name}{e.installed ? "" : "（未安裝）"}
+                  {e.name}{!e.installed ? "（未安裝）"
+                          : !e.configured ? "（未設定）" : ""}
                 </option>
               ))}
             </select>
