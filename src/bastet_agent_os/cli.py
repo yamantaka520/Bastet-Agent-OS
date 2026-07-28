@@ -65,8 +65,10 @@ def init():
 
 
 @app.command()
-def serve(host: str = "127.0.0.1", port: int = 0):
-    """Run the control plane + gateway (binds 127.0.0.1 only by default)."""
+def serve(host: str = typer.Option("", help="bind address; default from "
+                                   "config.json host, else 127.0.0.1"),
+          port: int = 0):
+    """Run the control plane + gateway (default bind: 127.0.0.1)."""
     import logging
 
     import uvicorn
@@ -82,10 +84,17 @@ def serve(host: str = "127.0.0.1", port: int = 0):
     home = Home()
     home.ensure()
     cfg = home.config()
+    host = host or cfg.get("host") or "127.0.0.1"
     port = port or cfg.get("port", 8890)
     if host not in ("127.0.0.1", "::1", "localhost"):
-        typer.echo("WARNING: binding beyond localhost exposes dispatch (= shell "
-                   "execution) and your LLM budgets to the network.", err=True)
+        typer.echo("NOTE: binding beyond localhost — every request still needs the "
+                   "API token, and Host/Origin validation only admits this "
+                   "machine's own addresses (plus config allowed_hosts).", err=True)
+        # the app reads cfg[\"host\"] to widen its Host allow-list; keep them in sync
+        if cfg.get("host") != host:
+            import json as _json
+            cfg["host"] = host
+            home.config_path.write_text(_json.dumps(cfg, indent=2))
     uvicorn.run(create_app(home), host=host, port=port, log_level="info")
 
 

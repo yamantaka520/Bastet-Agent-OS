@@ -32,12 +32,44 @@ log = logging.getLogger("bastet.server")
 # host.docker.internal lets container runs reach the gateway (SPEC §5.4.3);
 # it is safe against DNS rebinding — ".internal" is ICANN-reserved, so no
 # attacker-controlled public domain can present that Host header.
-ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "host.docker.internal"}
+BASE_ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "host.docker.internal"}
 
 
-def _host_ok(value: str) -> bool:
+def _local_addresses() -> set[str]:
+    """This machine's own IPs — legitimate Host headers when binding 0.0.0.0.
+    DNS rebinding stays blocked: a rebound request carries the attacker's
+    DOMAIN in Host, never our literal IP."""
+    import socket
+
+    found: set[str] = set()
+    try:
+        hostname = socket.gethostname()
+        found.add(hostname.lower())
+        for info in socket.getaddrinfo(hostname, None):
+            found.add(str(info[4][0]).lower())
+    except OSError:
+        pass
+    try:  # primary outbound interface (no packets actually sent)
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.connect(("8.8.8.8", 80))
+        found.add(probe.getsockname()[0])
+        probe.close()
+    except OSError:
+        pass
+    return found
+
+
+def _build_allowed_hosts(cfg: dict) -> set[str]:
+    allowed = set(BASE_ALLOWED_HOSTS)
+    allowed.update(h.lower() for h in cfg.get("allowed_hosts", []))
+    if cfg.get("host") not in (None, "", "127.0.0.1", "localhost", "::1"):
+        allowed.update(_local_addresses())  # LAN mode: our own addresses are valid
+    return allowed
+
+
+def _host_ok(value: str, allowed: set[str]) -> bool:
     host = value.split(":")[0].lower() if not value.startswith("[") else value.rsplit(":", 1)[0].lower()
-    return host in ALLOWED_HOSTS
+    return host in allowed
 
 
 # API models live at module level: `from __future__ import annotations` turns
@@ -177,6 +209,8 @@ def create_app(home: Home) -> FastAPI:
         for task in tasks:
             task.cancel()
 
+    allowed_hosts = _build_allowed_hosts(cfg)
+
     app = FastAPI(title="Bastet Agent OS", version="0.0.1.dev0", docs_url=None,
                   redoc_url=None, lifespan=lifespan)
     app.state.db = db
@@ -195,12 +229,12 @@ def create_app(home: Home) -> FastAPI:
 
     @app.middleware("http")
     async def host_origin_guard(request: Request, call_next):
-        if not _host_ok(request.headers.get("host", "")):
+        if not _host_ok(request.headers.get("host", ""), allowed_hosts):
             return JSONResponse({"error": "bad host"}, status_code=403)
         origin = request.headers.get("origin")
         if origin:
             from urllib.parse import urlparse
-            if not _host_ok(urlparse(origin).netloc):
+            if not _host_ok(urlparse(origin).netloc, allowed_hosts):
                 return JSONResponse({"error": "bad origin"}, status_code=403)
         return await call_next(request)
 
@@ -669,14 +703,14 @@ def create_app(home: Home) -> FastAPI:
 
     @app.websocket("/api/ws")
     async def events_ws(ws: WebSocket):
-        if not _host_ok(ws.headers.get("host", "")):
+        if not _host_ok(ws.headers.get("host", ""), allowed_hosts):
             log.warning("ws rejected: bad host %r", ws.headers.get("host"))
             await ws.close(code=4403)
             return
         origin = ws.headers.get("origin")
         if origin:
             from urllib.parse import urlparse
-            if not _host_ok(urlparse(origin).netloc):
+            if not _host_ok(urlparse(origin).netloc, allowed_hosts):
                 log.warning("ws rejected: bad origin %r", origin)
                 await ws.close(code=4403)
                 return

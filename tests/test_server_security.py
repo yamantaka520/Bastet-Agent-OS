@@ -36,6 +36,19 @@ def test_bad_origin_is_rejected(client):
     assert resp.status_code == 403
 
 
+def test_lan_mode_admits_own_addresses_only():
+    from bastet_agent_os.server import _build_allowed_hosts, _host_ok
+
+    lan = _build_allowed_hosts({"host": "0.0.0.0",
+                                "allowed_hosts": ["192.168.100.250"]})
+    assert _host_ok("192.168.100.250:8890", lan)      # configured address
+    assert _host_ok("127.0.0.1:8890", lan)
+    assert not _host_ok("evil.example.com", lan)      # rebinding still blocked
+
+    local = _build_allowed_hosts({"host": "127.0.0.1"})
+    assert not _host_ok("192.168.100.250:8890", local)  # loopback mode stays strict
+
+
 def test_api_requires_token(client):
     assert client.get("/api/projects").status_code == 401
     assert client.get("/api/projects",
