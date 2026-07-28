@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   status TEXT NOT NULL DEFAULT 'open',   -- open|in_progress|blocked|done|cancelled
   priority INTEGER NOT NULL DEFAULT 0,
   parent_job_id TEXT,
+  default_agent_id TEXT,           -- fallback executor agent for stages without a role match
+  resource_id TEXT,                -- LLM resource used by this job's runs (NULL = direct path)
   worktree_path TEXT,
   version INTEGER NOT NULL DEFAULT 0,    -- optimistic lock (CAS updates)
   created_at TEXT NOT NULL,
@@ -224,6 +226,12 @@ class Db:
     def migrate(self) -> None:
         with self._lock, self._conn:
             self._conn.executescript(SCHEMA)
+            # additive migrations for pre-release DBs (CREATE IF NOT EXISTS
+            # doesn't add columns to existing tables)
+            existing = {r[1] for r in self._conn.execute("PRAGMA table_info(jobs)")}
+            for col, decl in [("default_agent_id", "TEXT"), ("resource_id", "TEXT")]:
+                if col not in existing:
+                    self._conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {decl}")
             self._conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
                 (str(SCHEMA_VERSION),),

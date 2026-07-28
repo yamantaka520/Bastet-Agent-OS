@@ -152,15 +152,67 @@ def dispatch(
     agent: str = typer.Option(..., "--agent", "-a"),
     resource: str = typer.Option(None, "--resource", "-r",
                                  help="LLM resource id (omit for subscription/direct path)"),
+    template: str = typer.Option(None, "--template", "-t",
+                                 help="workflow template id (omit for single-stage)"),
     title: str = typer.Option(""),
     timeout: int = typer.Option(3600),
     no_worktree: bool = typer.Option(False, help="run directly in the project repo"),
 ):
-    """Dispatch a task to an agent (M1: single-stage job, gate: auto)."""
+    """Dispatch a task: creates a job on a workflow template and drives it."""
     _print(_call("POST", "/api/dispatch",
                  {"project_id": project_id, "prompt": prompt, "title": title,
-                  "agent_id": agent, "resource_id": resource, "timeout_s": timeout,
-                  "use_worktree": not no_worktree}))
+                  "agent_id": agent, "resource_id": resource, "template_id": template,
+                  "timeout_s": timeout, "use_worktree": not no_worktree}))
+
+
+template_app = typer.Typer(help="Manage workflow templates (stage pipelines).")
+app.add_typer(template_app, name="template")
+
+
+@template_app.command("add")
+def template_add(file: str):
+    """Add/replace a template from a YAML or JSON file (see SPEC §5.4.1)."""
+    from .workflow import load_template_file
+
+    name, stages = load_template_file(file)
+    _print(_call("POST", "/api/templates",
+                 {"name": name, "stages": [s.to_dict() for s in stages]}))
+
+
+@template_app.command("list")
+def template_list():
+    _print(_call("GET", "/api/templates"))
+
+
+@app.command("role-assign")
+def role_assign(project_id: str, agent_id: str, role: str,
+                preference: int = typer.Option(0)):
+    """Assign a role to an agent within a project (drives stage matching)."""
+    _print(_call("POST", "/api/roles",
+                 {"project_id": project_id, "agent_id": agent_id, "role": role,
+                  "preference": preference}))
+
+
+@app.command()
+def jobs(project_id: str = typer.Option(None), limit: int = 20):
+    path = "/api/jobs" + (f"?project_id={project_id}&limit={limit}" if project_id
+                          else f"?limit={limit}")
+    _print(_call("GET", path))
+
+
+@app.command("job")
+def job_show(job_id: str):
+    """Show a job: stages, runs, gate results."""
+    _print(_call("GET", f"/api/jobs/{job_id}"))
+
+
+@app.command()
+def approve(job_id: str,
+            reject: bool = typer.Option(False, help="reject instead of approve"),
+            comment: str = typer.Option("")):
+    """Decide a human-approve gate the job is waiting on."""
+    _print(_call("POST", f"/api/jobs/{job_id}/approve",
+                 {"approved": not reject, "comment": comment}))
 
 
 @app.command("run")
@@ -198,6 +250,90 @@ def pricing_update():
     resp.raise_for_status()
     (home.root / "model_prices.json").write_text(resp.text)
     typer.echo(f"saved {len(resp.text)//1024} KiB to {home.root / 'model_prices.json'}")
+
+
+@app.command()
+def doctor():
+    """Health checks: home, DB, audit chain, secrets hygiene, executor deps."""
+    import shutil
+    import stat
+    import subprocess
+
+    from . import secrets_store
+    from .db import Db
+
+    home = Home()
+    problems = 0
+
+    def ok(msg: str) -> None:
+        typer.echo(f"  ✓ {msg}")
+
+    def bad(msg: str) -> None:
+        nonlocal problems
+        problems += 1
+        typer.echo(f"  ✗ {msg}")
+
+    typer.echo(f"home: {home.root}")
+    if not home.root.exists():
+        bad("home missing — run `bastet init`")
+        raise typer.Exit(1)
+    ok("home exists")
+
+    if home.token_path.exists():
+        mode = stat.S_IMODE(home.token_path.stat().st_mode)
+        if mode & 0o077:
+            bad(f"api_token is group/world readable (mode {oct(mode)}); chmod 600 it")
+        else:
+            ok("api_token permissions are 0600")
+    else:
+        bad("api_token missing — run `bastet init`")
+
+    try:
+        db = Db(home.db_path)
+        ok("database opens (WAL, foreign_keys=ON)")
+        if db.verify_audit_chain():
+            ok("audit hash chain verifies")
+        else:
+            bad("audit hash chain BROKEN — log was modified out-of-band")
+        smuggled = 0
+        for row in db.query("SELECT id, config_json FROM resources"):
+            try:
+                secrets_store.reject_secrets_in_config(json.loads(row["config_json"]))
+            except secrets_store.SecretError:
+                smuggled += 1
+                bad(f"resource {row['id']} has secret material in config_json")
+        if not smuggled:
+            ok("no secrets smuggled in config_json")
+        stale = db.one("SELECT COUNT(*) AS n FROM runs "
+                       "WHERE status IN ('queued','running','waiting_input')")
+        typer.echo(f"  · active/queued runs: {stale['n']}")
+        db.close()
+    except Exception as exc:
+        bad(f"database check failed: {type(exc).__name__}")
+
+    for tool, why in [("git", "worktrees & diff artifacts"), ("claude", "claude-code executor")]:
+        if shutil.which(tool):
+            ok(f"{tool} on PATH ({why})")
+        else:
+            bad(f"{tool} not found on PATH — needed for {why}")
+
+    prices = home.root / "model_prices.json"
+    if prices.exists():
+        ok("local model price table present")
+    else:
+        typer.echo("  · no local price table (bundled fallback only) — "
+                   "run `bastet pricing-update`")
+
+    if shutil.which("claude"):
+        proc = subprocess.run(["claude", "-p", "ping", "--output-format", "json"],
+                              capture_output=True, text=True, timeout=60)
+        if '"is_error":true' in proc.stdout.replace(" ", "") or proc.returncode != 0:
+            bad("claude CLI cannot run tasks here (not logged in?) — "
+                "dispatches will fail until `claude /login` in this environment")
+        else:
+            ok("claude CLI is logged in and responding")
+
+    raise typer.Exit(1 if problems else 0)
 
 
 if __name__ == "__main__":

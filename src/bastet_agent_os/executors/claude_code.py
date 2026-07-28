@@ -23,7 +23,11 @@ from .base import RunEvent, RunResult, TaskSpec, register_builtin
 
 GRACE_SECONDS = 10  # SIGTERM -> grace -> SIGKILL
 
-READ_ONLY_TOOLS = ["Read", "Grep", "Glob"]
+# Reviewer runs: no Edit/Bash. Write stays enabled because the structured
+# verdict travels via a file (workflow.VERDICT_RELPATH) — headless
+# --allowedTools cannot scope Write to one path yet; the M4 Agent SDK
+# migration closes this gap.
+READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Write"]
 
 
 @dataclass
@@ -159,6 +163,8 @@ class ClaudeCodeExecutor:
         else:
             status = "failed"
         error_tail = "\n".join(handle.stderr_tail[-5:])
+        from ..workflow import read_verdict
+
         return RunResult(
             status=status,
             summary=str(event.get("result") or error_tail or "")[:2000],
@@ -168,5 +174,5 @@ class ClaudeCodeExecutor:
             cache_write=int(usage.get("cache_creation_input_tokens") or 0),
             cost_usd=float(event.get("total_cost_usd") or 0),
             precision="estimated" if (handle.timed_out or handle.cancelled) else "reported",
-            structured_verdict=None,
+            structured_verdict=read_verdict(handle.task.workdir),
         )

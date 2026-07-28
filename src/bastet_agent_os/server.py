@@ -79,8 +79,26 @@ class DispatchIn(BaseModel):
     title: str = ""
     agent_id: str
     resource_id: str | None = None
+    template_id: str | None = None
     timeout_s: int = 3600
     use_worktree: bool = True
+
+
+class TemplateIn(BaseModel):
+    name: str
+    stages: list[dict]
+
+
+class RoleIn(BaseModel):
+    project_id: str
+    agent_id: str
+    role: str
+    preference: int = 0
+
+
+class ApproveIn(BaseModel):
+    approved: bool
+    comment: str = ""
 
 
 def create_app(home: Home) -> FastAPI:
@@ -232,17 +250,74 @@ def create_app(home: Home) -> FastAPI:
     async def dispatch(d: DispatchIn):
         # async def: dispatch must run on the main event loop to spawn the run task
         try:
-            job_id, run_id = orch.dispatch(DispatchRequest(
+            job_id = orch.dispatch(DispatchRequest(
                 project_id=d.project_id, prompt=d.prompt,
                 title=d.title or d.prompt[:60], agent_id=d.agent_id,
-                resource_id=d.resource_id, timeout_s=d.timeout_s,
-                use_worktree=d.use_worktree,
+                resource_id=d.resource_id, template_id=d.template_id,
+                timeout_s=d.timeout_s, use_worktree=d.use_worktree,
             ))
         except QuotaError as exc:
             raise HTTPException(status_code=429, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"job_id": job_id, "run_id": run_id}
+        return {"job_id": job_id}
+
+    @app.post("/api/templates", dependencies=[Depends(require_api_token)])
+    def create_template(t: TemplateIn):
+        from .workflow import parse_stages
+        try:
+            parse_stages(t.stages)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        row = db.one("SELECT version FROM workflow_templates WHERE id=?", (t.name,))
+        version = (row["version"] + 1) if row else 1
+        db.write("INSERT OR REPLACE INTO workflow_templates(id, name, version, stages_json) "
+                 "VALUES(?,?,?,?)", (t.name, t.name, version, json.dumps(t.stages)))
+        db.audit("user", "template.upsert", "template", t.name, {"version": version})
+        return {"id": t.name, "version": version}
+
+    @app.get("/api/templates", dependencies=[Depends(require_api_token)])
+    def list_templates():
+        return [dict(r) for r in db.query("SELECT * FROM workflow_templates ORDER BY id")]
+
+    @app.post("/api/roles", dependencies=[Depends(require_api_token)])
+    def assign_role(r: RoleIn):
+        db.write("INSERT OR REPLACE INTO project_agent_roles(project_id, agent_id, role, "
+                 "preference) VALUES(?,?,?,?)",
+                 (r.project_id, r.agent_id, r.role, r.preference))
+        db.audit("user", "role.assign", "project", r.project_id,
+                 {"agent": r.agent_id, "role": r.role})
+        return {"ok": True}
+
+    @app.get("/api/jobs", dependencies=[Depends(require_api_token)])
+    def list_jobs(project_id: str | None = None, limit: int = 50):
+        where, params = ("WHERE project_id=?", (project_id,)) if project_id else ("", ())
+        return [dict(r) for r in db.query(
+            "SELECT id, project_id, template_id, title, stage, status, priority, "
+            f"created_at, updated_at FROM jobs {where} ORDER BY updated_at DESC LIMIT ?",
+            (*params, limit))]
+
+    @app.get("/api/jobs/{job_id}", dependencies=[Depends(require_api_token)])
+    def get_job(job_id: str):
+        row = db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        job = dict(row)
+        job["runs"] = [dict(r) for r in db.query(
+            "SELECT id, stage, attempt, agent_id, status, cost_usd, accounting_precision, "
+            "started_at, finished_at FROM runs WHERE job_id=? ORDER BY started_at", (job_id,))]
+        job["gates"] = [dict(g) for g in db.query(
+            "SELECT g.* FROM gate_results g JOIN runs r ON r.id=g.run_id "
+            "WHERE r.job_id=? ORDER BY g.at", (job_id,))]
+        return job
+
+    @app.post("/api/jobs/{job_id}/approve", dependencies=[Depends(require_api_token)])
+    async def approve_job(job_id: str, a: ApproveIn):
+        # async def: resuming the job driver needs the main event loop
+        try:
+            return orch.approve(job_id, a.approved, a.comment)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/runs/{run_id}", dependencies=[Depends(require_api_token)])
     def get_run(run_id: str):
