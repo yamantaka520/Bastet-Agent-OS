@@ -273,10 +273,11 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
               </select>
             )}
             <button onClick={addAgent} disabled={!form.id}>add</button>
-            {selected && !selected.configured && selected.installed && (
-              <button className="ghost" onClick={() =>
+            {selected && selected.kind !== "bastet-lite" && (
+              <button className={selected.configured ? "ghost" : ""} onClick={() =>
                 setWizard({ title: selected.name, executorType: selected.kind,
-                            accountId: null })}>WebUI 登入（全域）</button>
+                            accountId: null })}>
+                WebUI 登入（全域）{!selected.configured && " ←"}</button>
             )}
           </div>
           {selected?.supports_accounts && (
@@ -289,7 +290,7 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
           )}
           {selected && !selected.supports_accounts && (
             <p className="muted">{selected.auth_note === "global-only"
-              ? "此 executor 僅支援全域登入（單一帳號）。"
+              ? "此 executor 僅支援全域登入（單一帳號）— 用上方「WebUI 登入（全域）」按鈕完成驗證。"
               : "此 executor 的憑證來自資源池，不需要帳號。"}</p>
           )}
           {created && (
