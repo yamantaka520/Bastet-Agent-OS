@@ -56,7 +56,7 @@ class LoginSessionManager:
         self.sessions: dict[str, LoginSession] = {}
 
     def start(self, kind: str, env: dict[str, str], argv: list[str],
-              strip_alt_screen: bool = False   # web-hostile sequence filter) -> LoginSession:
+              strip_alt_screen: bool = False) -> LoginSession:
         if sys.platform == "win32":
             raise RuntimeError("WebUI 登入精靈暫不支援 Windows — 請在終端執行登入指令")
         import fcntl
