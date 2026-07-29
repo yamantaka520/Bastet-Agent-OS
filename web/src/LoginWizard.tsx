@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { del, openLoginSocket, post } from "./api";
@@ -26,11 +25,8 @@ export default function LoginWizard({ title, executorType, accountId, onClose }:
       cols: 100, rows: 30, convertEol: false, cursorBlink: true,
       fontSize: 13, theme: { background: "#0c0f13" },
     });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon((_e, uri) => window.open(uri, "_blank")));
-    term.open(container.current);
-    fit.fit();
+    term.open(container.current);  // fixed 100x30 — matches the PTY winsize
 
     let closed = false;
     post<{ id: string; command: string }>("/api/login-sessions",
