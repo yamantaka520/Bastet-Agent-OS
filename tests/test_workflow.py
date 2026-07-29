@@ -135,3 +135,24 @@ async def test_role_routing_picks_role_agent(orch, seeded):
     review_run = seeded.one("SELECT agent_id FROM runs WHERE job_id=? AND stage='review'",
                             (job_id,))
     assert review_run["agent_id"] == "reviewer-bot"  # role match beats job default
+
+
+# ---- built-in presets (workflow_presets) ------------------------------------------
+
+def test_all_presets_parse_and_are_well_formed():
+    from bastet_agent_os.workflow_presets import GATES, PRESETS, ROLES
+
+    role_ids = {r["id"] for r in ROLES}
+    gate_ids = {g["id"] for g in GATES}
+    assert len(PRESETS) >= 6
+    for preset in PRESETS:
+        stages = parse_stages(preset["stages"])   # engine must accept every preset
+        assert stages, preset["id"]
+        for raw, stage in zip(preset["stages"], stages, strict=True):
+            assert stage.gate in gate_ids
+            if raw.get("role"):
+                assert raw["role"] in role_ids, f"{preset['id']}: unknown role"
+            if stage.gate == "tests-pass":
+                assert stage.gate_config.get("command")
+        # side-effecting last stage should ask a human
+        assert stages[-1].gate in ("human-approve", "agent-review"), preset["id"]

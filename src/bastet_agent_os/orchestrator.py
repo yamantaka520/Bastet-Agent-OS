@@ -95,10 +95,13 @@ class Orchestrator:
                     raise
                 # queue policy: accept the job; the stage runner waits its turn
 
-        if req.template_id:
-            row = self.db.one("SELECT * FROM workflow_templates WHERE id=?", (req.template_id,))
+        # explicit template > the project's assigned workflow > single stage
+        template_id = req.template_id or project["default_template_id"]
+        if template_id:
+            row = self.db.one("SELECT * FROM workflow_templates WHERE id=?",
+                              (template_id,))
             if row is None:
-                raise ValueError(f"unknown template {req.template_id!r}")
+                raise ValueError(f"unknown template {template_id!r}")
             stages_raw = json.loads(row["stages_json"])
         else:
             stages_raw = SINGLE_STAGE
@@ -110,7 +113,7 @@ class Orchestrator:
             "INSERT INTO jobs(id, project_id, template_id, stages_snapshot_json, title, "
             "spec_md, stage, status, default_agent_id, resource_id, created_at, updated_at) "
             "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-            (job_id, req.project_id, req.template_id or "single-stage",
+            (job_id, req.project_id, template_id or "single-stage",
              json.dumps(stages_raw), req.title, req.prompt, stages[0].name,
              "in_progress", req.agent_id, req.resource_id, ts, ts),
         )

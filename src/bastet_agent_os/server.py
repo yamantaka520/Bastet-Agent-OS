@@ -197,6 +197,10 @@ class TeamIn(BaseModel):
     name: str = ""
 
 
+class ProjectTemplateIn(BaseModel):
+    template_id: str | None = None   # None/"" clears the assignment
+
+
 def create_app(home: Home) -> FastAPI:
     from .config import augment_path
 
@@ -678,7 +682,49 @@ def create_app(home: Home) -> FastAPI:
 
     @app.get("/api/templates", dependencies=[Depends(require_role("viewer"))])
     def list_templates():
-        return [dict(r) for r in db.query("SELECT * FROM workflow_templates ORDER BY id")]
+        rows = [dict(r) for r in db.query("SELECT * FROM workflow_templates ORDER BY id")]
+        assigned: dict[str, list[str]] = {}
+        for project in db.query("SELECT id, default_template_id FROM projects "
+                                "WHERE default_template_id IS NOT NULL"):
+            assigned.setdefault(project["default_template_id"], []).append(project["id"])
+        for row in rows:
+            row["assigned_projects"] = assigned.get(row["id"], [])
+        return rows
+
+    @app.get("/api/workflow-catalog", dependencies=[Depends(require_role("viewer"))])
+    def workflow_catalog():
+        """Built-in presets plus the role/gate vocabulary the builder offers."""
+        from .workflow_presets import GATES, PRESETS, ROLES
+        return {"presets": PRESETS, "roles": ROLES, "gates": GATES}
+
+    @app.delete("/api/templates/{template_id}")
+    def delete_template(template_id: str, auth: Auth = Depends(require_role("operator"))):
+        using = [r["id"] for r in db.query(
+            "SELECT id FROM projects WHERE default_template_id=?", (template_id,))]
+        if using:
+            raise HTTPException(status_code=409,
+                                detail=f"仍被專案使用中：{using} — 請先改指派其他範本")
+        cur = db.write("DELETE FROM workflow_templates WHERE id=?", (template_id,))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail="template not found")
+        db.audit(auth.actor, "template.delete", "template", template_id, {})
+        return {"deleted": template_id}
+
+    @app.post("/api/projects/{project_id}/template")
+    def assign_project_template(project_id: str, t: ProjectTemplateIn,
+                                auth: Auth = Depends(require_role("operator"))):
+        """Bind a workflow to a project — dispatches then default to it."""
+        if db.one("SELECT id FROM projects WHERE id=?", (project_id,)) is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        template_id = t.template_id or None
+        if template_id and db.one("SELECT id FROM workflow_templates WHERE id=?",
+                                  (template_id,)) is None:
+            raise HTTPException(status_code=404, detail="template not found")
+        db.write("UPDATE projects SET default_template_id=?, updated_at=? WHERE id=?",
+                 (template_id, now(), project_id))
+        db.audit(auth.actor, "project.template", "project", project_id,
+                 {"template": template_id})
+        return {"project_id": project_id, "template_id": template_id}
 
     @app.post("/api/roles")
     def assign_role(r: RoleIn, auth: Auth = Depends(require_role("operator"))):

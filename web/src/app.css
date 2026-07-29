@@ -110,3 +110,38 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
 .keypad { align-items: center; gap: .35rem; flex-wrap: wrap; }
 .keypad button.ghost { border: 1px solid var(--line); border-radius: 6px;
                        color: var(--text); padding: .3rem .6rem; }
+.wf-cards { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: .8rem; }
+.wf-card { display: grid; gap: .2rem; text-align: left; background: var(--bg);
+           border: 1px solid var(--line); border-radius: 10px; padding: .7rem .8rem;
+           width: 15rem; color: var(--text); }
+.wf-card:hover { border-color: var(--accent); }
+.wf-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.wf-detail { border-top: 1px dashed var(--line); padding-top: .8rem; display: grid;
+             gap: .8rem; }
+.wf-mine { border: 1px solid var(--line); border-radius: 10px; padding: .5rem .7rem;
+           margin-bottom: .5rem; }
+.wf-mine-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.wf-assign-row { display: flex; align-items: center; justify-content: space-between;
+                 gap: .8rem; padding: .35rem 0; border-bottom: 1px solid var(--line);
+                 flex-wrap: wrap; }
+
+.flow { display: flex; align-items: stretch; gap: .3rem; overflow-x: auto;
+        padding: .3rem 0; }
+.flow-item { display: flex; align-items: center; gap: .3rem; }
+.flow-node { display: grid; gap: .15rem; min-width: 10rem; background: var(--bg);
+             border: 1px solid var(--line); border-left: 3px solid var(--muted);
+             border-radius: 8px; padding: .45rem .6rem; font-size: .8rem; }
+.flow-node.gate-human-approve { border-left-color: #f59e0b; }
+.flow-node.gate-agent-review { border-left-color: var(--accent); }
+.flow-node.gate-tests-pass { border-left-color: #10b981; }
+.flow-idx { color: var(--muted); font-size: .7rem; }
+.flow-role, .flow-gate { color: var(--muted); font-size: .72rem; }
+.flow-tag { justify-self: start; background: var(--line); border-radius: 4px;
+            padding: 0 .3rem; font-size: .68rem; }
+.flow-arrow { color: var(--muted); }
+
+.stage-editor { border: 1px solid var(--line); border-radius: 10px; padding: .6rem .7rem;
+                margin: .5rem 0; display: grid; gap: .45rem; background: var(--bg); }
+.stage-editor-head { display: flex; justify-content: space-between; align-items: center; }
+.chk { display: inline-flex; align-items: center; gap: .3rem; color: var(--muted);
+       font-size: .8rem; }
