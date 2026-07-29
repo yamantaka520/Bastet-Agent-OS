@@ -27,6 +27,7 @@ export default function LoginWizard({ title, executorType, accountId, onClose }:
     });
     term.loadAddon(new WebLinksAddon((_e, uri) => window.open(uri, "_blank")));
     term.open(container.current);  // fixed 100x30 — matches the PTY winsize
+    term.write("\x1b[90m[bastet] 連線中…\x1b[0m\r\n");  // proves the terminal renders
 
     let closed = false;
     post<{ id: string; command: string }>("/api/login-sessions",
@@ -36,7 +37,13 @@ export default function LoginWizard({ title, executorType, accountId, onClose }:
         sessionId.current = session.id;
         setCommand(session.command);
         socket.current = openLoginSocket(session.id,
-          (text) => term.write(text),
+          (text) => {
+            try {
+              term.write(text);
+            } catch (e) {
+              setError(`終端寫入失敗：${String(e)}`);
+            }
+          },
           (exitCode) => setDone(exitCode));
         // every keystroke (arrows, Enter=\r, ctrl…) goes straight to the PTY
         term.onData((data) => socket.current?.send(data));

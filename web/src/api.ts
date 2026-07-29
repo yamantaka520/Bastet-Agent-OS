@@ -100,11 +100,14 @@ export function openLoginSocket(
   const ws = new WebSocket(`${proto}://${location.host}/api/login-sessions/${sessionId}/ws`);
   ws.onopen = () => ws.send(JSON.stringify({ token: getToken() }));
   ws.onmessage = (msg) => {
+    let data: { output?: string; done?: boolean; exit_code?: number | null };
     try {
-      const data = JSON.parse(msg.data);
-      if (data.output) onOutput(data.output);
-      if (data.done) onDone(data.exit_code ?? null);
-    } catch { /* ignore */ }
+      data = JSON.parse(msg.data);
+    } catch {
+      return;  // ignore malformed frames — but NEVER swallow handler errors
+    }
+    if (data.output) onOutput(data.output);
+    if (data.done) onDone(data.exit_code ?? null);
   };
   return {
     send: (input: string) => ws.send(JSON.stringify({ input })),
