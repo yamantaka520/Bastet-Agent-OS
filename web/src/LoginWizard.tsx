@@ -8,6 +8,14 @@ import { del, openLoginSocket, post } from "./api";
  *  this is a REAL terminal for it (xterm.js) — arrow keys, Enter, full TUI
  *  rendering, clickable URLs. The command is fixed server-side: no shell. */
 
+const KEYS = [
+  { label: "Enter", seq: "\r" },
+  { label: "↑", seq: "\x1b[A" },
+  { label: "↓", seq: "\x1b[B" },
+  { label: "Esc", seq: "\x1b" },
+  { label: "Ctrl+C", seq: "\x03" },
+];
+
 export default function LoginWizard({ title, executorType, accountId, onClose }: {
   title: string; executorType: string; accountId: string | null;
   onClose: () => void;
@@ -15,6 +23,7 @@ export default function LoginWizard({ title, executorType, accountId, onClose }:
   const [command, setCommand] = useState("");
   const [done, setDone] = useState<number | null | "running">("running");
   const [error, setError] = useState("");
+  const [paste, setPaste] = useState("");
   const container = useRef<HTMLDivElement>(null);
   const socket = useRef<ReturnType<typeof openLoginSocket> | null>(null);
   const sessionId = useRef<string | null>(null);
@@ -59,6 +68,11 @@ export default function LoginWizard({ title, executorType, accountId, onClose }:
     };
   }, [executorType, accountId]);
 
+  const sendPaste = () => {
+    socket.current?.send(paste + "\r");
+    setPaste("");
+  };
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal wizard" onClick={(e) => e.stopPropagation()}>
@@ -66,6 +80,19 @@ export default function LoginWizard({ title, executorType, accountId, onClose }:
         {command && <p className="card-meta"><code>{command}</code></p>}
         {error && <p className="error">{error}</p>}
         <div ref={container} className="xterm-host" />
+        {done === "running" && (
+          <div className="row keypad">
+            <span className="muted">按鍵：</span>
+            {KEYS.map((k) => (
+              <button key={k.label} className="ghost"
+                      onClick={() => socket.current?.send(k.seq)}>{k.label}</button>
+            ))}
+            <input placeholder="貼上代碼後按送出" value={paste} style={{ flex: 1 }}
+                   onChange={(e) => setPaste(e.target.value)}
+                   onKeyDown={(e) => e.key === "Enter" && sendPaste()} />
+            <button onClick={sendPaste} disabled={!paste}>送出</button>
+          </div>
+        )}
         <div className="row">
           {done !== "running" && (
             <p className="notice">{done === 0 ? "✅ 登入流程結束（成功）"
@@ -74,8 +101,8 @@ export default function LoginWizard({ title, executorType, accountId, onClose }:
           <button className="ghost" onClick={onClose}>
             {done === "running" ? "取消" : "關閉"}</button>
         </div>
-        <p className="muted">這是完整終端：直接在黑框內打字/方向鍵/Enter 操作；
-          出現的網址可直接點開。</p>
+        <p className="muted">點一下黑框即可直接打字/方向鍵/Enter；也可用上面的按鍵按鈕。
+          出現的網址可直接點開，代碼貼進輸入框送出。</p>
       </div>
     </div>
   );

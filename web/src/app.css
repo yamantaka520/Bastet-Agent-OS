@@ -107,3 +107,6 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
 .terminal a { color: #8ab4ff; }
 .xterm-host { background: #0c0f13; border-radius: 8px; padding: .4rem;
               overflow: auto; }
+.keypad { align-items: center; gap: .35rem; flex-wrap: wrap; }
+.keypad button.ghost { border: 1px solid var(--line); border-radius: 6px;
+                       color: var(--text); padding: .3rem .6rem; }
