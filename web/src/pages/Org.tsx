@@ -95,6 +95,8 @@ function TeamsProjectsSection({ canOperate, projects, reloadProjects }:
           {error && <p className="error">{error}</p>}
         </>
       )}
+      <p className="muted">repo 路徑指的是<b>執行 bastet serve 的那台主機</b>上的路徑
+        （worktree 與 agent 都在該主機上跑），不是你目前瀏覽器所在電腦的路徑。</p>
       {teams.map((t) => {
         const inTeam = projects.filter((p) => p.team_id === t.id);
         return (
@@ -122,8 +124,8 @@ function ProjectAdd({ team, onDone, onError }:
     <>
       <input placeholder="project id" value={id}
              onChange={(e) => setId(e.target.value)} />
-      <input placeholder="/path/to/repo" style={{ width: "18rem" }} value={repo}
-             onChange={(e) => setRepo(e.target.value)} />
+      <input placeholder="repo 路徑（Bastet 主機上的路徑）" style={{ width: "20rem" }}
+             value={repo} onChange={(e) => setRepo(e.target.value)} />
       <button disabled={!id || !repo || !team} onClick={async () => {
         onError("");
         try {
