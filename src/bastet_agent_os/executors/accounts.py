@@ -80,6 +80,10 @@ def login_command(kind: str, home_dir: str | None) -> tuple[dict[str, str], list
     return None
 
 
+# kinds whose login TUI must not use the alternate screen in a web terminal
+STRIP_ALT_SCREEN = {"agy"}
+
+
 def login_instruction(kind: str, home_dir: str | None) -> str:
     """Human-readable command line for running the login in a terminal."""
     command = login_command(kind, home_dir)

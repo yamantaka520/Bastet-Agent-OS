@@ -11,12 +11,19 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import signal
 import sys
 import time
 from dataclasses import dataclass, field
 
 from .db import new_id
+
+# Some CLIs (agy) paint their login menu into the alternate screen buffer,
+# which a browser terminal shows as a blank panel. Dropping the alt-screen
+# switches makes that output land in the normal, scrollable buffer instead —
+# the menu stays readable and keystrokes still reach the app.
+ALT_SCREEN_RE = re.compile(rb"\x1b\[\?(?:1049|1047|47)[hl]")
 
 SESSION_TIMEOUT_S = 600
 BUFFER_LIMIT = 200_000
@@ -29,6 +36,7 @@ class LoginSession:
     pid: int
     master_fd: int
     buffer: bytes = b""
+    strip_alt_screen: bool = False
     subscribers: set = field(default_factory=set)
     done: bool = False
     exit_code: int | None = None
@@ -39,7 +47,8 @@ class LoginSessionManager:
     def __init__(self) -> None:
         self.sessions: dict[str, LoginSession] = {}
 
-    def start(self, kind: str, env: dict[str, str], argv: list[str]) -> LoginSession:
+    def start(self, kind: str, env: dict[str, str], argv: list[str],
+              strip_alt_screen: bool = False) -> LoginSession:
         if sys.platform == "win32":
             raise RuntimeError("WebUI 登入精靈暫不支援 Windows — 請在終端執行登入指令")
         import fcntl
@@ -64,7 +73,8 @@ class LoginSessionManager:
             pass
 
         session = LoginSession(id=new_id("lgn"), kind=kind, pid=pid,
-                               master_fd=master_fd)
+                               master_fd=master_fd,
+                               strip_alt_screen=strip_alt_screen)
         self.sessions[session.id] = session
         loop = asyncio.get_running_loop()
         loop.add_reader(master_fd, self._on_readable, session)
@@ -79,6 +89,8 @@ class LoginSessionManager:
         if not data:
             self._finish(session)
             return
+        if session.strip_alt_screen:
+            data = ALT_SCREEN_RE.sub(b"", data)
         session.buffer = (session.buffer + data)[-BUFFER_LIMIT:]
         for queue in list(session.subscribers):
             try:

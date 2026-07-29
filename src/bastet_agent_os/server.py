@@ -569,7 +569,9 @@ def create_app(home: Home) -> FastAPI:
                                 detail="此 executor 不需要登入（憑證來自資源池）")
         env, argv = command
         try:
-            session = login_manager.start(kind, env, argv)
+            session = login_manager.start(
+                kind, env, argv,
+                strip_alt_screen=kind in accounts_mod.STRIP_ALT_SCREEN)
         except (RuntimeError, OSError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         db.audit(auth.actor, "login_session.start", "executor", kind,
