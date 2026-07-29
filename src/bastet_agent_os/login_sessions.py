@@ -19,11 +19,19 @@ from dataclasses import dataclass, field
 
 from .db import new_id
 
-# Some CLIs (agy) paint their login menu into the alternate screen buffer,
-# which a browser terminal shows as a blank panel. Dropping the alt-screen
-# switches makes that output land in the normal, scrollable buffer instead —
-# the menu stays readable and keystrokes still reach the app.
-ALT_SCREEN_RE = re.compile(rb"\x1b\[\?(?:1049|1047|47)[hl]")
+# Sequences that break a browser terminal but are pure decoration for a
+# login flow. agy opens with DECRQM capability queries and kitty-keyboard
+# negotiation, after which xterm.js stops painting — the menu bytes arrive
+# but nothing renders. Dropping these (and the alternate-screen switches, so
+# output lands in the normal scrollable buffer) restores the menu while
+# keystrokes still reach the app.
+WEB_HOSTILE_RE = re.compile(
+    rb"\x1b\[\?(?:1049|1047|47)[hl]"          # alternate screen
+    rb"|\x1b\[\?[0-9;]*\$p"                    # DECRQM mode queries
+    rb"|\x1b\[=[0-9;]*u|\x1b\[\?u"            # kitty keyboard protocol
+    rb"|\x1b\[>[0-9;]*[mnqu]"                  # XTMODKEYS / XTQMODKEYS
+    rb"|\x1b\[\?5W"                            # DECST8C (tab stops)
+)
 
 SESSION_TIMEOUT_S = 600
 BUFFER_LIMIT = 200_000
@@ -36,7 +44,7 @@ class LoginSession:
     pid: int
     master_fd: int
     buffer: bytes = b""
-    strip_alt_screen: bool = False
+    strip_alt_screen: bool = False   # web-hostile sequence filter
     subscribers: set = field(default_factory=set)
     done: bool = False
     exit_code: int | None = None
@@ -48,7 +56,7 @@ class LoginSessionManager:
         self.sessions: dict[str, LoginSession] = {}
 
     def start(self, kind: str, env: dict[str, str], argv: list[str],
-              strip_alt_screen: bool = False) -> LoginSession:
+              strip_alt_screen: bool = False   # web-hostile sequence filter) -> LoginSession:
         if sys.platform == "win32":
             raise RuntimeError("WebUI 登入精靈暫不支援 Windows — 請在終端執行登入指令")
         import fcntl
@@ -90,7 +98,7 @@ class LoginSessionManager:
             self._finish(session)
             return
         if session.strip_alt_screen:
-            data = ALT_SCREEN_RE.sub(b"", data)
+            data = WEB_HOSTILE_RE.sub(b"", data)
         session.buffer = (session.buffer + data)[-BUFFER_LIMIT:]
         for queue in list(session.subscribers):
             try:
