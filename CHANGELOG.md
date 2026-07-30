@@ -8,6 +8,14 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.9.4] - 2026-07-31
+
+### Fixed
+- The decomposition prompt now tells the agent not to use tools: everything it
+  needs is inline, and a headless executor cannot prompt for a read permission,
+  so a tool call is auto-denied and the whole decomposition fails. (agy on the
+  validation host failed exactly that way.)
+
 ## [0.9.3] - 2026-07-31
 
 ### Fixed
