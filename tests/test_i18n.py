@@ -67,3 +67,15 @@ def test_no_hardcoded_cjk_outside_the_dictionaries():
                  for p in [*components(), *WEB.rglob("*.ts")]
                  if I18N not in p.parents and CJK_RE.search(p.read_text())}
     assert offenders == {}
+
+
+def test_the_web_build_runs_the_hooks_linter():
+    """TypeScript cannot see a hook placed after an early return; React only
+    fails at runtime (#310, white screen). eslint's rules-of-hooks can, so it is
+    part of the build rather than an optional extra."""
+    import json
+
+    package = json.loads((WEB.parent / "package.json").read_text())
+    assert "eslint src" in package["scripts"]["build"]
+    config = (WEB.parent / "eslint.config.js").read_text()
+    assert '"react-hooks/rules-of-hooks": "error"' in config

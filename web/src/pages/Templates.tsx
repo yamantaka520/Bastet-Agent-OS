@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, del, post } from "../api";
 import RolePromptsSection from "./RolePrompts";
 import { useT, useVocab, type T } from "../i18n";

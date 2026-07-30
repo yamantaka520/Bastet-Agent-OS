@@ -181,16 +181,19 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   }, [jobId]);
   useEffect(load, [load]);
 
-  if (!job) return null;
-  const lastGate = job.gates[job.gates.length - 1];
-  const waitingApproval = job.status === "blocked" && lastGate?.verdict === "pending";
-
+  // hooks first, unconditionally: this one used to sit after the early return
+  // below, which threw React #310 ("more hooks than the previous render") and
+  // white-screened the app the moment a card was opened
   useEffect(() => {
     api<{ id: string }[]>("/api/agents").then(setAgents).catch(() => {});
   }, []);
 
+  if (!job) return null;
+  const lastGate = job.gates[job.gates.length - 1];
+  const waitingApproval = job.status === "blocked" && lastGate?.verdict === "pending";
+
   // the reason the stage failed: the last run's error, shown where the retry is
-  const failure = (job?.runs ?? []).slice().reverse()
+  const failure = job.runs.slice().reverse()
     .map((r) => r.error).find((e) => e && e.trim()) || "";
 
   const retry = async () => {

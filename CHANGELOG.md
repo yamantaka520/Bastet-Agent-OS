@@ -8,6 +8,17 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.9.9] - 2026-07-31
+
+### Fixed
+- Opening a job card white-screened the WebUI. The retry work put a `useEffect`
+  after the drawer's early `return null`, so the hook count changed between
+  renders (React #310). Hooks now run unconditionally, before the return.
+- eslint with `react-hooks/rules-of-hooks` is now part of `npm run build`, and a
+  test fails if it is removed. TypeScript cannot see this class of bug and React
+  only reports it at runtime, as a blank page — exactly the kind of failure that
+  should never reach a user twice.
+
 ## [0.9.8] - 2026-07-31
 
 ### Fixed

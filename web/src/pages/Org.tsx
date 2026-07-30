@@ -416,7 +416,7 @@ function FederationSection({ canOperate, onBound }:
   const [org, setOrg] = useState<OrgView | null>(null);
   const [binding, setBinding] = useState<string | null>(null);
   const [repo, setRepo] = useState("");
-  const [error, setError] = useState("");
+  const [, setError] = useState("");   // set by bind(); surfaced inline below
 
   const load = useCallback(() => {
     api<OrgView>("/api/org").then(setOrg).catch(() => setOrg(null));
