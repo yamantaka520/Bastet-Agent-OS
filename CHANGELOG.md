@@ -8,6 +8,17 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.10.2] - 2026-07-31
+
+### Fixed
+- Reconciliation now heals state that drifted *before* the fix existed. The
+  event-driven sync in 0.10.1 only covered work dispatched after it shipped, so a
+  job created earlier — or a control plane restarted mid-run — kept a stale light
+  and an unlinked plan forever. `reconcile()` links every unlinked job to its
+  planned task and re-evaluates the status; it runs at startup, and again when
+  the project list or a project's lifecycle is read. Both steps are idempotent and
+  only write when something actually changed.
+
 ## [0.10.1] - 2026-07-31
 
 ### Fixed — the project card now tells the truth about its own work

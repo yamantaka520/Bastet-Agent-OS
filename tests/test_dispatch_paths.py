@@ -301,3 +301,28 @@ async def test_retry_keeps_its_snapshot_when_the_new_workflow_lacks_the_stage(or
     assert out["workflow_refreshed"] is None
     await orch.wait_idle()
     assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+
+
+async def test_reconcile_heals_a_project_whose_state_predates_the_fix(orch, seeded):
+    """Event-driven sync only helps work dispatched after it shipped. A job that
+    already existed — or a control plane restarted mid-run — must heal too."""
+    from bastet_agent_os import project_lifecycle as lifecycle
+    from bastet_agent_os.db import now as _now
+
+    seeded.write("DELETE FROM runs")
+    seeded.write("DELETE FROM jobs")
+    seeded.write("UPDATE projects SET status='planning' WHERE id='proj1'")
+    lifecycle.save_task_plan(seeded, "proj1", [{"title": "既有任務", "spec": "s"}],
+                             by="pm", confirmed=True)
+    # a job created behind the lifecycle's back, exactly like the live project
+    seeded.write("INSERT INTO jobs(id, project_id, stages_snapshot_json, title, stage, "
+                 "status, spec_md, created_at, updated_at) VALUES('old','proj1','[]',"
+                 "'既有任務','work','in_progress','spec',?,?)", (_now(), _now()))
+
+    result = lifecycle.reconcile(seeded, "proj1", actor="server")
+    assert result["linked"] == 1 and result["status"] == lifecycle.RUNNING
+    tasks = lifecycle.task_plan(seeded, "proj1")["tasks"]
+    assert len(tasks) == 1 and tasks[0]["job_id"] == "old"   # matched, not appended
+
+    again = lifecycle.reconcile(seeded, "proj1")
+    assert again == {"linked": 0, "status": None}            # idempotent

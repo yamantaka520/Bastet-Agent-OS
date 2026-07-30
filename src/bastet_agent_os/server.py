@@ -510,6 +510,7 @@ def create_app(home: Home) -> FastAPI:
         """Projects with their lifecycle state, filterable by status, keyword and
         time window — the project tab groups on these rather than guessing."""
         from . import project_lifecycle as lc
+        lc.reconcile_all(db, actor="ui")     # the list must not show a stale light
         rows = []
         for row in db.query("SELECT * FROM projects ORDER BY updated_at DESC"):
             item = dict(row)
@@ -1040,6 +1041,8 @@ def create_app(home: Home) -> FastAPI:
     app.state.project_runner = runner_mod.ProjectRunner(db, orch, bus)
     for parked in runner_mod.reconcile(db):
         log.warning("project %s was running at shutdown — parked as paused", parked)
+    for healed in lifecycle_mod.reconcile_all(db):
+        log.info("project %s reconciled at startup: %s", healed["project"], healed)
 
     def _lifecycle_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=409, detail=str(exc))
@@ -1048,6 +1051,7 @@ def create_app(home: Home) -> FastAPI:
              dependencies=[Depends(require_role("viewer"))])
     def project_lifecycle_state(project_id: str):
         try:
+            lifecycle_mod.reconcile(db, project_id, actor="ui")
             state = lifecycle_mod.overview(db, project_id)
         except lifecycle_mod.LifecycleError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

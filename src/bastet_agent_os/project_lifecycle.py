@@ -200,6 +200,35 @@ def sync_from_jobs(db, project_id: str, actor: str = "system") -> str | None:
     return None
 
 
+def reconcile(db, project_id: str, actor: str = "system") -> dict[str, Any]:
+    """Heal a project whose plan or light drifted from its jobs.
+
+    Event-driven sync only fixes work dispatched *after* the code that does it —
+    a job created earlier, or a control plane restarted mid-run, would stay wrong
+    forever. So this also runs at startup and whenever the project is read: both
+    steps are idempotent and only write when something actually changed."""
+    linked = 0
+    for job in db.query("SELECT id, title, spec_md FROM jobs WHERE project_id=? "
+                        "ORDER BY created_at", (project_id,)):
+        before = task_plan(db, project_id)["tasks"]
+        if any(t.get("job_id") == job["id"] for t in before):
+            continue
+        link_job(db, project_id, job["id"], job["title"], job["spec_md"] or "",
+                 origin="dispatch")
+        linked += 1
+    moved = sync_from_jobs(db, project_id, actor)
+    return {"linked": linked, "status": moved}
+
+
+def reconcile_all(db, actor: str = "server") -> list[dict[str, Any]]:
+    out = []
+    for row in db.query("SELECT id FROM projects"):
+        result = reconcile(db, row["id"], actor)
+        if result["linked"] or result["status"]:
+            out.append({"project": row["id"], **result})
+    return out
+
+
 def plan_with_jobs(db, project_id: str) -> dict[str, Any]:
     """The plan, each task carrying its job's live state — this is what makes
     the project tab and the Kanban board the same picture."""
