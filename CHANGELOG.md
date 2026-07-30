@@ -8,6 +8,22 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.10.0] - 2026-07-31
+
+### Fixed — retry actually re-reads the project, chat dispatches join the plan
+- **A retry used the state that had already failed.** It now re-snapshots the
+  project's *current* workflow (unless that template no longer contains the stage
+  the job is parked on, in which case it keeps its own snapshot rather than
+  stranding the job) and the spec can be corrected in the drawer before the
+  re-run. Repo path, credentials and pool resources were already re-read per run;
+  the workflow and the spec were the frozen parts.
+- **A chat dispatch was invisible to the project tab.** The job is now recorded
+  on the project's task plan (marked `origin: chat`), so the board card and the
+  project's task list are the same work rather than two views that disagree.
+  Dispatching the same conversation twice does not duplicate the entry.
+- The board drawer's retry panel shows the failure reason, an agent picker, the
+  editable spec, and a toggle for re-reading the workflow.
+
 ## [0.9.9] - 2026-07-31
 
 ### Fixed

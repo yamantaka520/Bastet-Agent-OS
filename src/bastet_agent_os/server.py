@@ -184,6 +184,8 @@ class RoleIn(BaseModel):
 
 class RetryIn(BaseModel):
     agent_id: str = ""             # blank = the same agent that failed
+    spec: str = ""                 # blank = keep the current spec
+    refresh_workflow: bool = True  # re-snapshot the project's current template
 
 
 class ApproveIn(BaseModel):
@@ -1113,7 +1115,8 @@ def create_app(home: Home) -> FastAPI:
         tasks = [{"title": str(t.get("title", "")).strip(),
                   "spec": str(t.get("spec", "")).strip(),
                   "role": str(t.get("role", "")).strip(),
-                  **({"job_id": t["job_id"]} if t.get("job_id") else {})}
+                  **({"job_id": t["job_id"]} if t.get("job_id") else {}),
+                  **({"origin": t["origin"]} if t.get("origin") else {})}
                  for t in body.tasks if str(t.get("title", "")).strip()]
         if not tasks:
             raise HTTPException(status_code=400, detail="至少需要一個任務")
@@ -1270,12 +1273,26 @@ def create_app(home: Home) -> FastAPI:
             raise HTTPException(status_code=429, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # The project tab and the board must show the same work: record the
+        # dispatched task on the project's plan, or the chat becomes a parallel
+        # universe where a card exists on the board and nowhere else.
+        plan = lifecycle_mod.task_plan(db, session["scope_id"])
+        tasks = plan["tasks"]
+        if not any(task.get("job_id") == job_id for task in tasks):
+            tasks = [*tasks, {"title": body.title or f"chat: {session['title']}"[:60],
+                              "spec": spec[:4000], "role": "", "job_id": job_id,
+                              "origin": "chat"}]
+            lifecycle_mod.save_task_plan(db, session["scope_id"], tasks,
+                                         by=plan["by"] or auth.actor,
+                                         confirmed=True)
         chat_mod.add_message(db, session_id, role="system", author=auth.actor,
                              content=f"✅ 已派工：{job_id}",
                              meta={"job_id": job_id})
         db.audit(auth.actor, "chat.dispatch", "chat", session_id,
-                 {"job_id": job_id, "project": session["scope_id"]})
-        return {"job_id": job_id}
+                 {"job_id": job_id, "project": session["scope_id"],
+                  "tasks_on_plan": len(tasks)})
+        bus.emit("project.status", session["scope_id"], status="dispatched")
+        return {"job_id": job_id, "tasks_on_plan": len(tasks)}
 
     # ---- WebUI login wizard (PTY over WS) -----------------------------------------
 
@@ -1673,7 +1690,9 @@ def create_app(home: Home) -> FastAPI:
                         auth: Auth = Depends(require_role("operator"))):
         # async def: the re-dispatch spawns its driver on the main event loop
         try:
-            return orch.retry(job_id, agent_id=body.agent_id, user=auth.name)
+            return orch.retry(job_id, agent_id=body.agent_id, user=auth.name,
+                              spec=body.spec,
+                              refresh_workflow=body.refresh_workflow)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

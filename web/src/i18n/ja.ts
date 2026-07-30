@@ -461,6 +461,8 @@ const ja: Dict = {
   "board.retry": "このステージを再実行",
   "board.retrySameAgent": "同じ Agent で再試行",
   "board.retryHint": "現在のステージだけを再実行します（完了済みステージは繰り返しません）。失敗原因が Agent 側（未ログイン・上限到達）なら、左で別の Agent を選べます。",
+  "board.retryRefresh": "プロジェクトの最新ワークフローを読み直す",
+  "board.retrySpecHint": "再試行の前にタスク内容を直せます：止まる原因は仕様の曖昧さやパス間違いが多く、同じ内容で再実行してもまた失敗します。repo パス・認証情報・リソースプールは再実行時に必ず読み直されます。",
 };
 
 export default ja;

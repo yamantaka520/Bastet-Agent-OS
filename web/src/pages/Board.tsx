@@ -161,6 +161,8 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   const [diff, setDiff] = useState<string | null>(null);
   const [agents, setAgents] = useState<{ id: string }[]>([]);
   const [retryAgent, setRetryAgent] = useState("");
+  const [retrySpec, setRetrySpec] = useState<string | null>(null);
+  const [refreshWorkflow, setRefreshWorkflow] = useState(true);
 
   const load = useCallback(() => {
     api<JobDetail>(`/api/jobs/${jobId}`).then(async (j) => {
@@ -197,7 +199,11 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
     .map((r) => r.error).find((e) => e && e.trim()) || "";
 
   const retry = async () => {
-    await post(`/api/jobs/${jobId}/retry`, { agent_id: retryAgent });
+    await post(`/api/jobs/${jobId}/retry`, {
+      agent_id: retryAgent,
+      spec: retrySpec ?? "",                    // blank = keep the current spec
+      refresh_workflow: refreshWorkflow });
+    setRetrySpec(null);
     onChanged();
     load();
   };
@@ -231,9 +237,17 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
               <option value="">{t("board.retrySameAgent")}</option>
               {agents.map((a) => <option key={a.id} value={a.id}>{a.id}</option>)}
             </select>
+            <label className="chk">
+              <input type="checkbox" checked={refreshWorkflow}
+                     onChange={(e) => setRefreshWorkflow(e.target.checked)} />
+              {t("board.retryRefresh")}
+            </label>
             <button onClick={retry}>{t("board.retry")}</button>
           </div>
+          <textarea rows={5} value={retrySpec ?? job.spec_md}
+                    onChange={(e) => setRetrySpec(e.target.value)} />
           <p className="muted">{t("board.retryHint")}</p>
+          <p className="muted">{t("board.retrySpecHint")}</p>
         </div>
       )}
 

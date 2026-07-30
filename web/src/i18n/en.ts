@@ -461,6 +461,8 @@ const en: Dict = {
   "board.retry": "Run this stage again",
   "board.retrySameAgent": "retry with the same agent",
   "board.retryHint": "Re-runs the current stage (finished stages are not repeated). If the agent itself was the problem — not logged in, out of quota — pick a different one on the left.",
+  "board.retryRefresh": "re-read the project's current workflow",
+  "board.retrySpecHint": "Edit the task before retrying: a stuck card is usually an unclear spec or a wrong path, and re-running the same content just fails again. The project's repo path, credentials and resource pool are always re-read on a retry.",
 };
 
 export default en;

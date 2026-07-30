@@ -311,7 +311,8 @@ class Orchestrator:
         self._spawn(self._drive_job(job_id, req))
         return {"job_id": job_id, "status": "in_progress", "stage": names[idx + 1]}
 
-    def retry(self, job_id: str, agent_id: str = "", user: str = "user") -> dict:
+    def retry(self, job_id: str, agent_id: str = "", user: str = "user",
+              spec: str = "", refresh_workflow: bool = True) -> dict:
         """Run the current stage again after a failure.
 
         A blocked card with no way forward is a dead end: the operator fixed the
@@ -325,7 +326,36 @@ class Orchestrator:
         if job["status"] not in ("blocked", "cancelled"):
             raise ValueError(f"job {job_id} is {job['status']}, not stuck "
                              f"(only blocked/cancelled jobs can be retried)")
+        # Re-read the project as it is NOW. Retrying with the state that already
+        # failed just fails again: the operator has fixed the repo path, changed
+        # the workflow, or corrected the spec — that is the whole point.
         stages = parse_stages(json.loads(job["stages_snapshot_json"]))
+        refreshed_from = None
+        if refresh_workflow:
+            project = self.db.one("SELECT default_template_id FROM projects WHERE id=?",
+                                  (job["project_id"],))
+            template_id = project["default_template_id"] if project else None
+            if template_id and template_id != job["template_id"]:
+                template = self.db.one(
+                    "SELECT stages_json FROM workflow_templates WHERE id=?",
+                    (template_id,))
+                if template is not None:
+                    fresh = parse_stages(json.loads(template["stages_json"]))
+                    names = [st.name for st in fresh]
+                    if job["stage"] in names:      # keep our place in the pipeline
+                        stages = fresh
+                        refreshed_from = template_id
+                        self.db.write(
+                            "UPDATE jobs SET template_id=?, stages_snapshot_json=? "
+                            "WHERE id=?",
+                            (template_id, template["stages_json"], job_id))
+                    else:
+                        log.info("job %s stays on its snapshot: stage %r is not in "
+                                 "template %s", job_id, job["stage"], template_id)
+        if spec.strip() and spec.strip() != (job["spec_md"] or "").strip():
+            self.db.write("UPDATE jobs SET spec_md=? WHERE id=?",
+                          (spec.strip(), job_id))
+            job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if job["stage"] not in [s.name for s in stages]:
             raise ValueError(f"job {job_id} is at unknown stage {job['stage']!r}")
         agent = agent_id or job["default_agent_id"]
@@ -335,13 +365,16 @@ class Orchestrator:
         self.db.write("UPDATE jobs SET status='in_progress', updated_at=? WHERE id=?",
                       (now(), job_id))
         self.db.audit(f"user:{user}", "job.retry", "job", job_id,
-                      {"stage": job["stage"], "agent": agent})
+                      {"stage": job["stage"], "agent": agent,
+                       "workflow_refreshed": refreshed_from,
+                       "spec_edited": bool(spec.strip())})
         self._emit("job.retried", job["project_id"], job_id=job_id, stage=job["stage"])
         req = DispatchRequest(
             project_id=job["project_id"], prompt=job["spec_md"], title=job["title"],
             agent_id=agent, resource_id=job["resource_id"])
         self._spawn(self._drive_job(job_id, req))
-        return {"job_id": job_id, "status": "in_progress", "stage": job["stage"]}
+        return {"job_id": job_id, "status": "in_progress", "stage": job["stage"],
+                "workflow_refreshed": refreshed_from}
 
     # -- stage execution ----------------------------------------------------------
 

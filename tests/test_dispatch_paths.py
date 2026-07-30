@@ -182,3 +182,129 @@ def test_job_detail_returns_the_failure_reason(tmp_path):
     run = client.get("/api/jobs/j").json()["runs"][0]
     assert run["error"] == "repo path is not a git repo"
     assert run["executor_type"] == "fake"
+
+
+# ---- the project tab and the board must agree ---------------------------------------
+
+def test_a_chat_dispatch_lands_on_the_project_task_plan(tmp_path, monkeypatch):
+    """Live finding: dispatching from chat created a board card that the project
+    tab knew nothing about — two views of "this project's work" disagreeing."""
+    import httpx
+    from fastapi.testclient import TestClient
+
+    from bastet_agent_os import project_lifecycle as lifecycle
+    from bastet_agent_os.config import Home
+    from bastet_agent_os.db import Db
+    from bastet_agent_os.orchestrator import Orchestrator
+    from bastet_agent_os.server import create_app
+
+    monkeypatch.setattr(Orchestrator, "dispatch",
+                        lambda self, actor, req: "job_from_chat")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+
+    home = Home(tmp_path / "home")
+    client = TestClient(create_app(home), base_url="http://127.0.0.1")
+    client.headers["Authorization"] = f"Bearer {home.api_token()}"
+    client.post("/api/teams", json={"id": "t1", "name": "T"})
+    client.post("/api/projects", json={"id": "p1", "repo_path": str(repo),
+                                       "team_id": "t1"})
+    client.post("/api/agents", json={"id": "a1", "name": "A",
+                                     "executor_type": "claude-code"})
+    key = tmp_path / "k"
+    key.write_text("sk")
+    rid = client.post("/api/resources", json={
+        "name": "llm", "kind": "llm", "endpoint": "https://x/v1",
+        "api_flavor": "openai", "secret_ref": f"file:{key}",
+        "scope_type": "global", "config": {"default_model": "m"}}).json()["id"]
+
+    reply = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+    real = httpx.AsyncClient
+
+    class Mocked(real):
+        def __init__(self, *a, **kw):
+            kw["transport"] = httpx.MockTransport(
+                lambda request: httpx.Response(200, json=reply))
+            super().__init__(*a, **kw)
+
+    monkeypatch.setattr(httpx, "AsyncClient", Mocked)
+    session = client.post("/api/chat/sessions", json={
+        "scope_type": "project", "scope_id": "p1", "responder_kind": "resource",
+        "responder_id": rid}).json()["id"]
+    client.post(f"/api/chat/sessions/{session}/messages", json={"content": "做登入頁"})
+
+    out = client.post(f"/api/chat/sessions/{session}/dispatch",
+                      json={"agent_id": "a1", "title": "登入頁"}).json()
+    assert out["job_id"] == "job_from_chat" and out["tasks_on_plan"] == 1
+
+    db = Db(home.db_path)
+    try:
+        plan = lifecycle.task_plan(db, "p1")
+    finally:
+        db.close()
+    assert plan["confirmed"] is True
+    assert plan["tasks"][0]["job_id"] == "job_from_chat"
+    assert plan["tasks"][0]["origin"] == "chat"
+    assert "做登入頁" in plan["tasks"][0]["spec"]
+
+    # dispatching twice must not duplicate the same job on the plan
+    client.post(f"/api/chat/sessions/{session}/dispatch",
+                json={"agent_id": "a1", "title": "登入頁"})
+    db = Db(home.db_path)
+    try:
+        assert len(lifecycle.task_plan(db, "p1")["tasks"]) == 1
+    finally:
+        db.close()
+
+
+async def test_retry_picks_up_the_projects_current_workflow_and_spec(orch, seeded):
+    """Retrying with the state that already failed just fails again."""
+    from fake_executor import add_template
+
+    add_template(seeded, "old", [{"name": "work", "gate": "auto"}])
+    add_template(seeded, "new", [{"name": "work", "gate": "auto"},
+                                 {"name": "review", "gate": "auto"}])
+    seeded.write("UPDATE projects SET default_template_id='old' WHERE id='proj1'")
+    SCRIPT.append(RunResult(status="failed", summary="wrong spec"))
+    job_id = orch.dispatch(req(template_id="old"))
+    await orch.wait_idle()
+
+    # operator fixes the plan: new workflow, corrected spec
+    seeded.write("UPDATE projects SET default_template_id='new' WHERE id='proj1'")
+    captured = {}
+    SCRIPT.append(lambda task: (captured.update(prompt=task.prompt)
+                                or RunResult(status="succeeded")))
+    SCRIPT.append(RunResult(status="succeeded"))     # the new second stage
+    out = orch.retry(job_id, spec="corrected spec with the real requirements")
+    assert out["workflow_refreshed"] == "new"
+    await orch.wait_idle()
+
+    job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+    assert job["template_id"] == "new"
+    assert "corrected spec" in job["spec_md"]
+    assert "corrected spec" in captured["prompt"]    # the agent saw the new spec
+    assert "review" in job["stages_snapshot_json"]   # and the new pipeline
+    assert job["status"] == "done"
+
+
+async def test_retry_keeps_its_snapshot_when_the_new_workflow_lacks_the_stage(orch,
+                                                                             seeded):
+    """A template swap that drops the stage we are parked on must not strand the
+    job — better to finish on the snapshot it started with."""
+    from fake_executor import add_template
+
+    add_template(seeded, "orig", [{"name": "work", "gate": "auto"}])
+    add_template(seeded, "elsewhere", [{"name": "totally-different", "gate": "auto"}])
+    seeded.write("UPDATE projects SET default_template_id='orig' WHERE id='proj1'")
+    SCRIPT.append(RunResult(status="failed", summary="boom"))
+    job_id = orch.dispatch(req(template_id="orig"))
+    await orch.wait_idle()
+
+    seeded.write("UPDATE projects SET default_template_id='elsewhere' WHERE id='proj1'")
+    SCRIPT.append(RunResult(status="succeeded"))
+    out = orch.retry(job_id)
+    assert out["workflow_refreshed"] is None
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"

@@ -480,6 +480,8 @@ const zhHant = {
   "board.retry": "重新執行這個階段",
   "board.retrySameAgent": "用原本的 Agent 重試",
   "board.retryHint": "會重跑目前這個階段（不會跳過已完成的階段）。若失敗原因是 Agent 本身（未登入、額度用完），可在左邊改用別的 Agent。",
+  "board.retryRefresh": "重讀專案最新工作流",
+  "board.retrySpecHint": "重試前可以直接修改任務內容：卡住的原因常常是規格不清楚或路徑寫錯，用原本的內容重跑只會再失敗一次。專案的 repo 路徑、憑證、資源池都會在重跑時重新讀取。",
 } as const;
 
 export type Dict = { [K in keyof typeof zhHant]: string };
