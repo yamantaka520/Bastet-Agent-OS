@@ -118,7 +118,11 @@ def parse_tasks(text: str) -> list[dict[str, str]]:
             raw = candidate
             break
     if raw is None:
-        raise PlanError("the PM agent did not return a JSON task list")
+        # show what it actually said: "did not return JSON" with no evidence is
+        # the least useful error message in the system
+        excerpt = " ".join((text or "").split())[:400] or "(empty output)"
+        raise PlanError(f"the PM agent did not return a JSON task list. "
+                        f"It said: {excerpt}")
     tasks = []
     for item in raw[:MAX_TASKS]:
         if not isinstance(item, dict):
@@ -176,6 +180,10 @@ async def decompose(db, home_root, project_id: str, agent_id: str = "",
     async for _ in executor.stream(handle):
         pass
     result = await executor.result(handle)
+    db.audit(actor or "system", "project.decompose.raw", "project", project_id,
+             {"agent": agent["id"], "status": result.status,
+              "output": (result.summary or "")[:1500],
+              "error": (result.error or "")[:300]})
     if not result.summary:
         raise PlanError(f"PM agent produced no output ({result.status}: "
                         f"{result.error or 'no error given'})")

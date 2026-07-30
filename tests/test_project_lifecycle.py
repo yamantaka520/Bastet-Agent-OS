@@ -81,7 +81,7 @@ def test_parse_tasks_accepts_json_in_prose_and_rejects_prose_only():
     assert [t["title"] for t in tasks] == ["後端 API", "前端頁面"]
     assert tasks[0]["role"] == "backend-engineer"
     assert tasks[1]["spec"] == "表單"
-    with pytest.raises(runner_mod.PlanError):
+    with pytest.raises(runner_mod.PlanError, match="It said: I think we should"):
         runner_mod.parse_tasks("I think we should start with the backend.")
     with pytest.raises(runner_mod.PlanError):
         runner_mod.parse_tasks('{"tasks":[]}')
