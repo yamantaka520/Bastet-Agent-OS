@@ -374,6 +374,15 @@ const zhHant = {
   "sec.keepValuePh": "新內容（留空＝不變更）",
   "sec.editHint": "值是唯寫的：留空表示保留原本的憑證，填入就是輪替（舊檔案仍留在 <home>/secrets）。改可見範圍會立即影響哪些 run 拿得到它。",
   "project.resAllAdded": "（資源池的資源都已加入）",
+  "res.test": "測試",
+  "res.retest": "重新測試",
+  "res.testing": "測試中…",
+  "res.test.unknown": "尚未測試",
+  "res.test.ok": "測試通過",
+  "res.test.warn": "有回應但需確認",
+  "res.test.failed": "測試失敗",
+  "res.testAt": "測試於 {when}",
+  "res.testHint": "測試會用 agent 實際會走的方式檢查：LLM 列出模型（不會消耗 token）、MCP 完成一次 initialize 交握、Skill 檢查來源是否存在於 Bastet 主機、Git 驗證 token 可用。",
 } as const;
 
 export type Dict = { [K in keyof typeof zhHant]: string };

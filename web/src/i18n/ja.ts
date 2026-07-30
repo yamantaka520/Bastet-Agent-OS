@@ -355,6 +355,15 @@ const ja: Dict = {
   "sec.keepValuePh": "新しい値（空欄＝変更しない）",
   "sec.editHint": "値は書き込み専用です：空欄なら保存済みの認証情報をそのまま維持し、入力するとローテーションになります（古いファイルは <home>/secrets に残ります）。可視範囲を変えると、どの run に渡すかが即座に変わります。",
   "project.resAllAdded": "（プール内のリソースはすべて追加済みです）",
+  "res.test": "テスト",
+  "res.retest": "再テスト",
+  "res.testing": "テスト中…",
+  "res.test.unknown": "未テスト",
+  "res.test.ok": "テスト成功",
+  "res.test.warn": "応答あり・要確認",
+  "res.test.failed": "テスト失敗",
+  "res.testAt": "テスト実行 {when}",
+  "res.testHint": "テストは agent が実際に行う方法で確認します：LLM はモデル一覧（トークンは消費しません）、MCP は initialize ハンドシェイク、スキルは取得元が Bastet ホストに存在するか、Git はトークンが使えるかを検証します。",
 };
 
 export default ja;

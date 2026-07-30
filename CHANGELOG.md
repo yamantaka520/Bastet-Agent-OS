@@ -8,6 +8,23 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.7.0] - 2026-07-31
+
+### Added — per-resource test button
+- `POST /api/resources/{id}/test` exercises a resource the way an agent will,
+  with a check per kind: LLM and media list models (never a completion, so
+  testing costs no tokens), API/custom-git endpoints get an authenticated GET,
+  MCP servers complete a real `initialize` handshake (stdio spawn or streamable
+  HTTP, SSE frames included) and report their name plus tool list, skills are
+  looked for on the Bastet host, GitHub/GitLab tokens are verified against the
+  provider's identity endpoint.
+- Three-state verdict — `ok` / `warn` / `failed`. "Reachable but this path is
+  not it" is a different bug from "host is down", and collapsing them into one
+  red cross sends people debugging the wrong thing. A rejected credential is
+  named as such.
+- The verdict, what was checked, and when, are stored on the resource and
+  audited, so the WebUI still shows it after a reload.
+
 ## [0.6.1] - 2026-07-31
 
 ### Fixed

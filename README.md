@@ -52,6 +52,14 @@ MCP servers keep the vendor's install command; you run it from the WebUI and
 get the full output back, so a failed install can be fixed in place and
 retried. Nothing installs implicitly.
 
+Every resource has a **test button**: it does what an agent would, per kind —
+lists models for an LLM (a listing, never a completion, so testing costs no
+tokens), completes a real MCP `initialize` handshake and reports the server's
+tool list, checks a skill source exists on the Bastet host, verifies a git token
+against the provider. The verdict is three-state: `ok`, `warn` (it answered, but
+not the way we hoped — reachable-but-404 is a different bug from host-down), and
+`failed`, with the exact request that was made.
+
 Granted resources are callable by the agents running that project. At run start
 Bastet hands them over as env vars (`BASTET_RES_<NAME>_URL` / `_KEY` /
 `_TOKEN` / `_MODEL` / `_SOURCE`), an `mcpServers` config file

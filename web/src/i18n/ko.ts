@@ -355,6 +355,15 @@ const ko: Dict = {
   "sec.keepValuePh": "새 값（비우면 기존 값 유지）",
   "sec.editHint": "값은 쓰기 전용입니다: 비워 두면 저장된 자격 증명을 그대로 유지하고, 입력하면 교체됩니다（이전 파일은 <home>/secrets 에 남습니다）. 가시 범위를 바꾸면 어떤 run 이 받는지가 즉시 바뀝니다.",
   "project.resAllAdded": "（풀의 리소스가 모두 추가되었습니다）",
+  "res.test": "테스트",
+  "res.retest": "다시 테스트",
+  "res.testing": "테스트 중…",
+  "res.test.unknown": "미테스트",
+  "res.test.ok": "테스트 통과",
+  "res.test.warn": "응답 있음 · 확인 필요",
+  "res.test.failed": "테스트 실패",
+  "res.testAt": "{when} 에 테스트",
+  "res.testHint": "테스트는 agent 가 실제로 하는 방식으로 확인합니다: LLM 은 모델 목록（토큰 소모 없음）, MCP 는 initialize 핸드셰이크, 스킬은 출처가 Bastet 호스트에 있는지, Git 은 토큰이 유효한지 검증합니다.",
 };
 
 export default ko;

@@ -13,11 +13,13 @@ type Catalog = { groups: string[]; kinds: KindSpec[];
 type Scope = { grant_id: string; scope_type: string; scope_id: string };
 type Install = { status: string; at: string | null; exit_code: number | null;
                  command: string; log: string };
+type TestState = { status: string; at: string | null; checked: string;
+                   detail: string };
 type Resource = {
   id: string; kind: string; name: string; endpoint: string | null;
   api_flavor: string | null; enabled: number; secret_ref: string;
   credential_name: string | null; config: Record<string, string>;
-  install: Install; scopes: Scope[]; problems: string[];
+  install: Install; test: TestState; scopes: Scope[]; problems: string[];
 };
 type SecretRow = { id: string; name: string };
 type Grant = { id: string; resource_id: string; scope_type: string; scope_id: string;
@@ -117,9 +119,17 @@ export default function ResourcesPage(props: { isAdmin: boolean; refreshKey: num
     catch (e) { setError(String((e as Error).message)); }
   };
 
+  const test = async (r: Resource) => {
+    setError("");
+    setBusy(`test:${r.id}`);
+    try { await post(`/api/resources/${r.id}/test`, {}); load(); }
+    catch (e) { setError(String((e as Error).message)); }
+    finally { setBusy(""); }
+  };
+
   const install = async (r: Resource) => {
     setError("");
-    setBusy(r.id);
+    setBusy(`install:${r.id}`);
     try { await post(`/api/resources/${r.id}/install`, {}); load(); }
     catch (e) { setError(String((e as Error).message)); }
     finally { setBusy(""); }
@@ -211,8 +221,12 @@ export default function ResourcesPage(props: { isAdmin: boolean; refreshKey: num
                   </div>
                   {spec(r.kind)?.fields.includes(INSTALLABLE) && (
                     <InstallPanel resource={r} isAdmin={props.isAdmin} t={t}
-                                  busy={busy === r.id} onInstall={() => install(r)} />
+                                  busy={busy === `install:${r.id}`}
+                                  onInstall={() => install(r)} />
                   )}
+                  <TestPanel resource={r} isAdmin={props.isAdmin} t={t}
+                             busy={busy === `test:${r.id}`}
+                             onTest={() => test(r)} />
                 </div>
               ))}
             </div>
@@ -498,6 +512,37 @@ function InstallPanel({ resource, isAdmin, busy, onInstall, t }: {
       )}
       {openLog && <pre className="spec">{state.log}</pre>}
       {isAdmin && <p className="muted">{t("res.installHint")}</p>}
+    </div>
+  );
+}
+
+/** Verdict of the last test, with what was actually checked. Three states on
+ *  purpose: "reachable but the wrong path" is not the same bug as "host down". */
+function TestPanel({ resource, isAdmin, busy, onTest, t }: {
+  resource: Resource; isAdmin: boolean; busy: boolean; onTest: () => void; t: T;
+}) {
+  const [open, setOpen] = useState(false);
+  const state = resource.test;
+  const badge = state.status === "ok" ? "🟢"
+              : state.status === "warn" ? "🟡"
+              : state.status === "failed" ? "🔴" : "⚪";
+  return (
+    <div className="res-install">
+      <span>{badge} {t(`res.test.${state.status}`, undefined, state.status)}</span>
+      {isAdmin && (
+        <button className="ghost" disabled={busy} onClick={onTest}>
+          {busy ? t("res.testing")
+                : state.status === "unknown" ? t("res.test") : t("res.retest")}
+        </button>
+      )}
+      {state.at && <span className="card-meta">
+        {t("res.testAt", { when: new Date(state.at).toLocaleString() })}</span>}
+      {state.detail && (
+        <button className="ghost" onClick={() => setOpen(!open)}>
+          {open ? "▾" : "▸"} {state.checked || t("res.test")}</button>
+      )}
+      {open && <pre className="spec">{state.checked}\n\n{state.detail}</pre>}
+      {isAdmin && open && <p className="muted">{t("res.testHint")}</p>}
     </div>
   );
 }

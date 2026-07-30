@@ -355,6 +355,15 @@ const en: Dict = {
   "sec.keepValuePh": "new value (blank = keep current)",
   "sec.editHint": "The value is write-only: leave it blank to keep the stored credential, fill it in to rotate (the old file stays in <home>/secrets). Changing the scope immediately changes which runs receive it.",
   "project.resAllAdded": "(every pool resource is already added)",
+  "res.test": "Test",
+  "res.retest": "Test again",
+  "res.testing": "testing…",
+  "res.test.unknown": "not tested",
+  "res.test.ok": "test passed",
+  "res.test.warn": "answered, needs a look",
+  "res.test.failed": "test failed",
+  "res.testAt": "tested {when}",
+  "res.testHint": "The test does what an agent would: an LLM lists models (no tokens spent), an MCP server completes an initialize handshake, a skill source is looked for on the Bastet host, and a git token is verified against the provider.",
 };
 
 export default en;

@@ -992,7 +992,7 @@ def create_app(home: Home) -> FastAPI:
 
     def _resource_row(row) -> dict:
         """Public shape of a pool resource: config visible, secret never."""
-        from . import resource_install
+        from . import resource_install, resource_test
         from . import resource_kinds as rk
         config = json.loads(row["config_json"] or "{}")
         ref = row["secret_ref"] or ""
@@ -1007,6 +1007,7 @@ def create_app(home: Home) -> FastAPI:
                 "credential_name": credential,
                 "config": {k: v for k, v in config.items() if k != "install"},
                 "install": resource_install.state_of(config),
+                "test": resource_test.state_of(config),
                 "scopes": _scope_rows(row["id"]),
                 "problems": rk.validate(row["kind"], row["endpoint"], ref, config)}
 
@@ -1130,6 +1131,18 @@ def create_app(home: Home) -> FastAPI:
         from . import resource_install
         try:
             return resource_install.run(db, resource_id, auth.actor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/resources/{resource_id}/test")
+    async def test_resource(resource_id: str,
+                           auth: Auth = Depends(require_role("admin"))):
+        """Exercise the resource the way an agent would (read-only, no tokens
+        spent). async def: the blocking probe runs on a worker thread."""
+        from . import resource_test
+        try:
+            return await asyncio.to_thread(resource_test.run, db, resource_id,
+                                           auth.actor)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

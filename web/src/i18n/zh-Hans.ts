@@ -375,6 +375,15 @@ const zhHans: Dict = {
   "sec.keepValuePh": "新内容（留空＝不变更）",
   "sec.editHint": "值是只写的：留空表示保留原本的凭据，填入即为轮替（旧文件仍留在 <home>/secrets）。修改可见范围会立即影响哪些 run 能拿到它。",
   "project.resAllAdded": "（资源池的资源都已加入）",
+  "res.test": "测试",
+  "res.retest": "重新测试",
+  "res.testing": "测试中…",
+  "res.test.unknown": "尚未测试",
+  "res.test.ok": "测试通过",
+  "res.test.warn": "有响应但需确认",
+  "res.test.failed": "测试失败",
+  "res.testAt": "测试于 {when}",
+  "res.testHint": "测试会用 agent 实际会走的方式检查：LLM 列出模型（不会消耗 token）、MCP 完成一次 initialize 握手、Skill 检查来源是否存在于 Bastet 主机、Git 验证 token 可用。",
 };
 
 export default zhHans;
