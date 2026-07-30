@@ -395,7 +395,7 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
           {task.job_id
             ? (
               // the same job the board shows, with its live state: this is what
-              // makes 任務拆分 and 看板 one picture instead of two
+              // makes the plan and the Kanban one picture instead of two
               <span className="card-meta task-job">
                 {JOB_BADGE[task.job_status ?? ""] ?? "•"}{" "}
                 {task.job_status ? t(`proj.job.${task.job_status}`,
