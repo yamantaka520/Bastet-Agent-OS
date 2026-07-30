@@ -14,7 +14,6 @@ from fake_executor import SCRIPT, req
 from bastet_agent_os.config import check_repo_path, expand_repo_path, is_git_repo
 from bastet_agent_os.executors.base import RunResult
 
-
 # ---- path handling -----------------------------------------------------------------
 
 def test_tilde_and_env_vars_are_expanded(monkeypatch, tmp_path):
