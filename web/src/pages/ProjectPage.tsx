@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, post, put } from "../api";
+import { api, del, post, put } from "../api";
 import { DataTable, Section, useList } from "../ui";
 import { Secret, scopeText } from "./Secrets";
 
@@ -75,6 +75,16 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
     } catch (e) { setError(String((e as Error).message)); }
   };
 
+  const unassignRole = async (role: string, agentId: string) => {
+    setError("");
+    try {
+      await del(`/api/roles?project_id=${encodeURIComponent(selected)}` +
+                `&agent_id=${encodeURIComponent(agentId)}` +
+                `&role=${encodeURIComponent(role)}`);
+      load();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
   const setTemplate = async (templateId: string) => {
     setError("");
     try {
@@ -134,19 +144,39 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
                     i + 1,
                     st.name + (st.read_only ? " 🔒" : ""),
                     st.role ? roleLabel(st.role) : <span className="muted">不指定</span>,
-                    st.role
-                      ? (agentsForRole.length
-                          ? agentsForRole.map((a) => `${a.agent_name}(${a.executor_type})`)
-                              .join("、")
-                          : <span className="danger-text">⚠ 缺人</span>)
-                      : <span className="muted">用專案預設 agent</span>,
-                    st.role && props.canOperate && !agentsForRole.length ? (
-                      <AssignInline agents={agents} onPick={(aid) =>
-                        assignRole(st.role as string, aid)} />
+                    !st.role
+                      ? <span className="muted">用專案預設 agent</span>
+                      : agentsForRole.length
+                        ? (
+                          <span className="role-agents">
+                            {agentsForRole.map((a) => (
+                              <span key={a.agent_id} className="role-chip">
+                                {a.agent_name}
+                                <span className="card-meta"> ({a.executor_type})</span>
+                                {props.canOperate && (
+                                  <button className="ghost chip-x" title="移除此指派"
+                                          onClick={() => unassignRole(st.role as string,
+                                                                     a.agent_id)}>✕</button>
+                                )}
+                              </span>
+                            ))}
+                          </span>
+                        )
+                        : <span className="danger-text">⚠ 缺人</span>,
+                    // assignment stays editable: add another agent or swap by
+                    // removing the chip above — never a one-shot decision
+                    st.role && props.canOperate ? (
+                      <AssignInline
+                        agents={agents.filter((a) =>
+                          !agentsForRole.some((x) => x.agent_id === a.id))}
+                        label={agentsForRole.length ? "加入/更換…" : "指派 Agent…"}
+                        onPick={(aid) => assignRole(st.role as string, aid)} />
                     ) : null,
                   ];
                 })} />
             )}
+            <p className="muted">指派可隨時調整：✕ 移除、下拉選單加入其他 Agent。
+              同一角色指派多個 Agent 時，優先順序最高者執行（在「組織」頁調整優先順序）。</p>
           </Section>
 
           <Section title="資源與預算授權">
@@ -183,20 +213,23 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
   );
 }
 
-function AssignInline({ agents, onPick }: {
-  agents: Agent[]; onPick: (agentId: string) => void;
+function AssignInline({ agents, onPick, label = "指派 Agent…" }: {
+  agents: Agent[]; onPick: (agentId: string) => void; label?: string;
 }) {
   const [value, setValue] = useState("");
+  if (!agents.filter((a) => a.enabled).length) {
+    return <span className="muted">（無其他可用 Agent）</span>;
+  }
   return (
     <span className="row-ops">
       <select value={value} onChange={(e) => setValue(e.target.value)}>
-        <option value="">指派 Agent…</option>
+        <option value="">{label}</option>
         {agents.filter((a) => a.enabled).map((a) => (
           <option key={a.id} value={a.id}>{a.name}</option>
         ))}
       </select>
       <button className="ghost" disabled={!value}
-              onClick={() => { onPick(value); setValue(""); }}>指派</button>
+              onClick={() => { onPick(value); setValue(""); }}>套用</button>
     </span>
   );
 }
