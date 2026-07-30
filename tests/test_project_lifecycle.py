@@ -47,7 +47,10 @@ def test_only_declared_transitions_are_allowed(proj):
 
 def test_every_status_has_a_light_and_the_ui_gets_the_legal_moves(proj):
     assert set(lifecycle.LIGHTS) == set(lifecycle.STATUSES)
+    # `activate`/`complete` are internal: the UI must not offer them as buttons
     assert lifecycle.allowed_transitions(lifecycle.PLANNING) == ["confirm_plan"]
+    assert "activate" in lifecycle.allowed_transitions(lifecycle.PLANNING,
+                                                       include_internal=True)
     assert "start" in lifecycle.allowed_transitions(lifecycle.READY)
     assert lifecycle.allowed_transitions(lifecycle.CLOSED) == ["reopen"]
 

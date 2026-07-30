@@ -1268,23 +1268,15 @@ def create_app(home: Home) -> FastAPI:
             job_id = orch.dispatch(actor=auth.actor, req=DispatchRequest(
                 project_id=session["scope_id"], prompt=spec,
                 title=body.title or f"chat: {session['title']}"[:60],
-                agent_id=body.agent_id, template_id=body.template_id))
+                agent_id=body.agent_id, template_id=body.template_id,
+                origin="chat"))
         except QuotaError as exc:
             raise HTTPException(status_code=429, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        # The project tab and the board must show the same work: record the
-        # dispatched task on the project's plan, or the chat becomes a parallel
-        # universe where a card exists on the board and nowhere else.
-        plan = lifecycle_mod.task_plan(db, session["scope_id"])
-        tasks = plan["tasks"]
-        if not any(task.get("job_id") == job_id for task in tasks):
-            tasks = [*tasks, {"title": body.title or f"chat: {session['title']}"[:60],
-                              "spec": spec[:4000], "role": "", "job_id": job_id,
-                              "origin": "chat"}]
-            lifecycle_mod.save_task_plan(db, session["scope_id"], tasks,
-                                         by=plan["by"] or auth.actor,
-                                         confirmed=True)
+        # linking onto the plan + moving the light happens in orch.dispatch(), so
+        # every entry point (chat, board, runner) behaves identically
+        tasks = lifecycle_mod.task_plan(db, session["scope_id"])["tasks"]
         chat_mod.add_message(db, session_id, role="system", author=auth.actor,
                              content=f"✅ 已派工：{job_id}",
                              meta={"job_id": job_id})

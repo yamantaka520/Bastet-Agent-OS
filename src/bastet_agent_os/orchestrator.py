@@ -50,6 +50,7 @@ class DispatchRequest:
     timeout_s: int = 3600
     allowed_tools: list[str] | None = None
     use_worktree: bool = True
+    origin: str = "dispatch"          # chat|runner|dispatch — shown on the plan
 
 
 def _failure_reason(result: RunResult, workdir: str) -> str:
@@ -77,6 +78,20 @@ class Orchestrator:
     def _emit(self, event_type: str, project_id: str | None, **payload) -> None:
         if self.bus is not None:
             self.bus.emit(event_type, project_id=project_id, **payload)
+
+    def _sync_project(self, project_id: str | None) -> None:
+        """Keep the project's light truthful whenever a job's status moves.
+        A project reading 規劃中 while a job executes is worse than no light."""
+        if not project_id:
+            return
+        from . import project_lifecycle as lifecycle
+        try:
+            moved = lifecycle.sync_from_jobs(self.db, project_id, actor="orchestrator")
+        except Exception as exc:            # never let bookkeeping kill a run
+            log.warning("project %s status sync failed: %r", project_id, exc)
+            return
+        if moved:
+            self._emit("project.status", project_id, status=moved)
 
     # -- dispatch -------------------------------------------------------------
 
@@ -134,6 +149,14 @@ class Orchestrator:
                        "title": req.title})
         self._emit("job.created", req.project_id, job_id=job_id, title=req.title,
                    stage=stages[0].name)
+        # the plan and the board must show the same work, and the light must move
+        from . import project_lifecycle as lifecycle
+        try:
+            lifecycle.link_job(self.db, req.project_id, job_id, req.title,
+                               req.prompt, origin=req.origin)
+        except Exception as exc:
+            log.warning("could not link job %s to the plan: %r", job_id, exc)
+        self._sync_project(req.project_id)
         self._spawn(self._drive_job(job_id, req))
         return job_id
 
@@ -165,6 +188,7 @@ class Orchestrator:
                           (now(), job_id))
         self.db.audit(actor, "job.cancel", "job", job_id, {"runs": killed})
         self._emit("job.cancelled", job["project_id"], job_id=job_id)
+        self._sync_project(job["project_id"])
         return {"job_id": job_id, "runs_cancelled": killed}
 
     def _spawn(self, coro) -> None:
@@ -225,6 +249,7 @@ class Orchestrator:
                               (now(), job_id))
                 self.db.audit("orchestrator", "job.done", "job", job_id, {})
                 self._emit("job.done", job["project_id"], job_id=job_id)
+                self._sync_project(job["project_id"])
                 self.cleanup_worktree(job_id)
                 return
             self.db.write("UPDATE jobs SET stage=?, updated_at=? WHERE id=?",
@@ -302,6 +327,7 @@ class Orchestrator:
             self.db.write("UPDATE jobs SET status='done', updated_at=? WHERE id=?",
                           (now(), job_id))
             self.cleanup_worktree(job_id)
+            self._sync_project(job["project_id"])
             return {"job_id": job_id, "status": "done"}
         self.db.write("UPDATE jobs SET stage=?, status='in_progress', updated_at=? WHERE id=?",
                       (names[idx + 1], now(), job_id))
@@ -752,3 +778,4 @@ class Orchestrator:
         row = self.db.one("SELECT project_id, stage FROM jobs WHERE id=?", (job_id,))
         self._emit("job.blocked", row["project_id"] if row else None, job_id=job_id,
                    stage=row["stage"] if row else None, reason=reason[:200])
+        self._sync_project(row["project_id"] if row else None)

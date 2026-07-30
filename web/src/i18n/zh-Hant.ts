@@ -482,6 +482,13 @@ const zhHant = {
   "board.retryHint": "會重跑目前這個階段（不會跳過已完成的階段）。若失敗原因是 Agent 本身（未登入、額度用完），可在左邊改用別的 Agent。",
   "board.retryRefresh": "重讀專案最新工作流",
   "board.retrySpecHint": "重試前可以直接修改任務內容：卡住的原因常常是規格不清楚或路徑寫錯，用原本的內容重跑只會再失敗一次。專案的 repo 路徑、憑證、資源池都會在重跑時重新讀取。",
+  "proj.job.in_progress": "執行中",
+  "proj.job.blocked": "卡住/待授權",
+  "proj.job.done": "已完成",
+  "proj.job.cancelled": "已取消",
+  "proj.job.open": "待開始",
+  "proj.job.missing": "任務已不存在",
+  "proj.planSyncHint": "有 job 編號的任務就是看板上的同一張卡片，狀態會同步；沒有編號的還沒派工。",
 } as const;
 
 export type Dict = { [K in keyof typeof zhHant]: string };

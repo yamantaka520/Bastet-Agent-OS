@@ -275,7 +275,7 @@ class ProjectRunner:
                 continue
             job_id = self.orch.dispatch(actor=actor or "runner", req=DispatchRequest(
                 project_id=project_id, prompt=task.get("spec") or task["title"],
-                title=task["title"], agent_id=agent))
+                title=task["title"], agent_id=agent, origin="runner"))
             self._remember_job(project_id, index, job_id)
             if await self._await_job(project_id, job_id) is None:
                 return

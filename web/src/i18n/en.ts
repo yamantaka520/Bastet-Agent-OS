@@ -463,6 +463,13 @@ const en: Dict = {
   "board.retryHint": "Re-runs the current stage (finished stages are not repeated). If the agent itself was the problem — not logged in, out of quota — pick a different one on the left.",
   "board.retryRefresh": "re-read the project's current workflow",
   "board.retrySpecHint": "Edit the task before retrying: a stuck card is usually an unclear spec or a wrong path, and re-running the same content just fails again. The project's repo path, credentials and resource pool are always re-read on a retry.",
+  "proj.job.in_progress": "running",
+  "proj.job.blocked": "stuck / awaiting you",
+  "proj.job.done": "done",
+  "proj.job.cancelled": "cancelled",
+  "proj.job.open": "not started",
+  "proj.job.missing": "job no longer exists",
+  "proj.planSyncHint": "A task with a job id is the same card you see on the board, status included; one without has not been dispatched yet.",
 };
 
 export default en;

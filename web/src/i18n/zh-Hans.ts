@@ -483,6 +483,13 @@ const zhHans: Dict = {
   "board.retryHint": "会重跑当前这个阶段（不会跳过已完成的阶段）。若失败原因是 Agent 本身（未登录、配额用完），可在左边改用别的 Agent。",
   "board.retryRefresh": "重读项目最新工作流",
   "board.retrySpecHint": "重试前可以直接修改任务内容：卡住的原因常常是规格不清楚或路径写错，用原本的内容重跑只会再失败一次。项目的 repo 路径、凭据、资源池都会在重跑时重新读取。",
+  "proj.job.in_progress": "执行中",
+  "proj.job.blocked": "卡住/待授权",
+  "proj.job.done": "已完成",
+  "proj.job.cancelled": "已取消",
+  "proj.job.open": "待开始",
+  "proj.job.missing": "任务已不存在",
+  "proj.planSyncHint": "有 job 编号的任务就是看板上的同一张卡片，状态会同步；没有编号的还没派发。",
 };
 
 export default zhHans;

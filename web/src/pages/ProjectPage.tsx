@@ -21,7 +21,8 @@ type Agent = { id: string; name: string; executor_type: string; enabled: number 
 type Role = { id: string; label: string };
 type Template = { id: string };
 type PoolResource = { id: string; name: string; kind: string };
-type Task = { title: string; spec: string; role?: string; job_id?: string };
+type Task = { title: string; spec: string; role?: string; job_id?: string;
+               origin?: string; job_status?: string; job_stage?: string };
 type Overview = {
   project: { id: string; team_id: string; repo_path: string | null;
              description: string; template_id: string | null };
@@ -38,6 +39,10 @@ type Overview = {
 };
 
 const GROUPS = ["planning", "ready", "running", "paused", "maintenance", "closed"];
+const JOB_BADGE: Record<string, string> = {
+  in_progress: "🔵", blocked: "🟠", done: "✅", cancelled: "⚪", open: "⚪",
+  missing: "❓",
+};
 
 export default function ProjectPage(props: { canOperate: boolean; refreshKey: number }) {
   const t = useT();
@@ -256,7 +261,8 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
       <p className="muted">{t("project.assignHint")}</p>
 
       <TaskPlan projectId={projectId} project={project} agents={agents}
-                canOperate={canOperate} t={t} onChanged={onChanged} />
+                canOperate={canOperate} refreshKey={refreshKey} t={t}
+                onChanged={onChanged} />
 
       <h4>{t("project.grants")}</h4>
       <DataTable
@@ -304,9 +310,10 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
 }
 
 /** The PM agent's decomposition: propose → edit → human confirm → runnable. */
-function TaskPlan({ projectId, project, agents, canOperate, onChanged, t }: {
+function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChanged,
+                    t }: {
   projectId: string; project: Project; agents: Agent[]; canOperate: boolean;
-  onChanged: () => void; t: T;
+  refreshKey: number; onChanged: () => void; t: T;
 }) {
   const [plan, setPlan] = useState<{ tasks: Task[]; confirmed: boolean;
                                      by: string } | null>(null);
@@ -323,7 +330,7 @@ function TaskPlan({ projectId, project, agents, canOperate, onChanged, t }: {
         setTasks(state.task_plan.tasks);
       }).catch(() => setPlan(null));
   }, [projectId]);
-  useEffect(load, [load]);
+  useEffect(load, [load, refreshKey]);
 
   const decompose = async () => {
     setBusy(true);
@@ -386,7 +393,18 @@ function TaskPlan({ projectId, project, agents, canOperate, onChanged, t }: {
                  disabled={!canOperate} style={{ width: "9rem" }}
                  onChange={(e) => patch(i, "role", e.target.value)} />
           {task.job_id
-            ? <span className="card-meta">{t("proj.taskJob")}: {task.job_id}</span>
+            ? (
+              // the same job the board shows, with its live state: this is what
+              // makes 任務拆分 and 看板 one picture instead of two
+              <span className="card-meta task-job">
+                {JOB_BADGE[task.job_status ?? ""] ?? "•"}{" "}
+                {task.job_status ? t(`proj.job.${task.job_status}`,
+                                     undefined, task.job_status) : ""}
+                {task.job_stage ? ` · ${task.job_stage}` : ""}
+                {task.origin ? ` · ${task.origin}` : ""}
+                <code className="detail"> {task.job_id}</code>
+              </span>
+            )
             : canOperate && (
               <button className="ghost danger-text"
                       onClick={() => setTasks(tasks.filter((_, idx) => idx !== i))}>
@@ -404,6 +422,7 @@ function TaskPlan({ projectId, project, agents, canOperate, onChanged, t }: {
             {t("proj.confirmTasks")}</button>
         </div>
       )}
+      <p className="muted">{t("proj.planSyncHint")}</p>
       <p className="muted">{t("proj.runHint")}</p>
       {project.status === "closed" && <p className="muted">{t("proj.reopenHint")}</p>}
     </>

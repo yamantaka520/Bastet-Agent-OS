@@ -39,6 +39,8 @@ LIGHTS = {PLANNING: "🔵", READY: "🟡", RUNNING: "🟢", PAUSED: "⏸",
 # transition name -> (allowed from, to)
 TRANSITIONS: dict[str, tuple[tuple[str, ...], str]] = {
     "confirm_plan": ((PLANNING,), READY),
+    # work dispatched straight from chat or the board, without the runner
+    "activate": ((PLANNING, READY, PAUSED, MAINTENANCE), RUNNING),
     "start": ((READY, PAUSED, MAINTENANCE), RUNNING),
     "pause": ((RUNNING,), PAUSED),
     "resume": ((PAUSED,), RUNNING),
@@ -48,6 +50,11 @@ TRANSITIONS: dict[str, tuple[tuple[str, ...], str]] = {
     "reopen": ((CLOSED,), PLANNING),
     "replan": ((READY, MAINTENANCE, PAUSED), PLANNING),
 }
+
+
+# transitions the system performs for itself; never offered as a UI control,
+# because `activate` beside "confirm plan" would let a click skip the human gate
+INTERNAL_TRANSITIONS = {"activate", "complete"}
 
 
 class LifecycleError(Exception):
@@ -61,8 +68,10 @@ def status_of(db, project_id: str) -> str:
     return row["status"] or PLANNING
 
 
-def allowed_transitions(status: str) -> list[str]:
-    return [name for name, (froms, _) in TRANSITIONS.items() if status in froms]
+def allowed_transitions(status: str, include_internal: bool = False) -> list[str]:
+    return [name for name, (froms, _) in TRANSITIONS.items()
+            if status in froms
+            and (include_internal or name not in INTERNAL_TRANSITIONS)]
 
 
 def apply(db, project_id: str, transition: str, actor: str = "",
@@ -137,9 +146,82 @@ def maybe_complete(db, project_id: str, actor: str = "runner") -> str | None:
     return None
 
 
+def link_job(db, project_id: str, job_id: str, title: str, spec: str,
+             origin: str = "chat") -> int:
+    """Put a dispatched job on the project's plan.
+
+    Matching by title first matters: dispatching a task the PM already proposed
+    should light up *that* row, not append a near-duplicate. Otherwise the
+    project tab and the board drift into two different accounts of the work."""
+    plan = task_plan(db, project_id)
+    tasks = [dict(t) for t in plan["tasks"]]
+    if any(t.get("job_id") == job_id for t in tasks):
+        return len(tasks)
+    wanted = (title or "").strip()
+    for task in tasks:
+        if not task.get("job_id") and wanted and task.get("title", "").strip() == wanted:
+            task["job_id"] = job_id
+            task["origin"] = task.get("origin") or origin
+            save_task_plan(db, project_id, tasks, by=plan["by"],
+                           confirmed=plan["confirmed"])
+            return len(tasks)
+    tasks.append({"title": wanted or job_id, "spec": (spec or "")[:4000],
+                  "role": "", "job_id": job_id, "origin": origin})
+    save_task_plan(db, project_id, tasks, by=plan["by"], confirmed=plan["confirmed"])
+    return len(tasks)
+
+
+def sync_from_jobs(db, project_id: str, actor: str = "system") -> str | None:
+    """Make the status match what is actually happening.
+
+    A light that says 規劃中 while a job is executing is worse than no light at
+    all, and a project whose tasks have all finished should be waiting for
+    acceptance rather than pretending to still run. Returns the new status when
+    it moved."""
+    try:
+        status = status_of(db, project_id)
+    except LifecycleError:
+        return None
+    if status == CLOSED:
+        return None                       # a closed project is not resurrected
+    progress = job_progress(db, project_id)
+    in_flight = progress["active"] + progress["blocked"] + progress["open"]
+    if in_flight and status in (PLANNING, READY, PAUSED, MAINTENANCE):
+        return apply(db, project_id, "activate", actor,
+                     {"reason": "work in flight", "jobs": progress})
+    if not in_flight and status == RUNNING and progress["total"]:
+        # a runner mid-list has settled tasks but undispatched ones remain; calling
+        # that "finished" would stop the run after its first task
+        pending = [t for t in task_plan(db, project_id)["tasks"]
+                   if not t.get("job_id")]
+        if pending:
+            return None
+        return apply(db, project_id, "complete", actor, {"jobs": progress})
+    return None
+
+
+def plan_with_jobs(db, project_id: str) -> dict[str, Any]:
+    """The plan, each task carrying its job's live state — this is what makes
+    the project tab and the Kanban board the same picture."""
+    plan = task_plan(db, project_id)
+    tasks = []
+    for task in plan["tasks"]:
+        item = dict(task)
+        if item.get("job_id"):
+            job = db.one("SELECT status, stage, title FROM jobs WHERE id=?",
+                         (item["job_id"],))
+            if job is None:
+                item["job_status"] = "missing"
+            else:
+                item["job_status"] = job["status"]
+                item["job_stage"] = job["stage"]
+        tasks.append(item)
+    return {**plan, "tasks": tasks}
+
+
 def overview(db, project_id: str) -> dict[str, Any]:
     status = status_of(db, project_id)
     return {"status": status, "light": LIGHTS.get(status, "⚪"),
             "transitions": allowed_transitions(status),
             "progress": job_progress(db, project_id),
-            "task_plan": task_plan(db, project_id)}
+            "task_plan": plan_with_jobs(db, project_id)}

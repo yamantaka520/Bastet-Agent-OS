@@ -8,6 +8,25 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.10.1] - 2026-07-31
+
+### Fixed — the project card now tells the truth about its own work
+- **A job was executing while the card still read 規劃中.** Nothing reconciled
+  the lifecycle status with reality. `sync_from_jobs()` now runs whenever a job
+  is dispatched, blocked, finished or cancelled: work in flight moves the project
+  to 執行中 (a new internal `activate` transition, never offered as a UI button so
+  it cannot skip the human plan gate), and a project whose every planned task has
+  a finished job moves to 維護中. It deliberately does **not** finish a project
+  mid-plan — undispatched tasks remaining means the run is not over, which would
+  otherwise have stopped a runner after its first task.
+- **The task breakdown and the board were two accounts of the same work.**
+  `link_job()` attaches a dispatched job to the planned task with the same title
+  (appending only when there is no match, never duplicating), and it runs inside
+  `Orchestrator.dispatch()`, so chat, board and runner all behave identically.
+  Each task now carries its job's live status and stage, shown on the row.
+- `DispatchRequest.origin` records where the work came from (chat / runner /
+  dispatch) instead of guessing from the actor string.
+
 ## [0.10.0] - 2026-07-31
 
 ### Fixed — retry actually re-reads the project, chat dispatches join the plan

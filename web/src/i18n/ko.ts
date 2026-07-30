@@ -463,6 +463,13 @@ const ko: Dict = {
   "board.retryHint": "현재 단계만 다시 실행합니다（완료된 단계는 반복하지 않습니다）. 실패 원인이 Agent 쪽（미로그인·한도 초과）이면 왼쪽에서 다른 Agent 를 고르세요.",
   "board.retryRefresh": "프로젝트의 최신 워크플로 다시 읽기",
   "board.retrySpecHint": "재시도 전에 작업 내용을 수정할 수 있습니다: 멈추는 원인은 명세가 불분명하거나 경로가 틀린 경우가 많아, 같은 내용으로 다시 실행하면 또 실패합니다. repo 경로·자격 증명·리소스 풀은 재시도 시 항상 다시 읽습니다.",
+  "proj.job.in_progress": "실행 중",
+  "proj.job.blocked": "멈춤 / 승인 대기",
+  "proj.job.done": "완료",
+  "proj.job.cancelled": "취소됨",
+  "proj.job.open": "미시작",
+  "proj.job.missing": "작업이 존재하지 않음",
+  "proj.planSyncHint": "job id 가 있는 작업은 보드에 보이는 같은 카드이며 상태도 동기화됩니다. id 가 없으면 아직 배정되지 않은 것입니다.",
 };
 
 export default ko;

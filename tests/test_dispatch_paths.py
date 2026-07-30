@@ -186,77 +186,70 @@ def test_job_detail_returns_the_failure_reason(tmp_path):
 
 # ---- the project tab and the board must agree ---------------------------------------
 
-def test_a_chat_dispatch_lands_on_the_project_task_plan(tmp_path, monkeypatch):
-    """Live finding: dispatching from chat created a board card that the project
-    tab knew nothing about — two views of "this project's work" disagreeing."""
-    import httpx
-    from fastapi.testclient import TestClient
-
+def test_link_job_matches_a_planned_task_before_appending(db, tmp_path):
+    """The project tab and the board must be one account of the work: a job for
+    a task the PM already proposed lights up *that* row."""
     from bastet_agent_os import project_lifecycle as lifecycle
-    from bastet_agent_os.config import Home
-    from bastet_agent_os.db import Db
-    from bastet_agent_os.orchestrator import Orchestrator
-    from bastet_agent_os.server import create_app
+    from bastet_agent_os.db import now as _now
 
-    monkeypatch.setattr(Orchestrator, "dispatch",
-                        lambda self, actor, req: "job_from_chat")
+    db.write("INSERT INTO projects(id, team_id, repo_path, created_at, updated_at) "
+             "VALUES('p','t','/x',?,?)", (_now(), _now()))
+    lifecycle.save_task_plan(db, "p", [{"title": "後端 API", "spec": "s"},
+                                       {"title": "前端頁面", "spec": "s"}],
+                             by="pm", confirmed=True)
 
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    lifecycle.link_job(db, "p", "job1", "前端頁面", "spec", origin="chat")
+    tasks = lifecycle.task_plan(db, "p")["tasks"]
+    assert len(tasks) == 2                       # matched, did not append
+    assert tasks[1]["job_id"] == "job1" and tasks[1]["origin"] == "chat"
 
-    home = Home(tmp_path / "home")
-    client = TestClient(create_app(home), base_url="http://127.0.0.1")
-    client.headers["Authorization"] = f"Bearer {home.api_token()}"
-    client.post("/api/teams", json={"id": "t1", "name": "T"})
-    client.post("/api/projects", json={"id": "p1", "repo_path": str(repo),
-                                       "team_id": "t1"})
-    client.post("/api/agents", json={"id": "a1", "name": "A",
-                                     "executor_type": "claude-code"})
-    key = tmp_path / "k"
-    key.write_text("sk")
-    rid = client.post("/api/resources", json={
-        "name": "llm", "kind": "llm", "endpoint": "https://x/v1",
-        "api_flavor": "openai", "secret_ref": f"file:{key}",
-        "scope_type": "global", "config": {"default_model": "m"}}).json()["id"]
+    lifecycle.link_job(db, "p", "job1", "前端頁面", "spec")   # idempotent
+    assert len(lifecycle.task_plan(db, "p")["tasks"]) == 2
 
-    reply = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
-    real = httpx.AsyncClient
+    lifecycle.link_job(db, "p", "job2", "臨時加的事", "spec", origin="chat")
+    tasks = lifecycle.task_plan(db, "p")["tasks"]
+    assert len(tasks) == 3 and tasks[2]["job_id"] == "job2"
 
-    class Mocked(real):
-        def __init__(self, *a, **kw):
-            kw["transport"] = httpx.MockTransport(
-                lambda request: httpx.Response(200, json=reply))
-            super().__init__(*a, **kw)
 
-    monkeypatch.setattr(httpx, "AsyncClient", Mocked)
-    session = client.post("/api/chat/sessions", json={
-        "scope_type": "project", "scope_id": "p1", "responder_kind": "resource",
-        "responder_id": rid}).json()["id"]
-    client.post(f"/api/chat/sessions/{session}/messages", json={"content": "做登入頁"})
+async def test_dispatch_links_the_job_and_moves_the_light(orch, seeded):
+    """Live finding: a job was executing while the project card still read
+    規劃中, and the plan had no idea the job existed."""
+    from bastet_agent_os import project_lifecycle as lifecycle
 
-    out = client.post(f"/api/chat/sessions/{session}/dispatch",
-                      json={"agent_id": "a1", "title": "登入頁"}).json()
-    assert out["job_id"] == "job_from_chat" and out["tasks_on_plan"] == 1
+    seeded.write("UPDATE projects SET status='planning' WHERE id='proj1'")
+    seeded.write("DELETE FROM runs")
+    seeded.write("DELETE FROM jobs")
+    lifecycle.save_task_plan(seeded, "proj1", [{"title": "做登入頁", "spec": "spec"}],
+                             by="pm", confirmed=True)
 
-    db = Db(home.db_path)
-    try:
-        plan = lifecycle.task_plan(db, "p1")
-    finally:
-        db.close()
-    assert plan["confirmed"] is True
-    assert plan["tasks"][0]["job_id"] == "job_from_chat"
-    assert plan["tasks"][0]["origin"] == "chat"
-    assert "做登入頁" in plan["tasks"][0]["spec"]
+    SCRIPT.append(RunResult(status="succeeded", summary="ok"))
+    job_id = orch.dispatch(req(title="做登入頁"), actor="user:manfred")
+    # the light moves the moment work exists, not when someone remembers to click
+    assert lifecycle.status_of(seeded, "proj1") == lifecycle.RUNNING
+    tasks = lifecycle.task_plan(seeded, "proj1")["tasks"]
+    assert tasks[0]["job_id"] == job_id           # the planned row, not a new one
 
-    # dispatching twice must not duplicate the same job on the plan
-    client.post(f"/api/chat/sessions/{session}/dispatch",
-                json={"agent_id": "a1", "title": "登入頁"})
-    db = Db(home.db_path)
-    try:
-        assert len(lifecycle.task_plan(db, "p1")["tasks"]) == 1
-    finally:
-        db.close()
+    await orch.wait_idle()
+    # every planned task has a finished job → awaiting acceptance
+    assert lifecycle.status_of(seeded, "proj1") == lifecycle.MAINTENANCE
+    plan = lifecycle.plan_with_jobs(seeded, "proj1")
+    assert plan["tasks"][0]["job_status"] == "done"
+
+
+async def test_the_light_does_not_finish_a_project_mid_plan(orch, seeded):
+    """One task done out of three is not "finished" — that would stop a run."""
+    from bastet_agent_os import project_lifecycle as lifecycle
+
+    seeded.write("UPDATE projects SET status='planning' WHERE id='proj1'")
+    seeded.write("DELETE FROM runs")
+    seeded.write("DELETE FROM jobs")
+    lifecycle.save_task_plan(seeded, "proj1",
+                             [{"title": "A", "spec": "a"}, {"title": "B", "spec": "b"},
+                              {"title": "C", "spec": "c"}], by="pm", confirmed=True)
+    SCRIPT.append(RunResult(status="succeeded"))
+    orch.dispatch(req(title="A"))
+    await orch.wait_idle()
+    assert lifecycle.status_of(seeded, "proj1") == lifecycle.RUNNING   # B and C remain
 
 
 async def test_retry_picks_up_the_projects_current_workflow_and_spec(orch, seeded):

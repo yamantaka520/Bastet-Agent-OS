@@ -463,6 +463,13 @@ const ja: Dict = {
   "board.retryHint": "現在のステージだけを再実行します（完了済みステージは繰り返しません）。失敗原因が Agent 側（未ログイン・上限到達）なら、左で別の Agent を選べます。",
   "board.retryRefresh": "プロジェクトの最新ワークフローを読み直す",
   "board.retrySpecHint": "再試行の前にタスク内容を直せます：止まる原因は仕様の曖昧さやパス間違いが多く、同じ内容で再実行してもまた失敗します。repo パス・認証情報・リソースプールは再実行時に必ず読み直されます。",
+  "proj.job.in_progress": "実行中",
+  "proj.job.blocked": "停止中／承認待ち",
+  "proj.job.done": "完了",
+  "proj.job.cancelled": "キャンセル",
+  "proj.job.open": "未着手",
+  "proj.job.missing": "ジョブが存在しません",
+  "proj.planSyncHint": "job id があるタスクはボード上の同じカードで、状態も同期します。id がないものはまだディスパッチされていません。",
 };
 
 export default ja;
