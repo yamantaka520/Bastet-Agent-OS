@@ -149,3 +149,33 @@ async def test_retry_can_switch_agent_and_refuses_healthy_jobs(orch, seeded):
         orch.retry(job_id)                          # it is done now
     with pytest.raises(ValueError):
         orch.retry("job_ghost")
+
+
+def test_job_detail_returns_the_failure_reason(tmp_path):
+    """The drawer is where a stuck card gets diagnosed. Live finding: the API
+    left `error` out of the runs, so the UI had nothing to show next to the
+    retry button even though the DB knew exactly what was wrong."""
+    from fastapi.testclient import TestClient
+
+    from bastet_agent_os.config import Home
+    from bastet_agent_os.db import Db, now
+    from bastet_agent_os.server import create_app
+
+    home = Home(tmp_path / "home")
+    client = TestClient(create_app(home), base_url="http://127.0.0.1")
+    client.headers["Authorization"] = f"Bearer {home.api_token()}"
+    db = Db(home.db_path)
+    try:
+        db.write("INSERT INTO projects(id, team_id, repo_path, created_at, updated_at) "
+                 "VALUES('p','t','/x',?,?)", (now(), now()))
+        db.write("INSERT INTO jobs(id, project_id, stages_snapshot_json, title, stage, "
+                 "status, created_at, updated_at) VALUES('j','p','[]','t','s',"
+                 "'blocked',?,?)", (now(), now()))
+        db.write("INSERT INTO runs(id, job_id, stage, agent_id, executor_type, status, "
+                 "error) VALUES('r','j','s','a','fake','failed','repo path is not a "
+                 "git repo')")
+    finally:
+        db.close()
+    run = client.get("/api/jobs/j").json()["runs"][0]
+    assert run["error"] == "repo path is not a git repo"
+    assert run["executor_type"] == "fake"

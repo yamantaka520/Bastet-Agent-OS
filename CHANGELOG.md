@@ -8,6 +8,13 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.9.8] - 2026-07-31
+
+### Fixed
+- `GET /api/jobs/{id}` now returns each run's `error` and `executor_type`. The
+  drawer is where a stuck card is diagnosed, and the reason was being dropped on
+  the way out — the DB knew the repo was not a git repo, the UI showed nothing.
+
 ## [0.9.7] - 2026-07-31
 
 ### Fixed — the first real dispatch, and everything it exposed

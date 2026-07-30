@@ -1657,9 +1657,12 @@ def create_app(home: Home) -> FastAPI:
         if row is None:
             raise HTTPException(status_code=404, detail="job not found")
         job = dict(row)
+        # `error` and `executor_type` matter here: the drawer is where a stuck
+        # card is diagnosed, and without the reason there is nothing to act on
         job["runs"] = [dict(r) for r in db.query(
-            "SELECT id, stage, attempt, agent_id, status, cost_usd, accounting_precision, "
-            "started_at, finished_at FROM runs WHERE job_id=? ORDER BY started_at", (job_id,))]
+            "SELECT id, stage, attempt, agent_id, executor_type, status, error, "
+            "cost_usd, accounting_precision, started_at, finished_at "
+            "FROM runs WHERE job_id=? ORDER BY started_at", (job_id,))]
         job["gates"] = [dict(g) for g in db.query(
             "SELECT g.* FROM gate_results g JOIN runs r ON r.id=g.run_id "
             "WHERE r.job_id=? ORDER BY g.at", (job_id,))]
