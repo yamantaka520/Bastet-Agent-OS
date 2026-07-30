@@ -519,7 +519,7 @@ async def _reply_agent(db, home_root, session, history, responder) -> tuple[str,
         pass
     result = await executor.result(handle)
     if result.status != "succeeded" and not result.summary:
-        raise ChatError(f"agent run {result.status}: {result.error or 'no output'}")
+        raise ChatError(f"agent run {result.status} with no output")
     meta = {"responder": "agent", "agent_id": responder.id,
             "executor": agent["executor_type"], "status": result.status,
             "tokens_in": result.tokens_in, "tokens_out": result.tokens_out,

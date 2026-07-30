@@ -182,11 +182,9 @@ async def decompose(db, home_root, project_id: str, agent_id: str = "",
     result = await executor.result(handle)
     db.audit(actor or "system", "project.decompose.raw", "project", project_id,
              {"agent": agent["id"], "status": result.status,
-              "output": (result.summary or "")[:1500],
-              "error": (result.error or "")[:300]})
+              "output": (result.summary or "")[:1500]})
     if not result.summary:
-        raise PlanError(f"PM agent produced no output ({result.status}: "
-                        f"{result.error or 'no error given'})")
+        raise PlanError(f"PM agent produced no output (status: {result.status})")
     tasks = parse_tasks(result.summary)
     lifecycle.save_task_plan(db, project_id, tasks, by=agent["id"])
     db.audit(actor or "system", "project.decompose", "project", project_id,

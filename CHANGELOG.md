@@ -8,6 +8,16 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.9.2] - 2026-07-31
+
+### Fixed
+- `RunResult` has no `.error` field, so the two places that reported a failed
+  agent run (chat turn, PM decomposition) crashed with AttributeError on the
+  failure path itself. Both now report the status they actually have.
+- A decomposition that returns no task list quotes what the agent did say, and
+  the raw output is written to the audit log — "did not return JSON" with no
+  evidence is the least useful error message in the system.
+
 ## [0.9.1] - 2026-07-31
 
 ### Fixed

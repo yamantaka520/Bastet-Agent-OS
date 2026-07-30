@@ -301,3 +301,48 @@ def test_channel_session_is_reused_per_external_conversation(client, llm):
         assert other != first
     finally:
         db.close()
+
+
+async def test_failed_agent_turn_reports_cleanly(client, tmp_path, monkeypatch):
+    """Latent crash found while wiring decomposition: RunResult has no `.error`,
+    so the failure path itself raised AttributeError instead of reporting."""
+    from bastet_agent_os import chat as chat_mod
+    from bastet_agent_os.db import Db
+    from bastet_agent_os.executors.base import RunResult, register_builtin
+
+    class DeadHandle:
+        def state(self):
+            return {}
+
+    @register_builtin
+    class DeadExecutor:
+        kind = "dead-executor"
+
+        async def start(self, task):
+            return DeadHandle()
+
+        async def stream(self, handle):
+            return
+            yield
+
+        async def result(self, handle):
+            return RunResult(status="failed", summary="")
+
+        async def respond(self, handle, request_id, reply):
+            pass
+
+        async def cancel(self, handle):
+            pass
+
+    c, home = client
+    c.post("/api/agents", json={"id": "dead", "name": "Dead",
+                               "executor_type": "dead-executor"})
+    db = Db(home.db_path)
+    try:
+        session = chat_mod.create_session(db, scope_type="global", scope_id="",
+                                          responder_kind="agent", responder_id="dead")
+        chat_mod.add_message(db, session, role="user", content="hi")
+        with pytest.raises(chat_mod.ChatError, match="failed"):
+            await chat_mod.reply(db, home.root, session)
+    finally:
+        db.close()
