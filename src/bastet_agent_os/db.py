@@ -185,6 +185,14 @@ CREATE TABLE IF NOT EXISTS audit_log (
   row_hash TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS role_prompts (
+  role TEXT PRIMARY KEY,           -- matches workflow stage roles
+  label TEXT NOT NULL,
+  prompt TEXT NOT NULL,            -- prepended to a stage run's task context
+  builtin INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS executor_accounts (
   id TEXT PRIMARY KEY,
   executor_type TEXT NOT NULL,

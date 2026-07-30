@@ -145,3 +145,19 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
 .stage-editor-head { display: flex; justify-content: space-between; align-items: center; }
 .chk { display: inline-flex; align-items: center; gap: .3rem; color: var(--muted);
        font-size: .8rem; }
+.role-block { border: 1px solid var(--line); border-radius: 10px; padding: .6rem .8rem;
+              margin-bottom: .6rem; }
+.role-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+             margin-bottom: .4rem; }
+.role-row { display: flex; gap: .6rem; padding: .25rem 0; flex-wrap: wrap;
+            align-items: center; }
+.role-name { min-width: 9rem; }
+.role-agents { display: flex; gap: .4rem; flex-wrap: wrap; }
+.role-chip { display: inline-flex; align-items: center; gap: .2rem; background: var(--bg);
+             border: 1px solid var(--line); border-radius: 999px;
+             padding: .1rem .3rem .1rem .6rem; font-size: .8rem; }
+.chip-x { padding: 0 .25rem; }
+.role-prompt { border: 1px solid var(--line); border-radius: 10px; padding: .6rem .8rem;
+               margin-bottom: .5rem; }
+.role-prompt-text { margin: .2rem 0 0; white-space: pre-wrap; }
+button:disabled { opacity: .45; cursor: not-allowed; }

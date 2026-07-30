@@ -156,3 +156,38 @@ def test_all_presets_parse_and_are_well_formed():
                 assert stage.gate_config.get("command")
         # side-effecting last stage should ask a human
         assert stages[-1].gate in ("human-approve", "agent-review"), preset["id"]
+
+
+# ---- role prompts & project secrets in runs -----------------------------------------
+
+async def test_role_prompt_and_project_secret_reach_the_run(orch, seeded, monkeypatch,
+                                                            tmp_path):
+    from bastet_agent_os.db import now as _now
+
+    seeded.write("INSERT INTO role_prompts(role, label, prompt, builtin, updated_at) "
+                 "VALUES('reviewer','審查者','你是審查者：只找真正的問題。',1,?)", (_now(),))
+    secret_file = tmp_path / "deploy-token"
+    secret_file.write_text("s3cr3t-value")
+    seeded.write("INSERT INTO resources(id, kind, name, secret_ref, config_json, "
+                 "created_at, updated_at) VALUES('sec1','secret','deploy',?,?,?,?)",
+                 (f"file:{secret_file}", '{"env_name": "DEPLOY_TOKEN"}', _now(), _now()))
+    seeded.write("INSERT INTO grants(id, resource_id, scope_type, scope_id, created_at) "
+                 "VALUES('grt-sec','sec1','project','proj1',?)", (_now(),))
+    add_template(seeded, "reviewed", [{"name": "review", "role": "reviewer",
+                                       "gate": "auto"}])
+
+    captured = {}
+
+    def capture(task):
+        captured["prompt"] = task.prompt
+        captured["env"] = dict(task.extra_env)
+        return RunResult(status="succeeded")
+
+    SCRIPT.append(capture)
+    job_id = orch.dispatch(req(template_id="reviewed"))
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+    assert "你是審查者" in captured["prompt"]          # role definition briefs the agent
+    assert captured["env"]["DEPLOY_TOKEN"] == "s3cr3t-value"  # scoped secret injected
+    resolved = seeded.query("SELECT * FROM audit_log WHERE action='secret.resolve'")
+    assert resolved, "secret resolution must be audited"

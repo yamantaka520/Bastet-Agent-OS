@@ -22,6 +22,7 @@ from .db import Db, new_id, now
 from .executors.base import RunResult, TaskSpec, get_executor
 from .governance import GrantView, QuotaError, dispatch_check, resolve_grant
 from .pricing import PriceBook
+from .role_prompts import prompt_for as role_prompt_for
 from .workflow import (
     REVIEW_INSTRUCTIONS,
     GateOutcome,
@@ -326,7 +327,7 @@ class Orchestrator:
                 model = model or routing.get("default_model")
                 flavor = resource["api_flavor"]
             llm = {"flavor": flavor, "model": model} if (model or flavor) else None
-            extra_env: dict[str, str] = {}
+            extra_env: dict[str, str] = self._project_secrets(job, run_id)
             account_id = agent["account_id"] if "account_id" in agent.keys() else None
             if account_id:
                 from .executors.accounts import account_env
@@ -412,7 +413,12 @@ class Orchestrator:
     def _stage_prompt(self, job, stage: StageDef) -> str:
         # pipeline history / deps / memory travel via TaskSpec.context_text
         # (context engine, §5.6); the prompt carries only the spec + scaffold
-        parts = [f"# Task: {job['title']}", job["spec_md"]]
+        parts = []
+        role_prompt = role_prompt_for(self.db, stage.role)
+        if role_prompt:
+            # the role definition frames HOW this stage's agent should behave
+            parts.append(f"## 你的角色（{stage.role}）\n{role_prompt}")
+        parts += [f"# Task: {job['title']}", job["spec_md"]]
         if stage.gate == "agent-review":
             parts.append(REVIEW_INSTRUCTIONS)
             diff = self._job_diff(job)
@@ -472,6 +478,40 @@ class Orchestrator:
         self.db.write("UPDATE jobs SET worktree_path=?, updated_at=? WHERE id=?",
                       (wt_path, now(), job["id"]))
         return wt_path
+
+    def _project_secrets(self, job, run_id: str) -> dict[str, str]:
+        """Resolve credentials whose scope covers this project (SPEC §5.8).
+
+        Resolution happens at run start, is audited, and the value lands in the
+        run's environment — anything injected must be assumed reachable by the
+        agent, so scope these tightly and prefer short-lived tokens."""
+        from . import secrets_store
+
+        env: dict[str, str] = {}
+        rows = self.db.query(
+            "SELECT DISTINCT r.id, r.name, r.secret_ref, r.config_json FROM grants g "
+            "JOIN resources r ON r.id = g.resource_id "
+            "WHERE r.kind='secret' AND r.enabled=1 AND g.enabled=1 AND "
+            "(g.scope_type='global' OR (g.scope_type='project' AND g.scope_id=?) "
+            " OR (g.scope_type='team' AND g.scope_id=?))",
+            (job["project_id"], self._project_team(job["project_id"])))
+        for row in rows:
+            config = json.loads(row["config_json"] or "{}")
+            env_name = config.get("env_name")
+            if not env_name:
+                continue
+            try:
+                env[env_name] = secrets_store.resolve(row["secret_ref"])
+            except secrets_store.SecretError as exc:
+                log.warning("secret %s unresolved: %s", row["name"], exc)
+                continue
+            self.db.audit(f"run:{run_id}", "secret.resolve", "resource", row["id"],
+                          {"env_name": env_name, "project": job["project_id"]})
+        return env
+
+    def _project_team(self, project_id: str) -> str:
+        row = self.db.one("SELECT team_id FROM projects WHERE id=?", (project_id,))
+        return row["team_id"] if row else ""
 
     # -- worktree lifecycle (SPEC §5.4.3) ----------------------------------------------
 

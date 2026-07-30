@@ -201,6 +201,27 @@ class ProjectTemplateIn(BaseModel):
     template_id: str | None = None   # None/"" clears the assignment
 
 
+class ProjectUpdateIn(BaseModel):
+    repo_path: str | None = None
+    description: str | None = None
+
+
+class RolePromptIn(BaseModel):
+    role: str
+    label: str = ""
+    prompt: str
+
+
+class SecretIn(BaseModel):
+    name: str
+    value: str = ""                  # raw value (stored to <home>/secrets) …
+    secret_ref: str = ""             # … or an existing ref (keyring:/file:/env:)
+    env_name: str = ""               # env var injected into runs
+    scope_type: str = "project"      # global|team|project
+    scope_id: str = ""
+    note: str = ""
+
+
 def create_app(home: Home) -> FastAPI:
     from .config import augment_path
 
@@ -215,6 +236,9 @@ def create_app(home: Home) -> FastAPI:
     bus = EventBus()
     orch = Orchestrator(db, home, prices, gateway_url, bus=bus)
     api_token = home.api_token()
+
+    from .role_prompts import seed as seed_role_prompts
+    seed_role_prompts(db)   # built-ins once; user edits persist
 
     channels: list = []
 
@@ -547,6 +571,193 @@ def create_app(home: Home) -> FastAPI:
                 "note": f"profile 目錄保留（可能含登入憑證）：{row['home_dir']} — "
                         "確認不需要後自行刪除"}
 
+    # ---- role definition prompts --------------------------------------------------
+
+    @app.get("/api/role-prompts", dependencies=[Depends(require_role("viewer"))])
+    def list_role_prompts():
+        rows = []
+        for r in db.query("SELECT * FROM role_prompts ORDER BY builtin DESC, role"):
+            row = dict(r)
+            used_by_templates = [t["id"] for t in db.query(
+                "SELECT id FROM workflow_templates WHERE stages_json LIKE ?",
+                (f'%"role": "{r["role"]}"%',))]
+            used_by_projects = [p["project_id"] for p in db.query(
+                "SELECT DISTINCT project_id FROM project_agent_roles WHERE role=?",
+                (r["role"],))]
+            row["used_by"] = {"templates": used_by_templates,
+                              "projects": used_by_projects}
+            row["in_use"] = bool(used_by_templates or used_by_projects)
+            rows.append(row)
+        return rows
+
+    @app.post("/api/role-prompts")
+    def upsert_role_prompt(r: RolePromptIn,
+                           auth: Auth = Depends(require_role("operator"))):
+        existing = db.one("SELECT * FROM role_prompts WHERE role=?", (r.role,))
+        label = r.label or (existing["label"] if existing else r.role)
+        db.write("INSERT INTO role_prompts(role, label, prompt, builtin, updated_at) "
+                 "VALUES(?,?,?,0,?) ON CONFLICT(role) DO UPDATE SET "
+                 "label=excluded.label, prompt=excluded.prompt, "
+                 "updated_at=excluded.updated_at",
+                 (r.role, label, r.prompt, now()))
+        db.audit(auth.actor, "role_prompt.upsert", "role", r.role, {"label": label})
+        return {"role": r.role, "label": label}
+
+    @app.delete("/api/role-prompts/{role}")
+    def delete_role_prompt(role: str, auth: Auth = Depends(require_role("operator"))):
+        used = db.one("SELECT COUNT(*) AS n FROM project_agent_roles WHERE role=?",
+                      (role,))["n"]
+        in_templates = db.query("SELECT id FROM workflow_templates WHERE stages_json LIKE ?",
+                                (f'%"role": "{role}"%',))
+        if used or in_templates:
+            raise HTTPException(status_code=409,
+                                detail="此角色仍被範本或專案指派使用中，無法刪除")
+        cur = db.write("DELETE FROM role_prompts WHERE role=?", (role,))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail="role not found")
+        db.audit(auth.actor, "role_prompt.delete", "role", role, {})
+        return {"deleted": role}
+
+    # ---- credentials (resources of kind=secret, scoped by grants) -------------------
+    # Same tables as the resource pool — the 資源/管理/專案 views are three lenses
+    # on one dataset, never separate stores.
+
+    def _secret_rows(scope_filter: tuple[str, str] | None = None) -> list[dict]:
+        rows = []
+        for r in db.query("SELECT * FROM resources WHERE kind='secret' ORDER BY name"):
+            config = json.loads(r["config_json"] or "{}")
+            scopes = [{"scope_type": g["scope_type"], "scope_id": g["scope_id"]}
+                      for g in db.query("SELECT scope_type, scope_id FROM grants "
+                                        "WHERE resource_id=? AND enabled=1", (r["id"],))]
+            if scope_filter:
+                kind, ident = scope_filter
+                visible = any(sc["scope_type"] == "global"
+                              or (sc["scope_type"] == kind and sc["scope_id"] == ident)
+                              for sc in scopes)
+                if not visible:
+                    continue
+            rows.append({"id": r["id"], "name": r["name"], "enabled": r["enabled"],
+                         "secret_scheme": (r["secret_ref"] or "").split(":", 1)[0],
+                         "env_name": config.get("env_name"),
+                         "note": config.get("note", ""), "scopes": scopes})
+        return rows
+
+    @app.get("/api/secrets", dependencies=[Depends(require_role("admin"))])
+    def list_secrets():
+        return _secret_rows()
+
+    @app.post("/api/secrets")
+    def create_secret(sec: SecretIn, auth: Auth = Depends(require_role("admin"))):
+        if not (sec.value or sec.secret_ref):
+            raise HTTPException(status_code=400, detail="需要憑證內容或既有 ref")
+        if sec.scope_type not in ("global", "team", "project"):
+            raise HTTPException(status_code=400, detail="scope 必須是 global/team/project")
+        if sec.scope_type != "global" and not sec.scope_id:
+            raise HTTPException(status_code=400, detail="team/project 範圍需要指定 id")
+        rid = new_id("sec")
+        ref = secrets_store.ensure_ref(sec.secret_ref or sec.value, home.root, rid)
+        env_name = sec.env_name or "BASTET_" + "".join(
+            ch.upper() if ch.isalnum() else "_" for ch in sec.name)[:48]
+        ts = now()
+        db.write("INSERT INTO resources(id, kind, name, secret_ref, config_json, "
+                 "created_at, updated_at) VALUES(?,'secret',?,?,?,?,?)",
+                 (rid, sec.name, ref,
+                  json.dumps({"env_name": env_name, "note": sec.note}), ts, ts))
+        db.write("INSERT INTO grants(id, resource_id, scope_type, scope_id, created_at) "
+                 "VALUES(?,?,?,?,?)",
+                 (new_id("grt"), rid, sec.scope_type, sec.scope_id or "*", ts))
+        db.audit(auth.actor, "secret.create", "resource", rid,
+                 {"name": sec.name, "scope": f"{sec.scope_type}:{sec.scope_id or '*'}",
+                  "env_name": env_name, "ref_scheme": ref.split(":", 1)[0]})
+        return {"id": rid, "env_name": env_name,
+                "note": "run 啟動時會以此環境變數注入可見範圍內的任務"}
+
+    @app.delete("/api/secrets/{secret_id}")
+    def delete_secret(secret_id: str, auth: Auth = Depends(require_role("admin"))):
+        row = db.one("SELECT * FROM resources WHERE id=? AND kind='secret'", (secret_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="secret not found")
+        db.write("DELETE FROM grants WHERE resource_id=?", (secret_id,))
+        db.write("DELETE FROM resources WHERE id=?", (secret_id,))
+        db.audit(auth.actor, "secret.delete", "resource", secret_id, {"name": row["name"]})
+        return {"deleted": secret_id,
+                "note": "憑證檔案本身保留在 <home>/secrets，確認後可自行刪除"}
+
+    # ---- project overview: one place per project -----------------------------------
+
+    @app.put("/api/projects/{project_id}")
+    def update_project(project_id: str, p: ProjectUpdateIn,
+                       auth: Auth = Depends(require_role("operator"))):
+        row = db.one("SELECT * FROM projects WHERE id=?", (project_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        config = json.loads(row["config_json"] or "{}")
+        if p.description is not None:
+            config["description"] = p.description
+        db.write("UPDATE projects SET repo_path=?, config_json=?, updated_at=? WHERE id=?",
+                 (p.repo_path if p.repo_path is not None else row["repo_path"],
+                  json.dumps(config), now(), project_id))
+        db.audit(auth.actor, "project.update", "project", project_id,
+                 {"repo_path": p.repo_path})
+        return {"id": project_id}
+
+    @app.get("/api/projects/{project_id}/overview",
+             dependencies=[Depends(require_role("viewer"))])
+    def project_overview(project_id: str):
+        project = db.one("SELECT * FROM projects WHERE id=?", (project_id,))
+        if project is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        config = json.loads(project["config_json"] or "{}")
+
+        stages: list[dict] = []
+        template = None
+        if project["default_template_id"]:
+            template = db.one("SELECT * FROM workflow_templates WHERE id=?",
+                              (project["default_template_id"],))
+            if template is not None:
+                stages = json.loads(template["stages_json"])
+
+        assignments = [dict(r) for r in db.query(
+            "SELECT par.role, par.agent_id, par.preference, a.name AS agent_name, "
+            "a.executor_type FROM project_agent_roles par "
+            "JOIN agents a ON a.id = par.agent_id WHERE par.project_id=? "
+            "ORDER BY par.role, par.preference DESC", (project_id,))]
+        by_role: dict[str, list[dict]] = {}
+        for row in assignments:
+            by_role.setdefault(row["role"], []).append(row)
+        needed = []
+        for stage in stages:
+            role = stage.get("role")
+            if role:
+                needed.append({"stage": stage.get("name"), "role": role,
+                               "agents": by_role.get(role, [])})
+
+        resources = [dict(r) for r in db.query(
+            "SELECT r.id, r.name, r.kind, g.budget_usd, g.max_concurrency, g.on_exceed "
+            "FROM grants g JOIN resources r ON r.id = g.resource_id "
+            "WHERE g.enabled=1 AND r.kind != 'secret' AND "
+            "((g.scope_type='project' AND g.scope_id=?) OR "
+            " (g.scope_type='team' AND g.scope_id=?))",
+            (project_id, project["team_id"]))]
+
+        return {
+            "project": {"id": project["id"], "team_id": project["team_id"],
+                        "repo_path": project["repo_path"],
+                        "description": config.get("description", ""),
+                        "template_id": project["default_template_id"]},
+            "stages": stages,
+            "role_coverage": needed,
+            "assignments": assignments,
+            "resources": resources,
+            "secrets": _secret_rows(("project", project_id))
+                       + [s for s in _secret_rows(("team", project["team_id"]))
+                          if s["id"] not in {x["id"] for x in
+                                             _secret_rows(("project", project_id))}],
+            "jobs": [dict(j) for j in db.query(
+                "SELECT id, title, stage, status, updated_at FROM jobs "
+                "WHERE project_id=? ORDER BY updated_at DESC LIMIT 10", (project_id,))],
+        }
+
     # ---- WebUI login wizard (PTY over WS) -----------------------------------------
 
     from .login_sessions import LoginSessionManager
@@ -725,6 +936,25 @@ def create_app(home: Home) -> FastAPI:
         db.audit(auth.actor, "project.template", "project", project_id,
                  {"template": template_id})
         return {"project_id": project_id, "template_id": template_id}
+
+    @app.get("/api/roles", dependencies=[Depends(require_role("viewer"))])
+    def list_roles(project_id: str | None = None):
+        where, params = ("WHERE project_id=?", (project_id,)) if project_id else ("", ())
+        return [dict(r) for r in db.query(
+            "SELECT par.*, a.name AS agent_name, a.executor_type, a.enabled "
+            "FROM project_agent_roles par JOIN agents a ON a.id = par.agent_id "
+            f"{where} ORDER BY par.project_id, par.role, par.preference DESC", params)]
+
+    @app.delete("/api/roles")
+    def unassign_role(project_id: str, agent_id: str, role: str,
+                      auth: Auth = Depends(require_role("operator"))):
+        cur = db.write("DELETE FROM project_agent_roles WHERE project_id=? AND "
+                       "agent_id=? AND role=?", (project_id, agent_id, role))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail="assignment not found")
+        db.audit(auth.actor, "role.unassign", "project", project_id,
+                 {"agent": agent_id, "role": role})
+        return {"removed": True}
 
     @app.post("/api/roles")
     def assign_role(r: RoleIn, auth: Auth = Depends(require_role("operator"))):

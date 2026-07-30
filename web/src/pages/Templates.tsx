@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, del, post } from "../api";
+import RolePromptsSection from "./RolePrompts";
 import { Section, useList } from "../ui";
 
 type Stage = {
@@ -156,6 +157,8 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
           );
         })}
       </Section>
+
+      <RolePromptsSection canOperate={props.canOperate} />
 
       <Section title="專案 ↔ 工作流對應">
         <h3>等待指派（{unassigned.length}）</h3>

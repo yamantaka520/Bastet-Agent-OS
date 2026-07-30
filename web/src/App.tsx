@@ -4,6 +4,7 @@ import AdminPage from "./pages/Admin";
 import AuditPage from "./pages/Audit";
 import BoardPage from "./pages/Board";
 import MemoryPage from "./pages/Memory";
+import ProjectPage from "./pages/ProjectPage";
 import OrgPage from "./pages/Org";
 import ResourcesPage from "./pages/Resources";
 import TemplatesPage from "./pages/Templates";
@@ -13,6 +14,7 @@ const ROLE_RANK: Record<string, number> = { viewer: 0, operator: 1, admin: 2 };
 type Tab = { key: string; label: string; minRole: string };
 const TABS: Tab[] = [
   { key: "board", label: "看板", minRole: "viewer" },
+  { key: "project", label: "專案", minRole: "viewer" },
   { key: "resources", label: "資源", minRole: "viewer" },
   { key: "org", label: "組織", minRole: "viewer" },
   { key: "templates", label: "模板", minRole: "viewer" },
@@ -110,6 +112,7 @@ function Workbench({ me }: { me: Me }) {
         ? <BoardPage projectId={projectId} refreshKey={refreshKey} canOperate={canOperate} />
         : <div className="page"><p className="muted">尚無專案 —
             到「組織」頁建立第一個專案。</p></div>)}
+      {tab === "project" && <ProjectPage canOperate={canOperate} refreshKey={refreshKey} />}
       {tab === "resources" && <ResourcesPage isAdmin={isAdmin} refreshKey={refreshKey} />}
       {tab === "org" && <OrgPage canOperate={canOperate} refreshKey={refreshKey} />}
       {tab === "templates" && <TemplatesPage canOperate={canOperate} refreshKey={refreshKey} />}

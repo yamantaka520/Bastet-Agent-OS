@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { del, post } from "../api";
+import SecretsSection from "./Secrets";
 import { DataTable, InlineForm, Section, useList } from "../ui";
 
 const CHANNEL_STATUS: Record<string, string> = {
@@ -14,7 +15,11 @@ type User = { id: string; name: string; role: string; enabled: number;
 type Channel = { id: string; kind: string; name: string | null; secret_ref: string;
                  enabled: number; paired_users: string[]; status: string };
 
+type ProjectRow = { id: string; team_id: string };
+
 export default function AdminPage(props: { refreshKey: number }) {
+  const [projects] = useList<ProjectRow>("/api/projects", props.refreshKey);
+  const teams = [...new Set(projects.map((p) => p.team_id))];
   const [users, reloadUsers] = useList<User>("/api/users", props.refreshKey);
   const [channels, reloadChannels] = useList<Channel>("/api/channels", props.refreshKey);
   const [freshToken, setFreshToken] = useState<string | null>(null);
@@ -65,6 +70,8 @@ export default function AdminPage(props: { refreshKey: number }) {
             }}>{u.enabled ? "disable" : "enable"}</button>,
           ])} />
       </Section>
+
+      <SecretsSection projects={projects} teams={teams} />
 
       <Section title="Channels (Telegram)">
         <InlineForm

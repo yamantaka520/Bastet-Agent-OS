@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, del, post, put } from "../api";
 import LoginWizard from "../LoginWizard";
+import RoleAssignSection from "./RoleAssign";
 import { DataTable, InlineForm, Section, useList } from "../ui";
 
 type Project = { id: string; team_id: string; repo_path: string | null };
@@ -38,24 +39,22 @@ export default function OrgPage(props: { canOperate: boolean; refreshKey: number
 
       <FederationSection canOperate={props.canOperate} onBound={reloadProjects} />
 
-      <Section title="Role assignment (stage → agent matching)">
-        {props.canOperate && (
-          <InlineForm
-            fields={[{ name: "project", placeholder: "project id" },
-                     { name: "agent", placeholder: "agent id" },
-                     { name: "role", placeholder: "engineer|reviewer|security-reviewer|pm" },
-                     { name: "pref", placeholder: "preference (0)" }]}
-            submit="assign"
-            onSubmit={async (v) => {
-              await post("/api/roles", { project_id: v.project, agent_id: v.agent,
-                                         role: v.role, preference: Number(v.pref || 0) });
-            }} />
-        )}
-        <p className="muted">Stages with a <code>role</code> pick the highest-preference
-          agent holding that role in the project; otherwise the job's default agent runs.</p>
-      </Section>
+      <RoleAssignBridge canOperate={props.canOperate} projects={projects}
+                        agents={agents} />
+
     </div>
   );
+}
+
+function RoleAssignBridge({ canOperate, projects, agents }:
+  { canOperate: boolean; projects: Project[]; agents: Agent[] }) {
+  const [roles, setRoles] = useState<{ id: string; label: string; hint: string }[]>([]);
+  useEffect(() => {
+    api<{ roles: { id: string; label: string; hint: string }[] }>("/api/workflow-catalog")
+      .then((c) => setRoles(c.roles)).catch(() => {});
+  }, []);
+  return <RoleAssignSection canOperate={canOperate} projects={projects}
+                            agents={agents} roles={roles} />;
 }
 
 function TeamsProjectsSection({ canOperate, projects, reloadProjects }:
