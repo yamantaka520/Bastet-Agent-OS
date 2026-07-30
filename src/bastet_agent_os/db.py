@@ -233,6 +233,36 @@ CREATE TABLE IF NOT EXISTS channels (
   enabled INTEGER NOT NULL DEFAULT 1
 );
 
+-- Chat: the human input channel per project (SPEC §5.11). Sessions belong to
+-- a real project (or a team/global scope) so the discussion stays consistent
+-- with the org the runs execute against.
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id TEXT PRIMARY KEY,
+  scope_type TEXT NOT NULL,        -- global|team|project
+  scope_id TEXT NOT NULL,          -- '*' for global
+  title TEXT NOT NULL DEFAULT '',
+  responder_kind TEXT NOT NULL,    -- agent|resource
+  responder_id TEXT NOT NULL,
+  channel TEXT NOT NULL DEFAULT 'web',   -- web|telegram
+  config_json TEXT NOT NULL DEFAULT '{}',
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES chat_sessions(id),
+  role TEXT NOT NULL,              -- user|assistant|system
+  author TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  attachments_json TEXT NOT NULL DEFAULT '[]',
+  meta_json TEXT NOT NULL DEFAULT '{}',   -- model, usage, cost, job_id …
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_msg_session ON chat_messages(session_id, at);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_scope
+  ON chat_sessions(scope_type, scope_id);
+
 CREATE INDEX IF NOT EXISTS idx_runs_job ON runs(job_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_run ON usage_ledger(run_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_at ON usage_ledger(at);

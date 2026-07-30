@@ -31,8 +31,14 @@ HELP_TEXT = (
     "/status — jobs overview\n"
     "/jobs — recent jobs\n"
     "/approve <job_id> — decide a waiting gate\n"
-    "/pair <code> — link this Telegram account"
+    "/pair <code> — link this Telegram account\n"
+    "any other message — talk to this channel's agent/LLM about the project"
 )
+NO_RESPONDER_TEXT = (
+    "This channel has no chat responder yet. Pick an agent or a pool LLM (and a "
+    "project) for it on the WebUI's 管理 tab, then send your message again."
+)
+MAX_TELEGRAM_TEXT = 3800     # 4096 hard limit; leave room for our own framing
 
 
 def issue_pairing_code(db: Db, bastet_user_id: str, name: str) -> str:
@@ -48,11 +54,15 @@ def issue_pairing_code(db: Db, bastet_user_id: str, name: str) -> str:
 
 class TelegramChannel:
     def __init__(self, db: Db, orchestrator, bus, channel_id: str, bot_token: str,
-                 transport: httpx.AsyncBaseTransport | None = None):
+                 transport: httpx.AsyncBaseTransport | None = None,
+                 home_root: str | None = None):
         self.db = db
         self.orch = orchestrator
         self.bus = bus
         self.channel_id = channel_id
+        # chat attachments land under the Bastet home, next to the web ones
+        self.home_root = home_root or str(getattr(orchestrator, "home", None)
+                                          and orchestrator.home.root or ".")
         self._client = httpx.AsyncClient(
             base_url=f"https://api.telegram.org/bot{bot_token}",
             timeout=httpx.Timeout(POLL_TIMEOUT_S + 10, connect=15),
@@ -150,8 +160,87 @@ class TelegramChannel:
                 await self._send(chat["id"], "usage: /approve <job_id>")
                 return
             await self._send_approval_card(chat["id"], parts[1])
-        else:
+        elif text.startswith("/help") or text == "/start":
             await self._send(chat["id"], HELP_TEXT)
+        else:
+            await self._chat_turn(message, binding, chat["id"], telegram_id, text)
+
+    # ---- chat: the second authorisation channel (SPEC §5.11) --------------------
+
+    def _responder(self) -> tuple[str, str, str, str] | None:
+        """(kind, id, scope_type, scope_id) configured for this channel."""
+        config = self._config()
+        responder = config.get("responder") or {}
+        kind, rid = responder.get("kind"), responder.get("id")
+        if not (kind and rid):
+            return None
+        project_id = config.get("project_id") or ""
+        if project_id:
+            return kind, rid, "project", project_id
+        return kind, rid, "global", "*"
+
+    async def _chat_turn(self, message: dict, binding: dict, chat_id: int,
+                         telegram_id: int, text: str) -> None:
+        from .. import chat as chat_mod
+
+        target = self._responder()
+        if target is None:
+            await self._send(chat_id, NO_RESPONDER_TEXT)
+            return
+        kind, rid, scope_type, scope_id = target
+        try:
+            session_id = chat_mod.find_or_create_channel_session(
+                self.db, channel="telegram", external_id=f"{self.channel_id}:{telegram_id}",
+                scope_type=scope_type, scope_id=scope_id, responder_kind=kind,
+                responder_id=rid, title=f"telegram · {binding.get('name', telegram_id)}",
+                actor=f"user:{binding.get('user_id', '')}")
+            attachments = await self._download_attachments(message, session_id)
+            if not (text or attachments):
+                return
+            chat_mod.add_message(self.db, session_id, role="user", content=text,
+                                 author=f"telegram:{telegram_id}",
+                                 attachments=attachments)
+            session = chat_mod.get_session(self.db, session_id)
+            chat_mod.remember(self.db, session, "user", text)
+            answer = await chat_mod.reply(self.db, self.home_root, session_id,
+                                          actor=f"telegram:{telegram_id}")
+        except Exception as exc:                      # never lose the user's message
+            log.warning("telegram chat turn failed: %s", exc)
+            await self._send(chat_id, f"⚠️ {type(exc).__name__}: {exc}"[:400])
+            return
+        self.bus.emit("chat.message", scope_id, session_id=session_id)
+        await self._send(chat_id, (answer["content"] or "")[:MAX_TELEGRAM_TEXT])
+
+    async def _download_attachments(self, message: dict, session_id: str) -> list[dict]:
+        """Documents and photos the user sent — the chat's file intake."""
+        from .. import chat as chat_mod
+
+        files: list[dict] = []
+        candidates = []
+        if message.get("document"):
+            candidates.append((message["document"].get("file_id"),
+                               message["document"].get("file_name") or "document"))
+        photos = message.get("photo") or []
+        if photos:                                    # last entry = highest resolution
+            candidates.append((photos[-1].get("file_id"), "photo.jpg"))
+        for file_id, name in candidates:
+            if not file_id:
+                continue
+            try:
+                info = await self._client.get("/getFile", params={"file_id": file_id})
+                path = ((info.json() or {}).get("result") or {}).get("file_path")
+                if not path:
+                    continue
+                token = str(self._client.base_url).rsplit("/bot", 1)[-1]
+                async with httpx.AsyncClient(timeout=60) as raw:
+                    blob = await raw.get(
+                        f"https://api.telegram.org/file/bot{token}/{path}")
+                blob.raise_for_status()
+                files.append(chat_mod.save_attachment(self.home_root, session_id,
+                                                      name, blob.content))
+            except Exception as exc:
+                log.warning("telegram attachment download failed: %s", exc)
+        return files
 
     async def _handle_pair(self, telegram_id: int, chat_id: int, text: str) -> None:
         parts = text.split()

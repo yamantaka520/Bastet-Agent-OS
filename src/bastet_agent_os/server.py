@@ -15,7 +15,16 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -243,6 +252,41 @@ class SecretIn(BaseModel):
     note: str = ""
 
 
+class ChatSessionIn(BaseModel):
+    scope_type: str = "project"        # global|team|project
+    scope_id: str = ""
+    responder_kind: str = "resource"   # agent|resource
+    responder_id: str
+    title: str = ""
+
+
+class ChatSessionUpdateIn(BaseModel):
+    title: str | None = None
+    responder_kind: str | None = None
+    responder_id: str | None = None
+
+
+class ChatMessageIn(BaseModel):
+    content: str = ""
+    attachment_ids: list[str] = []     # from POST …/files
+    reply: bool = True                 # let the responder answer straight away
+
+
+class ChannelChatIn(BaseModel):
+    """Which agent/LLM answers free-text messages on this channel, for which
+    project. Clearing responder_id turns the channel back into notify-only."""
+    responder_kind: str = ""      # agent|resource|"" (none)
+    responder_id: str = ""
+    project_id: str = ""
+
+
+class ChatDispatchIn(BaseModel):
+    agent_id: str
+    title: str = ""
+    spec: str = ""                     # blank = build it from the conversation
+    template_id: str | None = None
+
+
 class SecretUpdateIn(BaseModel):
     """Everything about a saved credential is editable. The value itself is
     write-only: send a new one to rotate it, leave both blank to keep it."""
@@ -287,7 +331,8 @@ def create_app(home: Home) -> FastAPI:
             except secrets_store.SecretError as exc:
                 log.warning("channel %s: credential error (%s); not started", row["id"], exc)
                 continue
-            channel = TelegramChannel(db, orch, bus, row["id"], bot_token)
+            channel = TelegramChannel(db, orch, bus, row["id"], bot_token,
+                                      home_root=str(home.root))
             channels.append(channel)
             tasks.append(asyncio.get_running_loop().create_task(channel.run()))
             log.info("telegram channel %s started (long polling)", row["id"])
@@ -920,6 +965,156 @@ def create_app(home: Home) -> FastAPI:
                  {"resource": resource_id, "scope": f"project:{project_id}"})
         return {"deleted": row["id"]}
 
+    # ---- chat: the human input + authorisation channel (SPEC §5.11) ----------
+
+    from . import chat as chat_mod
+
+    # uploads live here until a message references them
+    _pending_files: dict[str, dict[str, Any]] = {}
+
+    def _chat_error(exc: Exception) -> HTTPException:
+        return HTTPException(status_code=400, detail=str(exc))
+
+    @app.get("/api/chat/responders", dependencies=[Depends(require_role("viewer"))])
+    def chat_responders():
+        """The dropdown: enabled agents and pool LLM resources."""
+        return chat_mod.responders(db)
+
+    @app.get("/api/chat/sessions", dependencies=[Depends(require_role("viewer"))])
+    def chat_sessions(scope_type: str = "", scope_id: str = ""):
+        return chat_mod.list_sessions(db, scope_type or None, scope_id or None)
+
+    @app.post("/api/chat/sessions")
+    def create_chat_session(body: ChatSessionIn,
+                            auth: Auth = Depends(require_role("operator"))):
+        try:
+            session_id = chat_mod.create_session(
+                db, scope_type=body.scope_type, scope_id=body.scope_id,
+                responder_kind=body.responder_kind, responder_id=body.responder_id,
+                title=body.title, actor=auth.actor)
+        except chat_mod.ChatError as exc:
+            raise _chat_error(exc) from exc
+        return {"id": session_id}
+
+    @app.put("/api/chat/sessions/{session_id}")
+    def update_chat_session(session_id: str, body: ChatSessionUpdateIn,
+                            auth: Auth = Depends(require_role("operator"))):
+        try:
+            chat_mod.update_session(db, session_id, title=body.title,
+                                    responder_kind=body.responder_kind,
+                                    responder_id=body.responder_id, actor=auth.actor)
+        except chat_mod.ChatError as exc:
+            raise _chat_error(exc) from exc
+        return {"id": session_id}
+
+    @app.delete("/api/chat/sessions/{session_id}")
+    def delete_chat_session(session_id: str,
+                            auth: Auth = Depends(require_role("operator"))):
+        try:
+            chat_mod.delete_session(db, session_id, actor=auth.actor)
+        except chat_mod.ChatError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"deleted": session_id}
+
+    @app.get("/api/chat/sessions/{session_id}/messages",
+             dependencies=[Depends(require_role("viewer"))])
+    def chat_messages(session_id: str, limit: int = 200):
+        try:
+            session = chat_mod.get_session(db, session_id)
+        except chat_mod.ChatError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        pending = []
+        if session["scope_type"] == "project":
+            # blocked gates are the authorisation the chat exists to collect
+            pending = [dict(j) for j in db.query(
+                "SELECT id, title, stage FROM jobs WHERE project_id=? AND "
+                "status='blocked' ORDER BY updated_at DESC", (session["scope_id"],))]
+        return {"session": dict(session),
+                "messages": chat_mod.messages(db, session_id, limit),
+                "pending_approvals": pending}
+
+    @app.post("/api/chat/sessions/{session_id}/files")
+    async def upload_chat_file(session_id: str, file: UploadFile = File(...),
+                               auth: Auth = Depends(require_role("operator"))):
+        """Files, docs and screenshots come in here; the next message claims them."""
+        try:
+            chat_mod.get_session(db, session_id)
+        except chat_mod.ChatError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        data = await file.read()
+        item = chat_mod.save_attachment(home.root, session_id,
+                                        file.filename or "file", data)
+        _pending_files[item["id"]] = item
+        db.audit(auth.actor, "chat.file.upload", "chat", session_id,
+                 {"name": item["name"], "size": item["size"], "mime": item["mime"]})
+        return {k: v for k, v in item.items() if k != "path"}
+
+    @app.get("/api/chat/sessions/{session_id}/files/{file_id}",
+             dependencies=[Depends(require_role("viewer"))])
+    def download_chat_file(session_id: str, file_id: str):
+        from fastapi.responses import FileResponse
+        for message in chat_mod.messages(db, session_id, limit=1000):
+            for item in message["attachments"]:
+                if item["id"] == file_id and Path(item["path"]).exists():
+                    return FileResponse(item["path"], filename=item["name"],
+                                        media_type=item.get("mime"))
+        raise HTTPException(status_code=404, detail="attachment not found")
+
+    @app.post("/api/chat/sessions/{session_id}/messages")
+    async def post_chat_message(session_id: str, body: ChatMessageIn,
+                                auth: Auth = Depends(require_role("operator"))):
+        # async def: the responder call must run on the main event loop
+        try:
+            session = chat_mod.get_session(db, session_id)
+            attachments = [_pending_files.pop(fid) for fid in body.attachment_ids
+                           if fid in _pending_files]
+            if not (body.content.strip() or attachments):
+                raise chat_mod.ChatError("empty message")
+            chat_mod.add_message(db, session_id, role="user", content=body.content,
+                                 author=auth.actor, attachments=attachments)
+            chat_mod.remember(db, session, "user", body.content)
+            answer = None
+            if body.reply:
+                answer = await chat_mod.reply(db, home.root, session_id,
+                                              actor=auth.actor)
+        except chat_mod.ChatError as exc:
+            raise _chat_error(exc) from exc
+        bus.emit("chat.message", session["scope_id"], session_id=session_id)
+        return {"reply": answer,
+                "messages": chat_mod.messages(db, session_id, limit=200)}
+
+    @app.post("/api/chat/sessions/{session_id}/dispatch")
+    async def dispatch_from_chat(session_id: str, body: ChatDispatchIn,
+                                 auth: Auth = Depends(require_role("operator"))):
+        """Turn the discussion into a real job — the chat's whole point."""
+        try:
+            session = chat_mod.get_session(db, session_id)
+        except chat_mod.ChatError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if session["scope_type"] != "project":
+            raise HTTPException(status_code=400,
+                                detail="只有專案範圍的對話可以派工")
+        spec = body.spec.strip()
+        if not spec:
+            history = chat_mod.messages(db, session_id, limit=20)
+            spec = "\n\n".join(f"### {m['role']}\n{m['content']}"
+                                for m in history if m["role"] != "system")
+        try:
+            job_id = orch.dispatch(actor=auth.actor, req=DispatchRequest(
+                project_id=session["scope_id"], prompt=spec,
+                title=body.title or f"chat: {session['title']}"[:60],
+                agent_id=body.agent_id, template_id=body.template_id))
+        except QuotaError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        chat_mod.add_message(db, session_id, role="system", author=auth.actor,
+                             content=f"✅ 已派工：{job_id}",
+                             meta={"job_id": job_id})
+        db.audit(auth.actor, "chat.dispatch", "chat", session_id,
+                 {"job_id": job_id, "project": session["scope_id"]})
+        return {"job_id": job_id}
+
     # ---- WebUI login wizard (PTY over WS) -----------------------------------------
 
     from .login_sessions import LoginSessionManager
@@ -1458,10 +1653,43 @@ def create_app(home: Home) -> FastAPI:
             config = json.loads(row.pop("config_json") or "{}")
             row["paired_users"] = [b.get("name") for b in
                                    config.get("bindings", {}).values()]
+            row["responder"] = config.get("responder") or None
+            row["project_id"] = config.get("project_id") or ""
             row["status"] = ("polling" if row["id"] in running
                              else "credential_error" if credential == "error"
                              else "restart_needed" if row["enabled"] else "disabled")
         return rows
+
+    @app.put("/api/channels/{channel_id}/chat")
+    def set_channel_chat(channel_id: str, body: ChannelChatIn,
+                         auth: Auth = Depends(require_role("admin"))):
+        from . import chat as chat_mod
+        row = db.one("SELECT * FROM channels WHERE id=?", (channel_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="channel not found")
+        config = json.loads(row["config_json"] or "{}")
+        if body.responder_id:
+            try:
+                chat_mod._responder(db, body.responder_kind, body.responder_id)
+            except chat_mod.ChatError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            config["responder"] = {"kind": body.responder_kind,
+                                   "id": body.responder_id}
+        else:
+            config.pop("responder", None)
+        if body.project_id:
+            if db.one("SELECT id FROM projects WHERE id=?", (body.project_id,)) is None:
+                raise HTTPException(status_code=400, detail="project not found")
+            config["project_id"] = body.project_id
+        else:
+            config.pop("project_id", None)
+        db.write("UPDATE channels SET config_json=? WHERE id=?",
+                 (json.dumps(config), channel_id))
+        db.audit(auth.actor, "channel.chat.configure", "channel", channel_id,
+                 {"responder": config.get("responder"),
+                  "project": config.get("project_id")})
+        return {"id": channel_id, "responder": config.get("responder"),
+                "project_id": config.get("project_id", "")}
 
     @app.post("/api/channels/{channel_id}/enabled")
     def set_channel_enabled(channel_id: str, e: UserEnabledIn,

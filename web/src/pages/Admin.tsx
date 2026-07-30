@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { del, post } from "../api";
+import { api, del, post, put } from "../api";
 import SecretsSection from "./Secrets";
 import { useT } from "../i18n";
 import { DataTable, InlineForm, Section, useList } from "../ui";
@@ -12,7 +12,10 @@ const CHANNEL_STATUS: Record<string, string> = {
 type User = { id: string; name: string; role: string; enabled: number;
               created_at: string; last_used_at: string | null };
 type Channel = { id: string; kind: string; name: string | null; secret_ref: string;
-                 enabled: number; paired_users: string[]; status: string };
+                 enabled: number; paired_users: string[]; status: string;
+                 responder: { kind: string; id: string } | null;
+                 project_id: string };
+type Responder = { kind: string; id: string; label: string; detail: string };
 
 type ProjectRow = { id: string; team_id: string };
 
@@ -23,6 +26,10 @@ export default function AdminPage(props: { refreshKey: number }) {
   const [users, reloadUsers] = useList<User>("/api/users", props.refreshKey);
   const [channels, reloadChannels] = useList<Channel>("/api/channels", props.refreshKey);
   const [freshToken, setFreshToken] = useState<string | null>(null);
+  const [responders, setResponders] = useState<Responder[]>([]);
+  useEffect(() => {
+    api<Responder[]>("/api/chat/responders").then(setResponders).catch(() => {});
+  }, []);
   const [pairing, setPairing] = useState<{ channelId: string; code: string;
                                            baseline: number } | null>(null);
 
@@ -112,8 +119,75 @@ export default function AdminPage(props: { refreshKey: number }) {
                     onClick={() => setPairing(null)}>{t("adm.gotIt")}</button>
           </p>
         )}
+        {channels.map((c) => (
+          <ChannelChat key={`chat-${c.id}`} channel={c} responders={responders}
+                       projects={projects} onSaved={reloadChannels} />
+        ))}
         <p className="muted">{t("adm.restartHint")}</p>
       </Section>
+    </div>
+  );
+}
+
+/** Which agent/LLM answers plain messages on this channel, for which project —
+ *  the second authorisation channel next to the WebUI chat. */
+function ChannelChat({ channel, responders, projects, onSaved }: {
+  channel: Channel; responders: Responder[]; projects: ProjectRow[];
+  onSaved: () => void;
+}) {
+  const t = useT();
+  const [responder, setResponder] = useState(
+    channel.responder ? `${channel.responder.kind}:${channel.responder.id}` : "");
+  const [projectId, setProjectId] = useState(channel.project_id || "");
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  const save = async () => {
+    setError("");
+    const [kind, id] = responder ? responder.split(":") : ["", ""];
+    try {
+      await put(`/api/channels/${channel.id}/chat`,
+                { responder_kind: kind, responder_id: id, project_id: projectId });
+      setSaved(true);
+      onSaved();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
+  return (
+    <div className="res-row">
+      <div className="res-head">
+        <b>{channel.name ?? channel.kind}</b>
+        <span className="card-meta">{t("adm.chatChannel")}</span>
+      </div>
+      <div className="inline-form">
+        <select value={responder} onChange={(e) => { setResponder(e.target.value);
+                                                     setSaved(false); }}>
+          <option value="">{t("adm.chatNone")}</option>
+          <optgroup label={t("chat.groupAgents")}>
+            {responders.filter((r) => r.kind === "agent").map((r) => (
+              <option key={r.id} value={`agent:${r.id}`}>{r.label}</option>
+            ))}
+          </optgroup>
+          <optgroup label={t("chat.groupLLMs")}>
+            {responders.filter((r) => r.kind === "resource").map((r) => (
+              <option key={r.id} value={`resource:${r.id}`}>
+                {r.label}（{r.detail}）</option>
+            ))}
+          </optgroup>
+        </select>
+        <label className="res-field">
+          <span>{t("adm.chatProject")}</span>
+          <select value={projectId} onChange={(e) => { setProjectId(e.target.value);
+                                                       setSaved(false); }}>
+            <option value="">{t("sec.labelGlobal")}</option>
+            {projects.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
+          </select>
+        </label>
+        <button onClick={save}>{t("adm.chatSave")}</button>
+        {saved && <span className="muted">✅</span>}
+        {error && <span className="error">{error}</span>}
+      </div>
+      <p className="muted">{t("adm.chatHint")}</p>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { LanguagePicker, useT } from "./i18n";
 import AdminPage from "./pages/Admin";
 import AuditPage from "./pages/Audit";
 import BoardPage from "./pages/Board";
+import ChatPage from "./pages/Chat";
 import MemoryPage from "./pages/Memory";
 import ProjectPage from "./pages/ProjectPage";
 import OrgPage from "./pages/Org";
@@ -15,6 +16,7 @@ const ROLE_RANK: Record<string, number> = { viewer: 0, operator: 1, admin: 2 };
 type Tab = { key: string; minRole: string };
 const TABS: Tab[] = [
   { key: "board", minRole: "viewer" },
+  { key: "chat", minRole: "viewer" },
   { key: "project", minRole: "viewer" },
   { key: "resources", minRole: "viewer" },
   { key: "org", minRole: "viewer" },
@@ -132,6 +134,7 @@ function Workbench({ me }: { me: Me }) {
       {tab === "board" && (projectId
         ? <BoardPage projectId={projectId} refreshKey={refreshKey} canOperate={canOperate} />
         : <div className="page"><p className="muted">{t("app.noProjects")}</p></div>)}
+      {tab === "chat" && <ChatPage canOperate={canOperate} refreshKey={refreshKey} />}
       {tab === "project" && <ProjectPage canOperate={canOperate} refreshKey={refreshKey} />}
       {tab === "resources" && <ResourcesPage isAdmin={isAdmin} refreshKey={refreshKey} />}
       {tab === "org" && <OrgPage canOperate={canOperate} refreshKey={refreshKey} />}

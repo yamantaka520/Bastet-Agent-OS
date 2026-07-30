@@ -502,6 +502,26 @@ Reviewer run 強制唯讀工具面（`read_only: true`：不可寫檔、不可�
   Authorization header、無 wildcard CORS）—— localhost 服務被惡意網頁經
   DNS rebinding 打到即等於 RCE（派工 = 執行 shell），此為 M1 出貨判準之一。
 
+### 5.11 Chat（人的輸入與授權管道）
+
+- **對話綁在真實專案上**：session 的 scope 是真的 project / team / global 列，
+  討論的內容與實際執行的專案不會漂移（`chat_sessions.scope_type/scope_id`，
+  建立時驗證專案存在）。
+- **對話對象二選一**：`agent`（用該 agent 的 executor 與帳號回答，read-only，
+  可看到專案 repo）或資源池的 `resource`(kind=llm)（直接呼叫端點，回報 usage
+  才記 token，precision 誠實標示）。
+- **輸入介面**：文字 + 檔案。文字類附件內嵌進 prompt，圖片以 data URI／
+  base64 image block 傳給支援的 wire，其他型別誠實標示「未內嵌」。附件存在
+  `<home>/chat/<session>/`，經 API 下載。
+- **記憶**：每一輪寫入 AMOS 對應 scope，下一次 run 的 context pack 就會帶到；
+  對話開始時也從 AMOS 召回同 scope 記憶。
+- **授權管道**：session 顯示該專案 `status='blocked'` 的任務，可直接批准/退回；
+  也可以把整段討論轉成任務規格派工（`POST /api/chat/sessions/{id}/dispatch`），
+  兩者都寫稽核。Agent 不會自己派工 —— 送出動作永遠由人按下。
+- **第二管道（Telegram）**：channel 可設定 responder（agent/LLM）與綁定專案，
+  非指令訊息就進同一套 chat（每個 Telegram 使用者一個 session，重啟後續用），
+  文件與照片自動落成附件。`/approve` 的 inline 授權流程不變。
+
 ### 5.10 事件模型
 
 狀態轉移產生型別化事件，WS API 與 Channel **共用同一事件流**：

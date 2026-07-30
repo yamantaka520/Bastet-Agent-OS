@@ -40,6 +40,27 @@ Built-in workflow presets keep their authored stage text: the preset name
 becomes the template id when you copy it, so the display must match what gets
 saved. Copy a preset and rewrite it in any language.
 
+## Chat: the human end of the loop
+
+The 對話 tab is where a person plans the project by talking about it. A session
+picks who answers — an **agent** (through its own executor and account,
+read-only, with the project's repo in view) or a **pool LLM** — and a scope:
+project, team, or global. Project scope carries the real project state into the
+prompt: description, repo, workflow, team roles, recent jobs, and the resources
+it may use.
+
+Sessions are stored per project, so the discussion can't drift from the org the
+runs execute against. Files, documents and screenshots go in (text is inlined,
+images ride along where the wire supports it), every turn is written to Agent
+Memory OS in the session's scope so the next run inherits it, and the session is
+also where authorisation happens: pending human-approval gates are listed with
+Approve/Reject, and the whole discussion can be dispatched as a job. The agent
+never dispatches itself — a person presses the button.
+
+Telegram is the second such channel: give a channel a responder and a project on
+the Admin tab, and plain messages to the bot are answered in a per-user session
+that survives restarts, attachments included.
+
 ## Resource pool
 
 Resources are classified (`llm` · `mcp` · `api` · `skill` · `git` · media) and

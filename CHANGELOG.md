@@ -8,6 +8,36 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.8.0] - 2026-07-31
+
+### Added — Chat: the human input and authorisation channel
+- New 對話 tab. A session picks who it talks to — an **agent** (answers through
+  its own executor and account, read-only, with the project's repo in view) or a
+  pool **LLM resource** (direct metered call) — and a scope: project, team or
+  global. Project scope carries the real project state into the prompt:
+  description, repo, workflow, team roles, recent jobs and the resource pool it
+  may draw on.
+- Sessions are stored per project (`chat_sessions` / `chat_messages`) and
+  creating one against a project that does not exist is refused, so the
+  discussion cannot drift from the org the runs execute against.
+- File intake: drop in specs, documents and screenshots. Text-like files are
+  inlined into the prompt, images ride along as data URLs / base64 image blocks
+  where the wire supports it, everything else is listed honestly as
+  "not inlined". Attachments live under `<home>/chat/<session>/` and download
+  back through the API.
+- Every turn is written to Agent Memory OS in the session's scope, and the
+  session recalls from the same scope — so a decision made in chat reaches the
+  next run's context pack.
+- It can act: pending human-approval gates for the project are listed in the
+  session with Approve/Reject, and the whole discussion can be dispatched as a
+  job (`POST /api/chat/sessions/{id}/dispatch`). Both are audited. The agent
+  never dispatches itself — a person presses the button.
+- Telegram becomes a second chat channel: pick a responder and a project for the
+  channel on the 管理 tab, and plain messages to the bot are answered in a
+  per-user session that survives restarts, with documents and photos saved as
+  attachments. `/pair`, `/status`, `/jobs` and inline `/approve` are unchanged.
+- New dependency: `python-multipart` (file uploads).
+
 ## [0.7.3] - 2026-07-31
 
 ### Fixed
