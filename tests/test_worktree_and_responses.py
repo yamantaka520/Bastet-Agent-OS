@@ -20,15 +20,9 @@ from bastet_agent_os.pricing import PriceBook
 
 
 @pytest.fixture
-def git_project(seeded, tmp_path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
-    (repo / "README.md").write_text("# demo\n")
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
-                    "commit", "-qm", "init"], cwd=repo, check=True)
-    seeded.write("UPDATE projects SET repo_path=? WHERE id='proj1'", (str(repo),))
+def git_project(seeded, repo):
+    """conftest's `repo` fixture is already a real git repo on `main`."""
+    subprocess.run(["git", "-C", str(repo), "branch", "-M", "main"], check=True)
     return repo
 
 

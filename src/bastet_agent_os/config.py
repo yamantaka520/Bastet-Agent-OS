@@ -21,6 +21,45 @@ TOOL_DIRS = [
 ]
 
 
+def expand_repo_path(value: str | None) -> str:
+    """Turn a stored repo path into a real one.
+
+    A path is typed by a human and stored verbatim, so it arrives as
+    `~/Github/thing` or `$HOME/thing`. Neither is a directory: handing that to
+    subprocess `cwd` runs the agent somewhere that does not exist — and any tool
+    that mkdir's it creates a literal `~` directory, which is how a first
+    dispatch ends up executing in an empty non-repo. Expand once, here."""
+    if not value:
+        return ""
+    return str(Path(os.path.expandvars(value.strip())).expanduser())
+
+
+def is_git_repo(path: str | Path) -> bool:
+    """`.git` is a directory in a clone and a file inside a worktree."""
+    return (Path(path) / ".git").exists()
+
+
+def check_repo_path(value: str | None) -> str:
+    """Validate a repo path the way the host will use it.
+
+    Absolute only: the path is resolved on the machine running `bastet serve`,
+    where a relative path means "wherever the service happened to start".
+    Absoluteness is judged by *this* platform, so `C:\\Users\\me\\proj` is
+    accepted on Windows and `/home/me/proj` on POSIX — the same string is not
+    valid on both, and pretending otherwise moves the failure to dispatch time.
+    Returns the expanded path; raises ValueError with what to do instead."""
+    expanded = expand_repo_path(value)
+    if not expanded:
+        raise ValueError("repo 路徑不能空白")
+    if not Path(expanded).is_absolute():
+        example = (r"C:\Users\you\project" if os.name == "nt"
+                   else "/home/you/project")
+        raise ValueError(
+            f"repo 路徑必須是 Bastet 主機上的絕對路徑（例：{example}）；"
+            f"收到的是「{value}」")
+    return expanded
+
+
 def augment_path() -> None:
     """Make sure the well-known tool dirs are on PATH for this process."""
     current = os.environ.get("PATH", "").split(os.pathsep)

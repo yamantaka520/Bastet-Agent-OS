@@ -61,11 +61,11 @@ def test_gateway_url_rewrite():
 
 
 @pytest.fixture
-def two_projects(seeded):
+def two_projects(seeded, repo):
     ts = now()
     seeded.write_many([
         ("INSERT INTO projects(id, team_id, repo_path, created_at, updated_at) "
-         "VALUES('proj2','team2','/tmp/repo2',?,?)", (ts, ts)),
+         "VALUES('proj2','team2',?,?,?)", (str(repo), ts, ts)),
         ("INSERT INTO grants(id, resource_id, scope_type, scope_id, budget_usd, "
          "max_concurrency, created_at) VALUES('grt2','res1','project','proj2',5.0,1,?)",
          (ts,)),

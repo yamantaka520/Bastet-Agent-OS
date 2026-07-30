@@ -17,6 +17,7 @@ export type Run = {
   status: string;
   cost_usd: number;
   accounting_precision: string | null;
+  error: string | null;          // why the stage failed, shown next to the retry
   started_at: string | null;
   finished_at: string | null;
 };

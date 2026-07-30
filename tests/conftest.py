@@ -15,12 +15,27 @@ def db(tmp_path):
 
 
 @pytest.fixture
-def seeded(db):
+def repo(tmp_path):
+    """A real git repo — dispatch refuses a path that is not one, because
+    running an agent in a non-repo is how a first dispatch fails confusingly."""
+    import subprocess
+    path = tmp_path / "repo"
+    path.mkdir()
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    (path / "README.md").write_text("# test repo\n")
+    subprocess.run(["git", "-C", str(path), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(path), "-c", "user.email=t@t", "-c",
+                    "user.name=t", "commit", "-qm", "init"], check=True)
+    return path
+
+
+@pytest.fixture
+def seeded(db, repo):
     """A project + agent + llm resource + grant + job + active run."""
     ts = now()
     db.write_many([
         ("INSERT INTO projects(id, team_id, repo_path, created_at, updated_at) "
-         "VALUES('proj1','team1','/tmp/repo',?,?)", (ts, ts)),
+         "VALUES('proj1','team1',?,?,?)", (str(repo), ts, ts)),
         ("INSERT INTO agents(id, amos_agent_id, name, executor_type, created_at, updated_at) "
          "VALUES('ag1','ag1','Agent One','claude-code',?,?)", (ts, ts)),
         ("INSERT INTO resources(id, kind, name, endpoint, api_flavor, secret_ref, "

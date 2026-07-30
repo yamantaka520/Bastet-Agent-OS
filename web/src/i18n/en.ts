@@ -455,6 +455,12 @@ const en: Dict = {
   "adm.tokenNew": "new token (shown only once):",
   "adm.deleteUser": "Delete this user? Their token stops working immediately.",
   "adm.roleHint": "Role changes take effect at once — no need to reissue the token.",
+  "project.repoLabel": "repo path (absolute)",
+  "project.repoHint": "Must be an absolute path on the machine running bastet serve — no ~ and no relative paths: e.g. /home/you/project on Linux/macOS, C:\\Users\\you\\project on Windows. The path must already be a git repo (worktree isolation needs one).",
+  "board.stuck": "⚠ This card is stuck",
+  "board.retry": "Run this stage again",
+  "board.retrySameAgent": "retry with the same agent",
+  "board.retryHint": "Re-runs the current stage (finished stages are not repeated). If the agent itself was the problem — not logged in, out of quota — pick a different one on the left.",
 };
 
 export default en;

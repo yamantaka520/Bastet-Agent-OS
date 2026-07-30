@@ -152,10 +152,13 @@ async def decompose(db, home_root, project_id: str, agent_id: str = "",
     if agent is None:
         raise PlanError("這個專案沒有指派專案經理（pm 角色）的 agent，"
                         "請先在專案頁指派，或指定要用哪個 agent 拆分")
-    project = db.one("SELECT repo_path FROM projects WHERE id=?", (project_id,))
-    workdir = project["repo_path"] if project and project["repo_path"] else str(home_root)
     from pathlib import Path
-    if not Path(workdir).expanduser().exists():
+
+    from .config import expand_repo_path
+
+    project = db.one("SELECT repo_path FROM projects WHERE id=?", (project_id,))
+    workdir = expand_repo_path(project["repo_path"]) if project else ""
+    if not workdir or not Path(workdir).is_dir():
         workdir = str(home_root)
 
     agent_cfg = json.loads(agent["config_json"] or "{}")
@@ -171,7 +174,7 @@ async def decompose(db, home_root, project_id: str, agent_id: str = "",
     spec = TaskSpec(
         run_id=new_id("plan"),
         prompt=f"{DECOMPOSE_INSTRUCTIONS}\n\n{_planning_context(db, project_id)}",
-        workdir=str(Path(workdir).expanduser()),
+        workdir=workdir,
         timeout_s=DECOMPOSE_TIMEOUT_S,
         read_only=True,                 # planning reads the repo, never writes
         llm={"model": agent_cfg.get("model")} if agent_cfg.get("model") else None,

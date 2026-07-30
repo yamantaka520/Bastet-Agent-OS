@@ -474,6 +474,12 @@ const zhHant = {
   "adm.tokenNew": "新 token（只顯示這一次）：",
   "adm.deleteUser": "確定刪除這個使用者？其 token 會立即失效。",
   "adm.roleHint": "權限即時生效，不需要重新發 token。",
+  "project.repoLabel": "repo 路徑（絕對路徑）",
+  "project.repoHint": "必須是「執行 bastet serve 的那台主機」上的絕對路徑，不能用 ~ 或相對路徑：Linux/macOS 例 /home/you/project，Windows 例 C:\\Users\\you\\project。路徑必須已經是 git repo（worktree 隔離需要）。",
+  "board.stuck": "⚠ 這張卡片卡住了",
+  "board.retry": "重新執行這個階段",
+  "board.retrySameAgent": "用原本的 Agent 重試",
+  "board.retryHint": "會重跑目前這個階段（不會跳過已完成的階段）。若失敗原因是 Agent 本身（未登入、額度用完），可在左邊改用別的 Agent。",
 } as const;
 
 export type Dict = { [K in keyof typeof zhHant]: string };

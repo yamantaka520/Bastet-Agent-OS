@@ -182,6 +182,10 @@ class RoleIn(BaseModel):
     preference: int = 0
 
 
+class RetryIn(BaseModel):
+    agent_id: str = ""             # blank = the same agent that failed
+
+
 class ApproveIn(BaseModel):
     approved: bool
     comment: str = ""
@@ -477,6 +481,11 @@ def create_app(home: Home) -> FastAPI:
 
     @app.post("/api/projects")
     def create_project(p: ProjectIn, auth: Auth = Depends(require_role("operator"))):
+        from .config import check_repo_path
+        try:                          # never store a bare "~/…" or a relative path
+            p.repo_path = check_repo_path(p.repo_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         team_id = p.team_id or f"team-{p.id}"
         client = amos_client()
         if client is not None:
@@ -570,6 +579,7 @@ def create_app(home: Home) -> FastAPI:
     @app.post("/api/org/bind")
     def bind_project(b: BindIn, auth: Auth = Depends(require_role("operator"))):
         """Attach a federation-synced AMOS project to a local repo."""
+        from .config import check_repo_path
         client = amos_client()
         if client is None:
             raise HTTPException(status_code=502, detail="AMOS unavailable")
@@ -583,7 +593,8 @@ def create_app(home: Home) -> FastAPI:
         db.write(
             "INSERT INTO projects(id, team_id, repo_path, config_json, created_at, "
             "updated_at) VALUES(?,?,?,?,?,?)",
-            (b.project_id, amos_project["team_id"], b.repo_path, "{}", ts, ts))
+            (b.project_id, amos_project["team_id"],
+             check_repo_path(b.repo_path), "{}", ts, ts))
         db.audit(auth.actor, "project.bind", "project", b.project_id,
                  {"team": amos_project["team_id"], "repo": b.repo_path})
         return {"id": b.project_id, "team_id": amos_project["team_id"]}
@@ -905,9 +916,15 @@ def create_app(home: Home) -> FastAPI:
         row = db.one("SELECT * FROM projects WHERE id=?", (project_id,))
         if row is None:
             raise HTTPException(status_code=404, detail="project not found")
+        from .config import check_repo_path
         config = json.loads(row["config_json"] or "{}")
         if p.description is not None:
             config["description"] = p.description
+        if p.repo_path is not None and p.repo_path.strip():
+            try:
+                p.repo_path = check_repo_path(p.repo_path)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         db.write("UPDATE projects SET repo_path=?, config_json=?, updated_at=? WHERE id=?",
                  (p.repo_path if p.repo_path is not None else row["repo_path"],
                   json.dumps(config), now(), project_id))
@@ -1647,6 +1664,15 @@ def create_app(home: Home) -> FastAPI:
             "SELECT g.* FROM gate_results g JOIN runs r ON r.id=g.run_id "
             "WHERE r.job_id=? ORDER BY g.at", (job_id,))]
         return job
+
+    @app.post("/api/jobs/{job_id}/retry")
+    async def retry_job(job_id: str, body: RetryIn,
+                        auth: Auth = Depends(require_role("operator"))):
+        # async def: the re-dispatch spawns its driver on the main event loop
+        try:
+            return orch.retry(job_id, agent_id=body.agent_id, user=auth.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/jobs/{job_id}/approve")
     async def approve_job(job_id: str, a: ApproveIn,

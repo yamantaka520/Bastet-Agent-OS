@@ -455,6 +455,12 @@ const ja: Dict = {
   "adm.tokenNew": "新しいトークン（この一度だけ表示）：",
   "adm.deleteUser": "このユーザーを削除しますか？トークンは即時無効になります。",
   "adm.roleHint": "権限の変更は即時反映され、トークンの再発行は不要です。",
+  "project.repoLabel": "repo パス（絶対パス）",
+  "project.repoHint": "bastet serve を実行しているホスト上の絶対パスが必要です（~ や相対パスは不可）：Linux/macOS は /home/you/project、Windows は C:\\Users\\you\\project のように。指定先はすでに git repo である必要があります（worktree 隔離に必要）。",
+  "board.stuck": "⚠ このカードは止まっています",
+  "board.retry": "このステージを再実行",
+  "board.retrySameAgent": "同じ Agent で再試行",
+  "board.retryHint": "現在のステージだけを再実行します（完了済みステージは繰り返しません）。失敗原因が Agent 側（未ログイン・上限到達）なら、左で別の Agent を選べます。",
 };
 
 export default ja;

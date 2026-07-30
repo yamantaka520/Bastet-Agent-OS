@@ -27,6 +27,7 @@ import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from ..pricing import Usage
 from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
@@ -53,6 +54,8 @@ class CodexHandle:
     summary: str = ""
     failed_reason: str = ""
     last_message_path: Path | None = None
+    stderr_tail: list[str] = field(default_factory=list)
+    stderr_task: Any = None
     timed_out: bool = False
     cancelled: bool = False
 
@@ -111,8 +114,25 @@ class CodexExecutor:
             start_new_session=(sys.platform != "win32"))
         return handle
 
+    async def _drain_stderr(self, handle: CodexHandle) -> None:
+        """codex writes startup failures (bad cwd, missing auth, config errors)
+        to stderr only; without this a failed run reports nothing at all."""
+        stream = handle.process.stderr if handle.process else None
+        if stream is None:
+            return
+        while True:
+            line = await stream.readline()
+            if not line:
+                return
+            text = line.decode(errors="replace").rstrip()
+            if text:
+                handle.stderr_tail.append(text)
+                del handle.stderr_tail[:-20]
+
     async def stream(self, handle: CodexHandle) -> AsyncIterator[RunEvent]:
         assert handle.process and handle.process.stdout
+        stderr_task = asyncio.get_event_loop().create_task(self._drain_stderr(handle))
+        handle.stderr_task = stderr_task
         deadline = asyncio.get_event_loop().time() + handle.task.timeout_s
         while True:
             remaining = deadline - asyncio.get_event_loop().time()
@@ -205,7 +225,9 @@ class CodexExecutor:
 
         return RunResult(
             status=status,
-            summary=(handle.summary or handle.failed_reason)[:SUMMARY_LIMIT],
+            summary=(handle.summary or handle.failed_reason
+                     or ("\n".join(handle.stderr_tail[-5:]) if status == "failed"
+                         else ""))[:SUMMARY_LIMIT],
             tokens_in=handle.usage.tokens_in,
             tokens_out=handle.usage.tokens_out,
             cache_read=handle.usage.cache_read,

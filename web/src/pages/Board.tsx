@@ -159,6 +159,8 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   const [comment, setComment] = useState("");
   const [interactions, setInteractions] = useState<Record<string, Interaction[]>>({});
   const [diff, setDiff] = useState<string | null>(null);
+  const [agents, setAgents] = useState<{ id: string }[]>([]);
+  const [retryAgent, setRetryAgent] = useState("");
 
   const load = useCallback(() => {
     api<JobDetail>(`/api/jobs/${jobId}`).then(async (j) => {
@@ -183,6 +185,20 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   const lastGate = job.gates[job.gates.length - 1];
   const waitingApproval = job.status === "blocked" && lastGate?.verdict === "pending";
 
+  useEffect(() => {
+    api<{ id: string }[]>("/api/agents").then(setAgents).catch(() => {});
+  }, []);
+
+  // the reason the stage failed: the last run's error, shown where the retry is
+  const failure = (job?.runs ?? []).slice().reverse()
+    .map((r) => r.error).find((e) => e && e.trim()) || "";
+
+  const retry = async () => {
+    await post(`/api/jobs/${jobId}/retry`, { agent_id: retryAgent });
+    onChanged();
+    load();
+  };
+
   const decide = async (approved: boolean) => {
     await post(`/api/jobs/${jobId}/approve`, { approved, comment });
     onChanged();
@@ -202,6 +218,21 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
       <h2>{job.title}</h2>
       <p className="card-meta">{job.id} · {t("board.jobStage")} <b>{job.stage}</b> · {job.status}</p>
       <pre className="spec">{job.spec_md}</pre>
+
+      {canOperate && (job.status === "blocked" || job.status === "cancelled") && (
+        <div className="approval">
+          <h3>{t("board.stuck")}</h3>
+          {failure && <pre className="spec">{failure}</pre>}
+          <div className="row">
+            <select value={retryAgent} onChange={(e) => setRetryAgent(e.target.value)}>
+              <option value="">{t("board.retrySameAgent")}</option>
+              {agents.map((a) => <option key={a.id} value={a.id}>{a.id}</option>)}
+            </select>
+            <button onClick={retry}>{t("board.retry")}</button>
+          </div>
+          <p className="muted">{t("board.retryHint")}</p>
+        </div>
+      )}
 
       {canOperate && waitingApproval && (
         <div className="approval">

@@ -8,6 +8,37 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.9.7] - 2026-07-31
+
+### Fixed — the first real dispatch, and everything it exposed
+- **Repo paths were never expanded.** A project stored as `~/Github/app` was
+  handed to subprocess `cwd` verbatim; something then created a literal
+  `~/Github/app` directory, so the agent started in an empty non-repo and died.
+  `expand_repo_path()` now expands `~` and `$VARS` everywhere a repo path is
+  consumed (dispatch, chat, PM decomposition) and paths are normalised on write.
+- **A missing or non-git repo failed confusingly.** `git worktree add` failing
+  used to fall through to "run in that directory anyway". Dispatch now refuses
+  with the resolved path and what to fix; the worktree fallback only applies to
+  a directory that really is a git repo.
+- **Repo paths must be absolute, and Windows counts.** `check_repo_path()`
+  rejects relative paths with an example for the *server's* platform
+  (`C:\Users\you\project` on Windows, `/home/you/project` on POSIX) — the same
+  string is not valid on both, and pretending otherwise moves the failure to
+  dispatch time. The field now says so in all five languages.
+- **A failed run recorded an empty error.** The run now always says why, and the
+  codex executor drains stderr so a startup failure (bad cwd, missing auth) is
+  reported instead of vanishing.
+- **A stuck card had no way forward.** `POST /api/jobs/{id}/retry` re-runs the
+  current stage — optionally with a different agent, for when the agent itself
+  was the problem — and the board drawer shows the failure reason next to the
+  retry button. Only blocked/cancelled jobs can be retried, so a running job
+  cannot end up with two drivers.
+- **The project path could not be edited.** The form was re-seeded from the
+  server on every background refresh, so typing snapped back. Repo path and
+  description now keep their own state and adopt server values only while
+  untouched — the same discipline as the chat composer.
+- Test fixtures now use a real git repo, because that is what dispatch requires.
+
 ## [0.9.6] - 2026-07-31
 
 ### Fixed

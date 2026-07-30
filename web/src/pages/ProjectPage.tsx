@@ -165,14 +165,11 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
   const [pool] = useList<PoolResource>("/api/resources", refreshKey);
   const [roles, setRoles] = useState<Role[]>([]);
   const [ov, setOv] = useState<Overview | null>(null);
-  const [edit, setEdit] = useState({ repo: "", desc: "" });
   const [error, setError] = useState("");
 
   const load = useCallback(() => {
-    api<Overview>(`/api/projects/${projectId}/overview`).then((data) => {
-      setOv(data);
-      setEdit({ repo: data.project.repo_path ?? "", desc: data.project.description });
-    }).catch(() => setOv(null));
+    api<Overview>(`/api/projects/${projectId}/overview`)
+      .then(setOv).catch(() => setOv(null));
   }, [projectId]);
   useEffect(load, [load, refreshKey]);
   useEffect(() => {
@@ -195,20 +192,10 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
       {error && <p className="error">{error}</p>}
 
       <h4>{t("project.content")}</h4>
-      <div className="inline-form">
-        <input placeholder={t("project.repoPh")} style={{ width: "20rem" }}
-               value={edit.repo} disabled={!canOperate}
-               onChange={(e) => setEdit({ ...edit, repo: e.target.value })} />
-        <input placeholder={t("project.descPh")} style={{ flex: 1 }}
-               value={edit.desc} disabled={!canOperate}
-               onChange={(e) => setEdit({ ...edit, desc: e.target.value })} />
-        {canOperate && (
-          <button onClick={() => guard(() => put(`/api/projects/${projectId}`,
-                                                 { repo_path: edit.repo,
-                                                   description: edit.desc }))}>
-            {t("c.save")}</button>
-        )}
-      </div>
+      <ContentEditor projectId={projectId} canOperate={canOperate} t={t}
+                     repo={ov.project.repo_path ?? ""}
+                     desc={ov.project.description}
+                     onSaved={() => { load(); onChanged(); }} />
 
       <h4>{t("project.workflowBlock")}</h4>
       <div className="inline-form">
@@ -438,5 +425,65 @@ function Picker({ options, label, empty, onPick, t }: {
       <button className="ghost" disabled={!value}
               onClick={() => { onPick(value); setValue(""); }}>{t("c.apply")}</button>
     </span>
+  );
+}
+
+/** Repo path + description, with their own state.
+ *
+ *  These fields used to be reset from the server on every background reload, so
+ *  a WS event mid-typing snapped the path back and the edit looked impossible.
+ *  State lives here, seeded once per project, and is only re-seeded when the
+ *  server value actually changes while the field is untouched. */
+function ContentEditor({ projectId, repo, desc, canOperate, onSaved, t }: {
+  projectId: string; repo: string; desc: string; canOperate: boolean;
+  onSaved: () => void; t: T;
+}) {
+  const [draft, setDraft] = useState({ repo, desc });
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (!dirty) setDraft({ repo, desc });     // adopt server values only if idle
+  }, [repo, desc, dirty]);
+
+  const save = async () => {
+    setError("");
+    try {
+      await put(`/api/projects/${projectId}`,
+                { repo_path: draft.repo.trim(), description: draft.desc });
+      setDirty(false);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2000);
+      onSaved();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
+  const patch = (part: Partial<{ repo: string; desc: string }>) => {
+    setDraft({ ...draft, ...part });
+    setDirty(true);
+    setSaved(false);
+  };
+
+  return (
+    <>
+      <div className="inline-form">
+        <label className="res-field">
+          <span>{t("project.repoLabel")}</span>
+          <input placeholder={t("project.repoPh")} style={{ width: "22rem" }}
+                 value={draft.repo} disabled={!canOperate}
+                 onChange={(e) => patch({ repo: e.target.value })} />
+        </label>
+        <input placeholder={t("project.descPh")} style={{ flex: 1 }}
+               value={draft.desc} disabled={!canOperate}
+               onChange={(e) => patch({ desc: e.target.value })} />
+        {canOperate && (
+          <button onClick={save} disabled={!dirty}>{t("c.save")}</button>
+        )}
+        {saved && <span className="muted">✅</span>}
+      </div>
+      <p className="muted">{t("project.repoHint")}</p>
+      {error && <p className="error">{error}</p>}
+    </>
   );
 }

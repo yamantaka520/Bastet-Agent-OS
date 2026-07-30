@@ -484,8 +484,9 @@ async def _reply_agent(db, home_root, session, history, responder) -> tuple[str,
         project = db.one("SELECT repo_path FROM projects WHERE id=?",
                          (session["scope_id"],))
         if project is not None and project["repo_path"]:
-            candidate = Path(project["repo_path"]).expanduser()
-            if candidate.exists():
+            from .config import expand_repo_path
+            candidate = Path(expand_repo_path(project["repo_path"]))
+            if candidate.is_dir():
                 workdir = str(candidate)
 
     transcript = "\n\n".join(

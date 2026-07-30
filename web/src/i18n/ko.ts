@@ -455,6 +455,12 @@ const ko: Dict = {
   "adm.tokenNew": "새 토큰（이번 한 번만 표시）:",
   "adm.deleteUser": "이 사용자를 삭제할까요? 토큰이 즉시 무효화됩니다.",
   "adm.roleHint": "역할 변경은 즉시 적용되며 토큰을 다시 발급할 필요가 없습니다.",
+  "project.repoLabel": "repo 경로（절대 경로）",
+  "project.repoHint": "bastet serve 를 실행하는 호스트의 절대 경로여야 합니다（~ 나 상대 경로 불가）: Linux/macOS 는 /home/you/project, Windows 는 C:\\Users\\you\\project 형태. 해당 경로는 이미 git repo 여야 합니다（worktree 격리에 필요）.",
+  "board.stuck": "⚠ 이 카드가 멈춰 있습니다",
+  "board.retry": "이 단계 다시 실행",
+  "board.retrySameAgent": "같은 Agent 로 재시도",
+  "board.retryHint": "현재 단계만 다시 실행합니다（완료된 단계는 반복하지 않습니다）. 실패 원인이 Agent 쪽（미로그인·한도 초과）이면 왼쪽에서 다른 Agent 를 고르세요.",
 };
 
 export default ko;

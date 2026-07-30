@@ -52,6 +52,16 @@ class DispatchRequest:
     use_worktree: bool = True
 
 
+def _failure_reason(result: RunResult, workdir: str) -> str:
+    """A failed run must say why. An executor that reports nothing still leaves
+    us the status and where it ran — infinitely better than an empty string,
+    which is what the first real dispatch failure looked like."""
+    if result.summary.strip():
+        return result.summary[:500]
+    return (f"executor reported {result.status} with no output "
+            f"(workdir: {workdir})")[:500]
+
+
 class Orchestrator:
     def __init__(self, db: Db, home: Home, prices: PriceBook, gateway_url: str,
                  bus=None):
@@ -301,6 +311,38 @@ class Orchestrator:
         self._spawn(self._drive_job(job_id, req))
         return {"job_id": job_id, "status": "in_progress", "stage": names[idx + 1]}
 
+    def retry(self, job_id: str, agent_id: str = "", user: str = "user") -> dict:
+        """Run the current stage again after a failure.
+
+        A blocked card with no way forward is a dead end: the operator fixed the
+        repo path, logged the agent in, or freed the budget, and wants the same
+        stage attempted again — with a different agent if the first one is the
+        problem. Only jobs that are actually stuck may be retried; a running job
+        would end up with two drivers."""
+        job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job is None:
+            raise ValueError(f"unknown job {job_id!r}")
+        if job["status"] not in ("blocked", "cancelled"):
+            raise ValueError(f"job {job_id} is {job['status']}, not stuck "
+                             f"(only blocked/cancelled jobs can be retried)")
+        stages = parse_stages(json.loads(job["stages_snapshot_json"]))
+        if job["stage"] not in [s.name for s in stages]:
+            raise ValueError(f"job {job_id} is at unknown stage {job['stage']!r}")
+        agent = agent_id or job["default_agent_id"]
+        if agent_id:
+            self.db.write("UPDATE jobs SET default_agent_id=? WHERE id=?",
+                          (agent_id, job_id))
+        self.db.write("UPDATE jobs SET status='in_progress', updated_at=? WHERE id=?",
+                      (now(), job_id))
+        self.db.audit(f"user:{user}", "job.retry", "job", job_id,
+                      {"stage": job["stage"], "agent": agent})
+        self._emit("job.retried", job["project_id"], job_id=job_id, stage=job["stage"])
+        req = DispatchRequest(
+            project_id=job["project_id"], prompt=job["spec_md"], title=job["title"],
+            agent_id=agent, resource_id=job["resource_id"])
+        self._spawn(self._drive_job(job_id, req))
+        return {"job_id": job_id, "status": "in_progress", "stage": job["stage"]}
+
     # -- stage execution ----------------------------------------------------------
 
     async def _run_stage_with_retries(self, job, stage: StageDef,
@@ -498,10 +540,24 @@ class Orchestrator:
         return agent
 
     def _project_repo(self, job) -> str:
+        """The repo, expanded and checked. A missing repo is a configuration
+        error worth failing on: running the agent in some other directory
+        produces a confusing failure instead of an obvious one."""
+        from .config import expand_repo_path, is_git_repo
+
         project = self.db.one("SELECT * FROM projects WHERE id=?", (job["project_id"],))
         if not project or not project["repo_path"]:
             raise ValueError(f"project {job['project_id']} has no repo_path")
-        return project["repo_path"]
+        repo = expand_repo_path(project["repo_path"])
+        if not Path(repo).is_dir():
+            raise ValueError(
+                f"專案 {job['project_id']} 的 repo 路徑在 Bastet 主機上不存在："
+                f"{repo}（設定值：{project['repo_path']}）")
+        if not is_git_repo(repo):
+            raise ValueError(
+                f"專案 {job['project_id']} 的 repo 路徑不是 git repo：{repo}"
+                f"（worktree 隔離需要 git；先在該目錄 git init 或改成正確路徑）")
+        return repo
 
     def _ensure_workdir(self, job, use_worktree: bool) -> str:
         if job["worktree_path"]:
@@ -622,7 +678,8 @@ class Orchestrator:
             "UPDATE runs SET status=?, error=?, tokens_in=?, tokens_out=?, cache_read=?, "
             "cache_write=?, cost_usd=?, accounting_precision=?, finished_at=?, "
             "artifacts_json=? WHERE id=?",
-            (result.status, None if result.status == "succeeded" else result.summary[:500],
+            (result.status,
+             None if result.status == "succeeded" else _failure_reason(result, workdir),
              *usage, precision, now(), json.dumps(artifacts), run_id),
         )
         self.db.audit("orchestrator", "run.finished", "run", run_id,

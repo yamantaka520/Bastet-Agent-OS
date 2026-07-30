@@ -475,6 +475,12 @@ const zhHans: Dict = {
   "adm.tokenNew": "新 token（只显示这一次）：",
   "adm.deleteUser": "确定删除这个用户？其 token 会立即失效。",
   "adm.roleHint": "权限即时生效，不需要重新发 token。",
+  "project.repoLabel": "repo 路径（绝对路径）",
+  "project.repoHint": "必须是“运行 bastet serve 的那台主机”上的绝对路径，不能用 ~ 或相对路径：Linux/macOS 例 /home/you/project，Windows 例 C:\\Users\\you\\project。该路径必须已经是 git repo（worktree 隔离需要）。",
+  "board.stuck": "⚠ 这张卡片卡住了",
+  "board.retry": "重新运行这个阶段",
+  "board.retrySameAgent": "用原本的 Agent 重试",
+  "board.retryHint": "会重跑当前这个阶段（不会跳过已完成的阶段）。若失败原因是 Agent 本身（未登录、配额用完），可在左边改用别的 Agent。",
 };
 
 export default zhHans;
