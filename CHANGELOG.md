@@ -8,6 +8,19 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.6.1] - 2026-07-31
+
+### Fixed
+- Saved credentials are editable: `PUT /api/secrets/{id}` changes the name,
+  injected env var, note and visibility scope, and rotates the value itself
+  (blank keeps the stored one; the old file is left in place rather than
+  deleting a key that might still be needed). The Admin card grows an inline
+  editor — before this, a typo meant delete and retype.
+- Resources whose credential is a `secret:<id>` pointer pick the rotation up
+  on the next run, with no per-resource edits.
+- The project resource picker no longer says "no other agent available" when
+  every pool resource is already attached.
+
 ## [0.6.0] - 2026-07-31
 
 ### Added — classified resource pool, MCP installs, agent-callable resources

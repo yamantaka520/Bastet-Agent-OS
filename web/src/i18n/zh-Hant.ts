@@ -371,6 +371,9 @@ const zhHant = {
   "project.resRemove": "從本專案移除",
   "project.headSource": "來源",
   "project.resHint": "這裡加入的資源，本專案 Agent 執行時就能直接呼叫。標示「繼承」的來自 team／全域授權，需到「資源」頁調整。",
+  "sec.keepValuePh": "新內容（留空＝不變更）",
+  "sec.editHint": "值是唯寫的：留空表示保留原本的憑證，填入就是輪替（舊檔案仍留在 <home>/secrets）。改可見範圍會立即影響哪些 run 拿得到它。",
+  "project.resAllAdded": "（資源池的資源都已加入）",
 } as const;
 
 export type Dict = { [K in keyof typeof zhHant]: string };

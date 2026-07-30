@@ -233,6 +233,7 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
                   .map((r) => ({ id: r.id, name: r.name,
                                  executor_type: r.kind, enabled: 1 }))}
                 label={t("project.resAdd")}
+                emptyLabel={t("project.resAllAdded")}
                 onPick={attachResource} />
             )}
             <p className="muted">{t("project.resHint")}</p>
@@ -260,13 +261,15 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
   );
 }
 
-function AssignInline({ agents, onPick, label }: {
+function AssignInline({ agents, onPick, label, emptyLabel }: {
   agents: Agent[]; onPick: (agentId: string) => void; label: string;
+  emptyLabel?: string;   // the resource card reuses this picker
 }) {
   const t = useT();
   const [value, setValue] = useState("");
   if (!agents.filter((a) => a.enabled).length) {
-    return <span className="muted">{t("project.noOtherAgents")}</span>;
+    return <span className="muted">
+      {emptyLabel ?? t("project.noOtherAgents")}</span>;
   }
   return (
     <span className="row-ops">

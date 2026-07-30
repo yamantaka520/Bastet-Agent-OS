@@ -352,6 +352,9 @@ const ja: Dict = {
   "project.resRemove": "このプロジェクトから外す",
   "project.headSource": "由来",
   "project.resHint": "ここで追加したリソースは、このプロジェクトの Agent が直接呼び出せます。「継承」はチーム／全体の付与によるものなので、「リソース」タブで調整してください。",
+  "sec.keepValuePh": "新しい値（空欄＝変更しない）",
+  "sec.editHint": "値は書き込み専用です：空欄なら保存済みの認証情報をそのまま維持し、入力するとローテーションになります（古いファイルは <home>/secrets に残ります）。可視範囲を変えると、どの run に渡すかが即座に変わります。",
+  "project.resAllAdded": "（プール内のリソースはすべて追加済みです）",
 };
 
 export default ja;

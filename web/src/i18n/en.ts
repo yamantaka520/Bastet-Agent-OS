@@ -352,6 +352,9 @@ const en: Dict = {
   "project.resRemove": "Remove from this project",
   "project.headSource": "Source",
   "project.resHint": "Resources added here can be called directly by this project's agents. Rows marked inherited come from a team/global grant — change those on the Resources tab.",
+  "sec.keepValuePh": "new value (blank = keep current)",
+  "sec.editHint": "The value is write-only: leave it blank to keep the stored credential, fill it in to rotate (the old file stays in <home>/secrets). Changing the scope immediately changes which runs receive it.",
+  "project.resAllAdded": "(every pool resource is already added)",
 };
 
 export default en;

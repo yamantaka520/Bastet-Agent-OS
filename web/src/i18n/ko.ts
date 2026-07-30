@@ -352,6 +352,9 @@ const ko: Dict = {
   "project.resRemove": "이 프로젝트에서 제거",
   "project.headSource": "출처",
   "project.resHint": "여기서 추가한 리소스는 이 프로젝트의 Agent 가 바로 호출할 수 있습니다. 「상속」 표시는 팀／전역 부여이므로 「리소스」 탭에서 조정하세요.",
+  "sec.keepValuePh": "새 값（비우면 기존 값 유지）",
+  "sec.editHint": "값은 쓰기 전용입니다: 비워 두면 저장된 자격 증명을 그대로 유지하고, 입력하면 교체됩니다（이전 파일은 <home>/secrets 에 남습니다）. 가시 범위를 바꾸면 어떤 run 이 받는지가 즉시 바뀝니다.",
+  "project.resAllAdded": "（풀의 리소스가 모두 추가되었습니다）",
 };
 
 export default ko;

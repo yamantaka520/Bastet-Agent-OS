@@ -243,6 +243,18 @@ class SecretIn(BaseModel):
     note: str = ""
 
 
+class SecretUpdateIn(BaseModel):
+    """Everything about a saved credential is editable. The value itself is
+    write-only: send a new one to rotate it, leave both blank to keep it."""
+    name: str | None = None
+    value: str = ""
+    secret_ref: str = ""
+    env_name: str | None = None
+    note: str | None = None
+    scope_type: str | None = None
+    scope_id: str | None = None
+
+
 def create_app(home: Home) -> FastAPI:
     from .config import augment_path
 
@@ -741,6 +753,45 @@ def create_app(home: Home) -> FastAPI:
                   "env_name": env_name, "ref_scheme": ref.split(":", 1)[0]})
         return {"id": rid, "env_name": env_name,
                 "note": "run 啟動時會以此環境變數注入可見範圍內的任務"}
+
+    @app.put("/api/secrets/{secret_id}")
+    def update_secret(secret_id: str, sec: SecretUpdateIn,
+                      auth: Auth = Depends(require_role("admin"))):
+        row = db.one("SELECT * FROM resources WHERE id=? AND kind='secret'", (secret_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="secret not found")
+        config = json.loads(row["config_json"] or "{}")
+        if sec.env_name is not None:
+            config["env_name"] = sec.env_name or config.get("env_name")
+        if sec.note is not None:
+            config["note"] = sec.note
+        secret_ref = row["secret_ref"]
+        rotated = False
+        if sec.value or sec.secret_ref:
+            # rotation: a fresh file/ref replaces the old one (the previous file
+            # stays on disk — deleting a key we might still need is worse)
+            secret_ref = secrets_store.ensure_ref(sec.secret_ref or sec.value,
+                                                  home.root, secret_id)
+            rotated = True
+        db.write("UPDATE resources SET name=?, secret_ref=?, config_json=?, updated_at=? "
+                 "WHERE id=?", (sec.name or row["name"], secret_ref,
+                                json.dumps(config), now(), secret_id))
+        if sec.scope_type:
+            if sec.scope_type not in ("global", "team", "project"):
+                raise HTTPException(status_code=400,
+                                    detail="scope 必須是 global/team/project")
+            if sec.scope_type != "global" and not sec.scope_id:
+                raise HTTPException(status_code=400, detail="team/project 範圍需要指定 id")
+            db.write("DELETE FROM grants WHERE resource_id=?", (secret_id,))
+            db.write("INSERT INTO grants(id, resource_id, scope_type, scope_id, "
+                     "created_at) VALUES(?,?,?,?,?)",
+                     (new_id("grt"), secret_id, sec.scope_type,
+                      sec.scope_id or "*", now()))
+        db.audit(auth.actor, "secret.update", "resource", secret_id,
+                 {"name": sec.name or row["name"], "rotated": rotated,
+                  "env_name": config.get("env_name"),
+                  "scope": f"{sec.scope_type}:{sec.scope_id}" if sec.scope_type else None})
+        return next(s for s in _secret_rows() if s["id"] == secret_id)
 
     @app.delete("/api/secrets/{secret_id}")
     def delete_secret(secret_id: str, auth: Auth = Depends(require_role("admin"))):

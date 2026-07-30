@@ -311,3 +311,65 @@ def test_disabled_resource_is_not_exposed(pool):
     access = resource_access.build(db, tmp, "proj1", "team1", "run-4")
     assert "BASTET_RES_OPENAI_MAIN_URL" not in access.env
     resource_access.cleanup(tmp, "run-4")
+
+
+# ---- editing a saved credential ---------------------------------------------------
+
+def test_saved_credential_is_fully_editable(client, tmp_path):
+    """Everything about a credential can change after it is created — name,
+    env var, note, scope, and the value itself (rotation)."""
+    from bastet_agent_os import secrets_store
+    sec = client.post("/api/secrets", json={"name": "deploy", "value": "v1",
+                                            "scope_type": "project",
+                                            "scope_id": "proj1",
+                                            "note": "first"}).json()
+    row = client.put(f"/api/secrets/{sec['id']}", json={
+        "name": "deploy (prod)", "env_name": "PROD_TOKEN", "note": "rotated quarterly",
+        "scope_type": "team", "scope_id": "team1"}).json()
+    assert row["name"] == "deploy (prod)" and row["env_name"] == "PROD_TOKEN"
+    assert row["note"] == "rotated quarterly"
+    assert row["scopes"] == [{"scope_type": "team", "scope_id": "team1"}]
+
+    db = Db(tmp_path / "home" / "bastet.db")
+    try:
+        stored = db.one("SELECT secret_ref FROM resources WHERE id=?",
+                        (sec["id"],))["secret_ref"]
+        assert secrets_store.resolve(stored) == "v1"   # blank value keeps the old one
+
+        client.put(f"/api/secrets/{sec['id']}", json={"value": "v2"})
+        rotated = db.one("SELECT secret_ref FROM resources WHERE id=?",
+                         (sec["id"],))["secret_ref"]
+        assert secrets_store.resolve(rotated) == "v2"
+        assert rotated != stored                       # new file, old one untouched
+        assert secrets_store.resolve(stored) == "v1"
+    finally:
+        db.close()
+
+    assert client.put(f"/api/secrets/{sec['id']}",
+                      json={"scope_type": "project"}).status_code == 400
+    assert client.put("/api/secrets/sec_ghost", json={"name": "x"}).status_code == 404
+    assert db_audit_has(client, "secret.update")
+
+
+def db_audit_has(client, action: str) -> bool:
+    return any(r["action"] == action
+               for r in client.get("/api/audit?limit=200").json())
+
+
+def test_rotating_a_credential_updates_every_resource_using_it(client, tmp_path):
+    """The point of the secret:<id> pointer: resources follow the rotation."""
+    from bastet_agent_os import resource_access
+    sec = client.post("/api/secrets", json={"name": "shared key", "value": "old",
+                                            "scope_type": "global"}).json()
+    client.post("/api/resources", json={
+        "name": "svc-a", "kind": "api", "endpoint": "https://a",
+        "secret_ref": f"secret:{sec['id']}", "scope_type": "project",
+        "scope_id": "proj1"})
+    client.put(f"/api/secrets/{sec['id']}", json={"value": "new"})
+
+    db = Db(tmp_path / "home" / "bastet.db")
+    try:
+        access = resource_access.build(db, tmp_path / "home", "proj1", "team1", "run-x")
+        assert access.env["BASTET_RES_SVC_A_KEY"] == "new"
+    finally:
+        db.close()

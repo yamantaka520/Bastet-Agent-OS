@@ -372,6 +372,9 @@ const zhHans: Dict = {
   "project.resRemove": "从本项目移除",
   "project.headSource": "来源",
   "project.resHint": "这里加入的资源，本项目 Agent 运行时就能直接调用。标示“继承”的来自 team／全局授权，需到“资源”页调整。",
+  "sec.keepValuePh": "新内容（留空＝不变更）",
+  "sec.editHint": "值是只写的：留空表示保留原本的凭据，填入即为轮替（旧文件仍留在 <home>/secrets）。修改可见范围会立即影响哪些 run 能拿到它。",
+  "project.resAllAdded": "（资源池的资源都已加入）",
 };
 
 export default zhHans;
