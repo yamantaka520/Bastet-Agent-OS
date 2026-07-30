@@ -127,6 +127,36 @@ class Orchestrator:
         self._spawn(self._drive_job(job_id, req))
         return job_id
 
+    async def cancel_job(self, job_id: str, actor: str = "user") -> dict:
+        """Stop a job now: kill whatever is streaming, mark the job cancelled.
+
+        Used by the project stop control — a run left streaming after its job is
+        cancelled would keep spending tokens on work nobody wants."""
+        job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job is None:
+            raise ValueError("job not found")
+        killed = []
+        for row in self.db.query(
+                "SELECT id FROM runs WHERE job_id=? AND status IN "
+                "('queued','running','waiting_input')", (job_id,)):
+            pair = self._live.get(row["id"])
+            if pair is not None:
+                executor, handle = pair
+                try:
+                    await executor.cancel(handle)
+                except Exception as exc:            # a dead process is fine here
+                    log.info("cancel run %s: %s", row["id"], type(exc).__name__)
+            self.db.write("UPDATE runs SET status='cancelled', finished_at=? "
+                          "WHERE id=?", (now(), row["id"]))
+            run_tokens.revoke_for_run(self.db, row["id"])
+            killed.append(row["id"])
+        if job["status"] not in ("done", "cancelled"):
+            self.db.write("UPDATE jobs SET status='cancelled', updated_at=? WHERE id=?",
+                          (now(), job_id))
+        self.db.audit(actor, "job.cancel", "job", job_id, {"runs": killed})
+        self._emit("job.cancelled", job["project_id"], job_id=job_id)
+        return {"job_id": job_id, "runs_cancelled": killed}
+
     def _spawn(self, coro) -> None:
         task = asyncio.get_running_loop().create_task(coro)
         self._tasks.add(task)

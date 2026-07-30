@@ -16,6 +16,7 @@ type Channel = { id: string; kind: string; name: string | null; secret_ref: stri
                  responder: { kind: string; id: string } | null;
                  project_id: string };
 type Responder = { kind: string; id: string; label: string; detail: string };
+type RoleCap = { id: string; rank: number; can: string[]; cannot: string[] };
 
 type ProjectRow = { id: string; team_id: string };
 
@@ -53,30 +54,8 @@ export default function AdminPage(props: { refreshKey: number }) {
 
   return (
     <div className="page">
-      <Section title={t("adm.users")}>
-        <InlineForm
-          fields={[{ name: "name", placeholder: t("adm.namePh") },
-                   { name: "role", placeholder: t("adm.rolePh") }]}
-          submit={t("c.add")}
-          onSubmit={async (v) => {
-            const created = await post<{ id: string; token: string }>(
-              "/api/users", { name: v.name, role: v.role || "operator" });
-            setFreshToken(created.token);
-            reloadUsers();
-          }} />
-        {freshToken && (
-          <p className="notice">{t("adm.tokenOnce")}<code>{freshToken}</code></p>
-        )}
-        <DataTable
-          head={["id", t("c.name"), t("c.role"), "enabled", t("adm.headLastUsed"), ""]}
-          rows={users.map((u) => [
-            u.id, u.name, u.role, u.enabled ? "✅" : "⛔", u.last_used_at ?? "—",
-            <button key={u.id} className="ghost" onClick={async () => {
-              await post(`/api/users/${u.id}/enabled`, { enabled: !u.enabled });
-              reloadUsers();
-            }}>{u.enabled ? t("c.disable") : t("c.enable")}</button>,
-          ])} />
-      </Section>
+      <UsersSection users={users} reload={reloadUsers} freshToken={freshToken}
+                    setFreshToken={setFreshToken} />
 
       <SecretsSection projects={projects} teams={teams} />
 
@@ -189,5 +168,112 @@ function ChannelChat({ channel, responders, projects, onSaved }: {
       </div>
       <p className="muted">{t("adm.chatHint")}</p>
     </div>
+  );
+}
+
+/** Users: the role dropdown explains what it grants, and a token can be copied
+ *  once, disabled, rotated (old one dies at once) or deleted. */
+function UsersSection({ users, reload, freshToken, setFreshToken }: {
+  users: User[]; reload: () => void; freshToken: string | null;
+  setFreshToken: (token: string | null) => void;
+}) {
+  const t = useT();
+  const [roles, setRoles] = useState<RoleCap[]>([]);
+  const [draft, setDraft] = useState({ name: "", role: "operator" });
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api<RoleCap[]>("/api/user-roles").then(setRoles).catch(() => {});
+  }, []);
+
+  const guard = async (fn: () => Promise<unknown>) => {
+    setError("");
+    try { await fn(); reload(); }
+    catch (e) { setError(String((e as Error).message)); }
+  };
+
+  const copy = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch { setError("clipboard blocked — select the token and copy manually"); }
+  };
+
+  const selected = roles.find((r) => r.id === draft.role);
+
+  return (
+    <Section title={t("adm.users")}>
+      {error && <p className="error">{error}</p>}
+      <div className="inline-form">
+        <input placeholder={t("adm.namePh")} value={draft.name}
+               onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+        <label className="res-field">
+          <span>{t("c.role")}</span>
+          <select value={draft.role}
+                  onChange={(e) => setDraft({ ...draft, role: e.target.value })}>
+            {(roles.length ? roles.map((r) => r.id)
+                           : ["viewer", "operator", "admin"]).map((id) => (
+              <option key={id} value={id}>{id}</option>
+            ))}
+          </select>
+        </label>
+        <button disabled={!draft.name.trim()} onClick={() => guard(async () => {
+          const created = await post<{ token: string }>(
+            "/api/users", { name: draft.name.trim(), role: draft.role });
+          setFreshToken(created.token);
+          setDraft({ name: "", role: draft.role });
+        })}>{t("c.add")}</button>
+      </div>
+      {selected && (
+        <p className="muted">
+          <b>{selected.id}</b> — {t("adm.roleCan")}: {selected.can.join("、")}
+          {selected.cannot.length
+            ? ` ／ ${t("adm.roleCannot")}: ${selected.cannot.join("、")}` : ""}
+        </p>
+      )}
+      {freshToken && (
+        <p className="notice">{t("adm.tokenOnce")}
+          <code className="token-value">{freshToken}</code>
+          <button className="ghost" onClick={() => copy(freshToken)}>
+            {copied ? t("adm.copied") : t("adm.copy")}</button>
+          <button className="ghost" onClick={() => setFreshToken(null)}>
+            {t("adm.gotIt")}</button>
+        </p>
+      )}
+      <DataTable
+        head={["id", t("c.name"), t("c.role"), "enabled", t("adm.headLastUsed"), ""]}
+        rows={users.map((u) => [
+          u.id, u.name,
+          <select key={`role-${u.id}`} value={u.role}
+                  onChange={(e) => guard(() =>
+                    put(`/api/users/${u.id}`, { role: e.target.value }))}>
+            {(roles.length ? roles.map((r) => r.id)
+                           : ["viewer", "operator", "admin"]).map((id) => (
+              <option key={id} value={id}>{id}</option>
+            ))}
+          </select>,
+          u.enabled ? "✅" : "⛔", u.last_used_at ?? "—",
+          <span key={`ops-${u.id}`} className="row-ops">
+            <button className="ghost" onClick={() => guard(() =>
+              post(`/api/users/${u.id}/enabled`, { enabled: !u.enabled }))}>
+              {u.enabled ? t("c.disable") : t("c.enable")}</button>
+            <button className="ghost" onClick={() => {
+              if (!window.confirm(t("adm.rotateWarn"))) return;
+              guard(async () => {
+                const fresh = await post<{ token: string }>(
+                  `/api/users/${u.id}/token`, {});
+                setFreshToken(fresh.token);
+              });
+            }}>{t("adm.rotate")}</button>
+            <button className="ghost danger-text" onClick={() => {
+              if (!window.confirm(t("adm.deleteUser"))) return;
+              guard(() => del(`/api/users/${u.id}`));
+            }}>{t("c.delete")}</button>
+          </span>,
+        ])} />
+      <p className="muted">{t("adm.roleHint")}</p>
+    </Section>
   );
 }

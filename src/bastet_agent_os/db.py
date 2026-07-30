@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS projects (
   team_id TEXT NOT NULL,           -- = AMOS team id
   repo_path TEXT,
   default_template_id TEXT,
+  -- lifecycle (SPEC §5.12): planning -> ready -> running <-> paused
+  --                         -> maintenance -> closed (reopenable)
+  status TEXT NOT NULL DEFAULT 'planning',
   config_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -305,6 +308,10 @@ class Db:
             agent_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(agents)")}
             if "account_id" not in agent_cols:
                 self._conn.execute("ALTER TABLE agents ADD COLUMN account_id TEXT")
+            project_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(projects)")}
+            if "status" not in project_cols:
+                self._conn.execute("ALTER TABLE projects ADD COLUMN status TEXT "
+                                   "NOT NULL DEFAULT 'planning'")
             channel_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(channels)")}
             if "name" not in channel_cols:
                 self._conn.execute("ALTER TABLE channels ADD COLUMN name TEXT")

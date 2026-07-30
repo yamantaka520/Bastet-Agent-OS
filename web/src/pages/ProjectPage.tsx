@@ -1,20 +1,27 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, del, post, put } from "../api";
-import { useT, useVocab } from "../i18n";
+import { useT, useVocab, type T } from "../i18n";
 import { DataTable, Section, useList } from "../ui";
 import { Secret, scopeText } from "./Secrets";
 
-/** One project, everything about it: content, workflow, role coverage,
- *  resources & budgets, credentials, recent jobs. Every block reads the same
- *  data the other tabs write — this is a lens, not a separate store. */
+/** One collapsible card per project, grouped by lifecycle status. The header
+ *  carries the light, progress and run controls; the body — loaded only when
+ *  expanded, so a hundred projects stay usable — is everything about it. */
 
-type Project = { id: string; team_id: string; repo_path: string | null;
-                 default_template_id: string | null };
+type Progress = { total: number; done: number; active: number; blocked: number;
+                  open: number; cancelled: number };
+type Project = {
+  id: string; team_id: string; repo_path: string | null; description: string;
+  default_template_id: string | null; status: string; light: string;
+  transitions: string[]; progress: Progress; task_count: number;
+  running: boolean; created_at: string; updated_at: string;
+};
 type Stage = { name: string; role?: string | null; gate: string; read_only?: boolean };
 type Agent = { id: string; name: string; executor_type: string; enabled: number };
 type Role = { id: string; label: string };
 type Template = { id: string };
 type PoolResource = { id: string; name: string; kind: string };
+type Task = { title: string; spec: string; role?: string; job_id?: string };
 type Overview = {
   project: { id: string; team_id: string; repo_path: string | null;
              description: string; template_id: string | null };
@@ -22,7 +29,6 @@ type Overview = {
   role_coverage: { stage: string; role: string;
                    agents: { agent_id: string; agent_name: string;
                              executor_type: string; preference: number }[] }[];
-  assignments: { role: string; agent_id: string; agent_name: string }[];
   resources: { id: string; name: string; kind: string; grant_id: string;
                scope_type: string; budget_usd: number | null;
                max_concurrency: number | null; on_exceed: string }[];
@@ -31,253 +37,403 @@ type Overview = {
           updated_at: string }[];
 };
 
+const GROUPS = ["planning", "ready", "running", "paused", "maintenance", "closed"];
+
 export default function ProjectPage(props: { canOperate: boolean; refreshKey: number }) {
   const t = useT();
-  const vocab = useVocab();
-  const [projects] = useList<Project>("/api/projects", props.refreshKey);
-  const [templates] = useList<Template>("/api/templates", props.refreshKey);
-  const [agents] = useList<Agent>("/api/agents", props.refreshKey);
-  const [pool] = useList<PoolResource>("/api/resources", props.refreshKey);
-  const [roles, setRoles] = useState<Role[]>([]);
-  const [selected, setSelected] = useState<string>("");
-  const [ov, setOv] = useState<Overview | null>(null);
-  const [edit, setEdit] = useState({ repo: "", desc: "" });
+  const [query, setQuery] = useState({ q: "", since: "", until: "", status: "" });
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    api<{ roles: Role[] }>("/api/workflow-catalog")
-      .then((c) => setRoles(c.roles)).catch(() => {});
-  }, []);
-  useEffect(() => {
-    if (!selected && projects.length) setSelected(projects[0].id);
-  }, [projects, selected]);
-
   const load = useCallback(() => {
-    if (!selected) return;
-    api<Overview>(`/api/projects/${selected}/overview`).then((data) => {
-      setOv(data);
-      setEdit({ repo: data.project.repo_path ?? "", desc: data.project.description });
-    }).catch(() => setOv(null));
-  }, [selected]);
+    const params = new URLSearchParams();
+    if (query.q) params.set("q", query.q);
+    if (query.since) params.set("since", query.since);
+    if (query.until) params.set("until", query.until);
+    if (query.status) params.set("status", query.status);
+    api<Project[]>(`/api/projects?${params.toString()}`)
+      .then(setProjects).catch(() => setProjects([]));
+  }, [query]);
   useEffect(load, [load, props.refreshKey]);
 
-  // localised by stable role id; falls back to whatever the catalog sent
-  const roleLabel = (id: string) =>
-    vocab.roleLabel(id, roles.find((r) => r.id === id)?.label ?? id);
-
-  const saveProject = async () => {
+  const move = async (projectId: string, transition: string) => {
     setError("");
     try {
-      await put(`/api/projects/${selected}`,
-                { repo_path: edit.repo, description: edit.desc });
+      await post(`/api/projects/${projectId}/lifecycle/${transition}`, {});
       load();
     } catch (e) { setError(String((e as Error).message)); }
   };
 
-  const assignRole = async (role: string, agentId: string) => {
-    setError("");
-    try {
-      await post("/api/roles", { project_id: selected, agent_id: agentId, role,
-                                 preference: 0 });
-      load();
-    } catch (e) { setError(String((e as Error).message)); }
-  };
-
-  const unassignRole = async (role: string, agentId: string) => {
-    setError("");
-    try {
-      await del(`/api/roles?project_id=${encodeURIComponent(selected)}` +
-                `&agent_id=${encodeURIComponent(agentId)}` +
-                `&role=${encodeURIComponent(role)}`);
-      load();
-    } catch (e) { setError(String((e as Error).message)); }
-  };
-
-  const attachResource = async (resourceId: string) => {
-    setError("");
-    try {
-      await post(`/api/projects/${selected}/resources`, { resource_id: resourceId });
-      load();
-    } catch (e) { setError(String((e as Error).message)); }
-  };
-
-  const detachResource = async (resourceId: string) => {
-    setError("");
-    try {
-      await del(`/api/projects/${selected}/resources/${resourceId}`);
-      load();
-    } catch (e) { setError(String((e as Error).message)); }
-  };
-
-  const setTemplate = async (templateId: string) => {
-    setError("");
-    try {
-      await post(`/api/projects/${selected}/template`, { template_id: templateId || null });
-      load();
-    } catch (e) { setError(String((e as Error).message)); }
-  };
-
-  if (!projects.length) {
-    return <div className="page">
-      <p className="muted">{t("project.noneYet")}</p></div>;
-  }
+  const filtering = !!(query.q || query.status || query.since || query.until);
 
   return (
     <div className="page">
-      <div className="toolbar">
-        <span className="muted">{t("project.selector")}</span>
-        <select value={selected} onChange={(e) => setSelected(e.target.value)}>
-          {projects.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
-        </select>
-        {ov && <span className="card-meta">🏷 {ov.project.team_id}</span>}
+      <div className="inline-form proj-search">
+        <input placeholder={t("proj.searchPh")} value={query.q} style={{ flex: 1 }}
+               onChange={(e) => setQuery({ ...query, q: e.target.value })} />
+        <label className="res-field">
+          <span>{t("proj.statusFilter")}</span>
+          <select value={query.status}
+                  onChange={(e) => setQuery({ ...query, status: e.target.value })}>
+            <option value="">{t("proj.all")}</option>
+            {GROUPS.map((s) => (
+              <option key={s} value={s}>{t(`proj.status.${s}`)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="res-field">
+          <span>{t("proj.since")}</span>
+          <input type="date" value={query.since}
+                 onChange={(e) => setQuery({ ...query, since: e.target.value })} />
+        </label>
+        <label className="res-field">
+          <span>{t("proj.until")}</span>
+          <input type="date" value={query.until}
+                 onChange={(e) => setQuery({ ...query, until: e.target.value })} />
+        </label>
       </div>
       {error && <p className="error">{error}</p>}
+      {!projects.length && (
+        <p className="muted">{filtering ? t("proj.noMatch") : t("project.noneYet")}</p>
+      )}
 
-      {ov && (
-        <>
-          <Section title={t("project.content")}>
-            <div className="inline-form">
-              <input placeholder={t("project.repoPh")} style={{ width: "22rem" }}
-                     value={edit.repo} disabled={!props.canOperate}
-                     onChange={(e) => setEdit({ ...edit, repo: e.target.value })} />
-              <input placeholder={t("project.descPh")} style={{ flex: 1 }}
-                     value={edit.desc} disabled={!props.canOperate}
-                     onChange={(e) => setEdit({ ...edit, desc: e.target.value })} />
-              {props.canOperate && <button onClick={saveProject}>{t("c.save")}</button>}
-            </div>
+      {GROUPS.map((group) => {
+        const rows = projects.filter((p) => p.status === group);
+        if (!rows.length) return null;
+        return (
+          <Section key={group} title={`${t(`proj.group.${group}`)}（${rows.length}）`}>
+            {rows.map((p) => (
+              <ProjectCard key={p.id} project={p} t={t} open={!!open[p.id]}
+                           canOperate={props.canOperate} refreshKey={props.refreshKey}
+                           onToggle={() => setOpen({ ...open, [p.id]: !open[p.id] })}
+                           onMove={(tx) => move(p.id, tx)} onChanged={load} />
+            ))}
           </Section>
+        );
+      })}
+    </div>
+  );
+}
 
-          <Section title={t("project.workflowBlock")}>
-            <div className="inline-form">
-              <span className="muted">{t("project.workflowLabel")}</span>
-              <select value={ov.project.template_id ?? ""} disabled={!props.canOperate}
-                      onChange={(e) => setTemplate(e.target.value)}>
-                <option value="">{t("project.workflowNone")}</option>
-                {templates.map((t) => <option key={t.id} value={t.id}>{t.id}</option>)}
-              </select>
-              {!ov.project.template_id &&
-                <span className="muted">{t("project.workflowNoneHint")}</span>}
-            </div>
-            {!!ov.stages.length && (
-              <DataTable
-                head={["#", t("c.stage"), t("project.headRole"), t("project.headAssigned"), ""]}
-                rows={ov.stages.map((st, i) => {
-                  const cov = ov.role_coverage.find((c) => c.stage === st.name);
-                  const agentsForRole = cov?.agents ?? [];
-                  return [
-                    i + 1,
-                    st.name + (st.read_only ? " 🔒" : ""),
-                    st.role ? roleLabel(st.role) : <span className="muted">{t("project.roleAny")}</span>,
-                    !st.role
-                      ? <span className="muted">{t("project.roleAnyHint")}</span>
-                      : agentsForRole.length
-                        ? (
-                          <span className="role-agents">
-                            {agentsForRole.map((a) => (
-                              <span key={a.agent_id} className="role-chip">
-                                {a.agent_name}
-                                <span className="card-meta"> ({a.executor_type})</span>
-                                {props.canOperate && (
-                                  <button className="ghost chip-x"
-                                          title={t("project.removeAssign")}
-                                          onClick={() => unassignRole(st.role as string,
-                                                                     a.agent_id)}>✕</button>
-                                )}
-                              </span>
-                            ))}
-                          </span>
-                        )
-                        : <span className="danger-text">{t("project.missing")}</span>,
-                    // assignment stays editable: add another agent or swap by
-                    // removing the chip above — never a one-shot decision
-                    st.role && props.canOperate ? (
-                      <AssignInline
-                        agents={agents.filter((a) =>
-                          !agentsForRole.some((x) => x.agent_id === a.id))}
-                        label={agentsForRole.length ? t("project.assignSwap")
-                                                    : t("project.assignPick")}
-                        onPick={(aid) => assignRole(st.role as string, aid)} />
-                    ) : null,
-                  ];
-                })} />
-            )}
-            <p className="muted">{t("project.assignHint")}</p>
-          </Section>
-
-          <Section title={t("project.grants")}>
-            <DataTable
-              head={[t("project.headResource"), t("c.kind"), t("project.headSource"),
-                     t("project.headBudget"), t("project.headConcurrency"),
-                     t("project.headOnExceed"), ""]}
-              rows={ov.resources.map((r) => [
-                r.name, t(`res.kind.${r.kind}`, undefined, r.kind),
-                r.scope_type === "project"
-                  ? t("sec.labelProject")
-                  : <span className="card-meta">{t("project.resInherited")}（
-                      {t(r.scope_type === "team" ? "sec.labelTeam" : "sec.labelGlobal")}）
-                    </span>,
-                r.budget_usd != null ? `$${r.budget_usd}` : "∞",
-                r.max_concurrency ?? "∞", r.on_exceed,
-                r.scope_type === "project" && props.canOperate ? (
-                  <button className="ghost danger-text chip-x"
-                          title={t("project.resRemove")}
-                          onClick={() => detachResource(r.id)}>✕</button>
-                ) : null,
-              ])} />
-            {!ov.resources.length &&
-              <p className="muted">{t("project.noGrants")}</p>}
-            {props.canOperate && (
-              <AssignInline
-                agents={pool.filter((r) =>
-                  !ov.resources.some((x) => x.id === r.id))
-                  .map((r) => ({ id: r.id, name: r.name,
-                                 executor_type: r.kind, enabled: 1 }))}
-                label={t("project.resAdd")}
-                emptyLabel={t("project.resAllAdded")}
-                onPick={attachResource} />
-            )}
-            <p className="muted">{t("project.resHint")}</p>
-          </Section>
-
-          <Section title={t("project.secrets")}>
-            <DataTable
-              head={[t("c.name"), t("sec.headScope"), t("sec.headEnv"), t("c.note")]}
-              rows={ov.secrets.map((s) => [s.name, scopeText(s, t),
-                                           s.env_name ?? "—", s.note])} />
-            {!ov.secrets.length &&
-              <p className="muted">{t("project.noSecrets")}</p>}
-          </Section>
-
-          <Section title={t("project.jobs")}>
-            <DataTable
-              head={[t("project.headJob"), t("c.stage"), t("c.status"), t("c.updatedAt")]}
-              rows={ov.jobs.map((j) => [j.title, j.stage, j.status,
-                                        j.updated_at?.replace("T", " ") ?? ""])} />
-            {!ov.jobs.length && <p className="muted">{t("project.noJobs")}</p>}
-          </Section>
-        </>
+function ProjectCard({ project, open, canOperate, refreshKey, onToggle, onMove,
+                       onChanged, t }: {
+  project: Project; open: boolean; canOperate: boolean; refreshKey: number;
+  onToggle: () => void; onMove: (transition: string) => void;
+  onChanged: () => void; t: T;
+}) {
+  const p = project;
+  return (
+    <div className={`proj-card ${p.status}`}>
+      <div className="proj-head">
+        <button className="ghost proj-toggle" onClick={onToggle}
+                title={t("proj.detail")}>{open ? "▾" : "▸"}</button>
+        <b>{p.light} {p.id}</b>
+        <span className="flow-tag">{t(`proj.status.${p.status}`)}</span>
+        <span className="card-meta">🏷 {p.team_id}</span>
+        {!!p.progress.total && (
+          <span className="card-meta" title={t("proj.progressDetail", p.progress)}>
+            {t("proj.progress", p.progress)}</span>
+        )}
+        {p.running && <span className="card-meta">⚙ {t("proj.runnerActive")}</span>}
+        {canOperate && (
+          <span className="row-ops">
+            {p.transitions.map((tx) => (
+              <button key={tx}
+                      className={tx === "start" || tx === "resume" ? "" : "ghost"}
+                      onClick={() => onMove(tx)}>{t(`proj.tx.${tx}`)}</button>
+            ))}
+          </span>
+        )}
+      </div>
+      {p.description && <p className="proj-desc muted">{p.description}</p>}
+      {open && (
+        <ProjectDetail projectId={p.id} project={p} canOperate={canOperate}
+                       refreshKey={refreshKey} onChanged={onChanged} t={t} />
       )}
     </div>
   );
 }
 
-function AssignInline({ agents, onPick, label, emptyLabel }: {
-  agents: Agent[]; onPick: (agentId: string) => void; label: string;
-  emptyLabel?: string;   // the resource card reuses this picker
+function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, t }: {
+  projectId: string; project: Project; canOperate: boolean; refreshKey: number;
+  onChanged: () => void; t: T;
 }) {
-  const t = useT();
+  const vocab = useVocab();
+  const [templates] = useList<Template>("/api/templates", refreshKey);
+  const [agents] = useList<Agent>("/api/agents", refreshKey);
+  const [pool] = useList<PoolResource>("/api/resources", refreshKey);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [ov, setOv] = useState<Overview | null>(null);
+  const [edit, setEdit] = useState({ repo: "", desc: "" });
+  const [error, setError] = useState("");
+
+  const load = useCallback(() => {
+    api<Overview>(`/api/projects/${projectId}/overview`).then((data) => {
+      setOv(data);
+      setEdit({ repo: data.project.repo_path ?? "", desc: data.project.description });
+    }).catch(() => setOv(null));
+  }, [projectId]);
+  useEffect(load, [load, refreshKey]);
+  useEffect(() => {
+    api<{ roles: Role[] }>("/api/workflow-catalog")
+      .then((c) => setRoles(c.roles)).catch(() => {});
+  }, []);
+
+  const roleLabel = (id: string) =>
+    vocab.roleLabel(id, roles.find((r) => r.id === id)?.label ?? id);
+  const guard = async (fn: () => Promise<unknown>) => {
+    setError("");
+    try { await fn(); load(); onChanged(); }
+    catch (e) { setError(String((e as Error).message)); }
+  };
+
+  if (!ov) return <p className="muted">…</p>;
+
+  return (
+    <div className="proj-body">
+      {error && <p className="error">{error}</p>}
+
+      <h4>{t("project.content")}</h4>
+      <div className="inline-form">
+        <input placeholder={t("project.repoPh")} style={{ width: "20rem" }}
+               value={edit.repo} disabled={!canOperate}
+               onChange={(e) => setEdit({ ...edit, repo: e.target.value })} />
+        <input placeholder={t("project.descPh")} style={{ flex: 1 }}
+               value={edit.desc} disabled={!canOperate}
+               onChange={(e) => setEdit({ ...edit, desc: e.target.value })} />
+        {canOperate && (
+          <button onClick={() => guard(() => put(`/api/projects/${projectId}`,
+                                                 { repo_path: edit.repo,
+                                                   description: edit.desc }))}>
+            {t("c.save")}</button>
+        )}
+      </div>
+
+      <h4>{t("project.workflowBlock")}</h4>
+      <div className="inline-form">
+        <span className="muted">{t("project.workflowLabel")}</span>
+        <select value={ov.project.template_id ?? ""} disabled={!canOperate}
+                onChange={(e) => guard(() =>
+                  post(`/api/projects/${projectId}/template`,
+                       { template_id: e.target.value || null }))}>
+          <option value="">{t("project.workflowNone")}</option>
+          {templates.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.id}</option>)}
+        </select>
+        {!ov.project.template_id &&
+          <span className="muted">{t("project.workflowNoneHint")}</span>}
+      </div>
+      {!!ov.stages.length && (
+        <DataTable
+          head={["#", t("c.stage"), t("project.headRole"),
+                 t("project.headAssigned"), ""]}
+          rows={ov.stages.map((st, i) => {
+            const cov = ov.role_coverage.find((c) => c.stage === st.name);
+            const assigned = cov?.agents ?? [];
+            return [
+              i + 1,
+              st.name + (st.read_only ? " 🔒" : ""),
+              st.role ? roleLabel(st.role)
+                      : <span className="muted">{t("project.roleAny")}</span>,
+              !st.role
+                ? <span className="muted">{t("project.roleAnyHint")}</span>
+                : assigned.length
+                  ? (<span className="role-agents">{assigned.map((a) => (
+                      <span key={a.agent_id} className="role-chip">{a.agent_name}
+                        <span className="card-meta"> ({a.executor_type})</span>
+                        {canOperate && (
+                          <button className="ghost chip-x"
+                                  title={t("project.removeAssign")}
+                                  onClick={() => guard(() => del(
+                                    `/api/roles?project_id=${encodeURIComponent(projectId)}`
+                                    + `&agent_id=${encodeURIComponent(a.agent_id)}`
+                                    + `&role=${encodeURIComponent(st.role as string)}`))}>
+                            ✕</button>
+                        )}
+                      </span>))}</span>)
+                  : <span className="danger-text">{t("project.missing")}</span>,
+              st.role && canOperate ? (
+                <Picker options={agents.filter((a) => a.enabled
+                          && !assigned.some((x) => x.agent_id === a.id))
+                          .map((a) => ({ value: a.id, label: a.name }))}
+                        label={assigned.length ? t("project.assignSwap")
+                                               : t("project.assignPick")}
+                        empty={t("project.noOtherAgents")} t={t}
+                        onPick={(agentId) => guard(() => post("/api/roles",
+                          { project_id: projectId, agent_id: agentId,
+                            role: st.role, preference: 0 }))} />
+              ) : null,
+            ];
+          })} />
+      )}
+      <p className="muted">{t("project.assignHint")}</p>
+
+      <TaskPlan projectId={projectId} project={project} agents={agents}
+                canOperate={canOperate} t={t} onChanged={onChanged} />
+
+      <h4>{t("project.grants")}</h4>
+      <DataTable
+        head={[t("project.headResource"), t("c.kind"), t("project.headSource"),
+               t("project.headBudget"), t("project.headConcurrency"),
+               t("project.headOnExceed"), ""]}
+        rows={ov.resources.map((r) => [
+          r.name, t(`res.kind.${r.kind}`, undefined, r.kind),
+          r.scope_type === "project"
+            ? t("sec.labelProject")
+            : <span className="card-meta">{t("project.resInherited")}（
+                {t(r.scope_type === "team" ? "sec.labelTeam"
+                                           : "sec.labelGlobal")}）</span>,
+          r.budget_usd != null ? `$${r.budget_usd}` : "∞",
+          r.max_concurrency ?? "∞", r.on_exceed,
+          r.scope_type === "project" && canOperate ? (
+            <button className="ghost danger-text chip-x" title={t("project.resRemove")}
+                    onClick={() => guard(() =>
+                      del(`/api/projects/${projectId}/resources/${r.id}`))}>✕</button>
+          ) : null,
+        ])} />
+      {canOperate && (
+        <Picker options={pool.filter((r) => !ov.resources.some((x) => x.id === r.id))
+                  .map((r) => ({ value: r.id, label: r.name }))}
+                label={t("project.resAdd")} empty={t("project.resAllAdded")} t={t}
+                onPick={(rid) => guard(() =>
+                  post(`/api/projects/${projectId}/resources`,
+                       { resource_id: rid }))} />
+      )}
+      <p className="muted">{t("project.resHint")}</p>
+
+      <h4>{t("project.secrets")}</h4>
+      <DataTable
+        head={[t("c.name"), t("sec.headScope"), t("sec.headEnv"), t("c.note")]}
+        rows={ov.secrets.map((s) => [s.name, scopeText(s, t), s.env_name ?? "—",
+                                     s.note])} />
+
+      <h4>{t("project.jobs")}</h4>
+      <DataTable
+        head={[t("project.headJob"), t("c.stage"), t("c.status"), t("c.updatedAt")]}
+        rows={ov.jobs.map((j) => [j.title, j.stage, j.status,
+                                  j.updated_at?.replace("T", " ") ?? ""])} />
+    </div>
+  );
+}
+
+/** The PM agent's decomposition: propose → edit → human confirm → runnable. */
+function TaskPlan({ projectId, project, agents, canOperate, onChanged, t }: {
+  projectId: string; project: Project; agents: Agent[]; canOperate: boolean;
+  onChanged: () => void; t: T;
+}) {
+  const [plan, setPlan] = useState<{ tasks: Task[]; confirmed: boolean;
+                                     by: string } | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [pmAgent, setPmAgent] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(() => {
+    api<{ task_plan: { tasks: Task[]; confirmed: boolean; by: string } }>(
+      `/api/projects/${projectId}/lifecycle`)
+      .then((state) => {
+        setPlan(state.task_plan);
+        setTasks(state.task_plan.tasks);
+      }).catch(() => setPlan(null));
+  }, [projectId]);
+  useEffect(load, [load]);
+
+  const decompose = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const out = await post<{ tasks: Task[] }>(
+        `/api/projects/${projectId}/decompose`, { agent_id: pmAgent });
+      setTasks(out.tasks);
+      setPlan({ tasks: out.tasks, confirmed: false, by: pmAgent });
+    } catch (e) { setError(String((e as Error).message)); }
+    finally { setBusy(false); }
+  };
+
+  const confirm = async () => {
+    setError("");
+    try {
+      await put(`/api/projects/${projectId}/tasks`, { tasks });
+      load();
+      onChanged();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
+  const patch = (i: number, key: keyof Task, value: string) =>
+    setTasks(tasks.map((task, idx) => (idx === i ? { ...task, [key]: value } : task)));
+
+  return (
+    <>
+      <h4>{t("proj.tasks")}</h4>
+      {error && <p className="error">{error}</p>}
+      {canOperate && (
+        <div className="inline-form">
+          <label className="res-field">
+            <span>{t("proj.pmAgent")}</span>
+            <select value={pmAgent} onChange={(e) => setPmAgent(e.target.value)}>
+              <option value="">pm</option>
+              {agents.filter((a) => a.enabled).map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </label>
+          <button onClick={decompose} disabled={busy}>
+            {busy ? t("proj.decomposing") : t("proj.decompose")}</button>
+          {plan && (plan.confirmed
+            ? <span className="muted">{t("proj.tasksConfirmed")}</span>
+            : !!tasks.length
+              && <span className="danger-text">{t("proj.tasksPending")}</span>)}
+        </div>
+      )}
+      {!tasks.length && <p className="muted">{t("proj.noTasks")}</p>}
+      {tasks.map((task, i) => (
+        <div key={i} className="task-row">
+          <span className="card-meta">{i + 1}</span>
+          <input value={task.title} placeholder={t("proj.taskTitlePh")}
+                 disabled={!canOperate} style={{ width: "14rem" }}
+                 onChange={(e) => patch(i, "title", e.target.value)} />
+          <input value={task.spec} placeholder={t("proj.taskSpecPh")}
+                 disabled={!canOperate} style={{ flex: 1 }}
+                 onChange={(e) => patch(i, "spec", e.target.value)} />
+          <input value={task.role ?? ""} placeholder={t("proj.taskRolePh")}
+                 disabled={!canOperate} style={{ width: "9rem" }}
+                 onChange={(e) => patch(i, "role", e.target.value)} />
+          {task.job_id
+            ? <span className="card-meta">{t("proj.taskJob")}: {task.job_id}</span>
+            : canOperate && (
+              <button className="ghost danger-text"
+                      onClick={() => setTasks(tasks.filter((_, idx) => idx !== i))}>
+                ✕</button>
+            )}
+        </div>
+      ))}
+      {canOperate && (
+        <div className="row">
+          <button className="ghost"
+                  onClick={() => setTasks([...tasks, { title: "", spec: "" }])}>
+            {t("proj.addTask")}</button>
+          <button onClick={confirm}
+                  disabled={!tasks.length || !tasks.every((x) => x.title.trim())}>
+            {t("proj.confirmTasks")}</button>
+        </div>
+      )}
+      <p className="muted">{t("proj.runHint")}</p>
+      {project.status === "closed" && <p className="muted">{t("proj.reopenHint")}</p>}
+    </>
+  );
+}
+
+function Picker({ options, label, empty, onPick, t }: {
+  options: { value: string; label: string }[]; label: string; empty: string;
+  onPick: (value: string) => void; t: T;
+}) {
   const [value, setValue] = useState("");
-  if (!agents.filter((a) => a.enabled).length) {
-    return <span className="muted">
-      {emptyLabel ?? t("project.noOtherAgents")}</span>;
-  }
+  if (!options.length) return <span className="muted">{empty}</span>;
   return (
     <span className="row-ops">
       <select value={value} onChange={(e) => setValue(e.target.value)}>
         <option value="">{label}</option>
-        {agents.filter((a) => a.enabled).map((a) => (
-          <option key={a.id} value={a.id}>{a.name}</option>
-        ))}
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
       <button className="ghost" disabled={!value}
               onClick={() => { onPick(value); setValue(""); }}>{t("c.apply")}</button>

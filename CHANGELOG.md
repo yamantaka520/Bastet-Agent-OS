@@ -8,6 +8,40 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.9.0] - 2026-07-31
+
+### Added — project lifecycle, PM decomposition, run controls
+- Projects have a real state (`projects.status`): planning → ready → running ⇄
+  paused → maintenance → closed, reopenable. Only declared transitions are
+  allowed, each is audited, and the light in the UI *is* that status rather than
+  a guess derived from job rows.
+- The project-manager agent turns the agreed plan into tasks
+  (`POST /api/projects/{id}/decompose`): read-only, with the repo, the workflow
+  stages and the planning conversation in view. It is a **proposal** — a human
+  edits and confirms it (`PUT /api/projects/{id}/tasks`) before anything runs.
+- `ProjectRunner` then dispatches the confirmed tasks in order; each follows the
+  project's workflow and role assignments. A task sitting at a gate keeps the
+  runner waiting — it never approves anything itself. When every task settles the
+  project moves to maintenance (awaiting acceptance).
+- Run controls on the card: ▶ run / ⏸ pause / ■ stop / close / reopen. Pause
+  stops the *next* dispatch and lets the current task finish; stop cancels jobs
+  in flight (new `Orchestrator.cancel_job` kills the streaming run too — a
+  cancelled job with a live run keeps spending tokens). After a restart, a
+  project still marked running is parked as paused, because its runner is gone.
+- Project tab rebuilt: one collapsible card per project, grouped by status
+  (planning / ready / running / paused / maintenance / closed), with keyword and
+  date-range search. The body loads only when expanded.
+- Decomposed tasks become normal jobs, so they appear on the Kanban board and
+  move across stage columns as their status changes.
+
+### Added — user & token management
+- Role dropdown backed by `GET /api/user-roles`, which reports what each role
+  can and cannot do; `tests/test_users_roles.py` pins those claims against real
+  endpoints so the UI cannot oversell.
+- Tokens: copy the one-time value, disable/enable, rotate (the old token dies
+  the moment the new one is issued), change role in place (effective at once, no
+  reissue), delete the user.
+
 ## [0.8.0] - 2026-07-31
 
 ### Added — Chat: the human input and authorisation channel

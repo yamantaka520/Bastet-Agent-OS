@@ -502,6 +502,24 @@ Reviewer run 強制唯讀工具面（`read_only: true`：不可寫檔、不可�
   Authorization header、無 wildcard CORS）—— localhost 服務被惡意網頁經
   DNS rebinding 打到即等於 RCE（派工 = 執行 shell），此為 M1 出貨判準之一。
 
+### 5.12 專案生命週期（規劃 → 執行 → 維護 → 結案）
+
+- `projects.status`：`planning → ready → running ⇄ paused`、
+  `running → maintenance → closed`，`closed → planning`（重啟）。
+  只有宣告過的轉移可以發生（`project_lifecycle.TRANSITIONS`），每一次都寫稽核；
+  UI 的燈號就是這個 status，不是從 job 列反推的猜測。
+- **拆分要人確認**：`POST /api/projects/{id}/decompose` 讓專案的 `pm` 角色 agent
+  （read-only，看得到 repo、工作流階段與規劃討論紀錄）產出任務清單，只是**提案**；
+  必須 `PUT /api/projects/{id}/tasks` 由人確認（可先編輯）才會變成可執行。
+  Agent 回散文而不是 JSON 就是拆分失敗，不做猜測補救。
+- **執行**：`ProjectRunner` 依序派工（`max_parallel` 預設 1）。每個任務走該專案的
+  工作流與角色指派；卡在 `blocked` 表示等人在關卡上決定，runner 就等，永遠不會
+  自己批准。全部任務結束 → 自動轉 `maintenance`（待驗收）。
+- **控制**：暫停只停下一個派工（目前任務跑完）；停止會 `cancel_job` 取消進行中的
+  run 並回到 `ready` —— job 取消了卻讓 run 繼續串流就是白燒 token。
+- **重啟後不說謊**：控制平面重啟時 `reconcile()` 把仍標記 running 的專案降為
+  paused，因為背後已經沒有 runner 了。
+
 ### 5.11 Chat（人的輸入與授權管道）
 
 - **對話綁在真實專案上**：session 的 scope 是真的 project / team / global 列，

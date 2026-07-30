@@ -40,6 +40,25 @@ Built-in workflow presets keep their authored stage text: the preset name
 becomes the template id when you copy it, so the display must match what gets
 saved. Copy a preset and rewrite it in any language.
 
+## Project lifecycle
+
+A project has a state, shown as a light on its card: **planning → ready →
+running ⇄ paused → maintenance → closed** (and reopen). Only declared
+transitions are allowed and each one is audited, so the light is the truth, not
+a guess derived from job rows.
+
+Between planning and execution sits a human. The project-manager agent turns the
+agreed plan into a task list (read-only: it sees the repo, the workflow stages
+and the planning conversation), you edit and confirm it, and only then does the
+runner dispatch — task by task, each following the project's workflow and role
+assignments. A task waiting at a gate keeps the runner waiting; it never
+approves anything itself. When every task settles the project moves to
+maintenance, awaiting your acceptance.
+
+Controls on the card: ▶ run, ⏸ pause (stops the *next* dispatch, current task
+finishes), ■ stop (cancels what is in flight), close, reopen. Tasks are ordinary
+jobs, so they show up on the Kanban board and move across stage columns.
+
 ## Chat: the human end of the loop
 
 The 對話 tab is where a person plans the project by talking about it. A session

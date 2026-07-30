@@ -272,6 +272,27 @@ class ChatMessageIn(BaseModel):
     reply: bool = True                 # let the responder answer straight away
 
 
+class UserRoleIn(BaseModel):
+    role: str                      # viewer|operator|admin
+
+
+class UserUpdateIn(BaseModel):
+    name: str | None = None
+    role: str | None = None
+
+
+class DecomposeIn(BaseModel):
+    agent_id: str = ""             # blank = the project's pm-role agent
+
+
+class TaskPlanIn(BaseModel):
+    tasks: list[dict[str, Any]]    # edited plan straight from the UI
+
+
+class ProjectRunIn(BaseModel):
+    agent_id: str = ""             # fallback executor when a task names no role
+
+
 class ChannelChatIn(BaseModel):
     """Which agent/LLM answers free-text messages on this channel, for which
     project. Clearing responder_id turns the channel back into notify-only."""
@@ -474,8 +495,35 @@ def create_app(home: Home) -> FastAPI:
         return {"id": p.id, "team_id": team_id}
 
     @app.get("/api/projects", dependencies=[Depends(require_role("viewer"))])
-    def list_projects():
-        return [dict(r) for r in db.query("SELECT * FROM projects ORDER BY created_at")]
+    def list_projects(status: str = "", q: str = "", since: str = "", until: str = ""):
+        """Projects with their lifecycle state, filterable by status, keyword and
+        time window — the project tab groups on these rather than guessing."""
+        from . import project_lifecycle as lc
+        rows = []
+        for row in db.query("SELECT * FROM projects ORDER BY updated_at DESC"):
+            item = dict(row)
+            config = json.loads(item.get("config_json") or "{}")
+            item["description"] = config.get("description", "")
+            item["status"] = item.get("status") or lc.PLANNING
+            item["light"] = lc.LIGHTS.get(item["status"], "⚪")
+            item["transitions"] = lc.allowed_transitions(item["status"])
+            item["progress"] = lc.job_progress(db, item["id"])
+            item["task_count"] = len(lc.task_plan(db, item["id"])["tasks"])
+            item["running"] = app.state.project_runner.is_active(item["id"])
+            if status and item["status"] != status:
+                continue
+            if q:
+                haystack = " ".join([item["id"], item["team_id"] or "",
+                                     item["description"],
+                                     item["repo_path"] or ""]).lower()
+                if q.lower() not in haystack:
+                    continue
+            if since and (item["updated_at"] or "") < since:
+                continue
+            if until and (item["created_at"] or "") > until:
+                continue
+            rows.append(item)
+        return rows
 
     @app.post("/api/teams")
     def create_team(t: TeamIn, auth: Auth = Depends(require_role("operator"))):
@@ -964,6 +1012,103 @@ def create_app(home: Home) -> FastAPI:
         db.audit(auth.actor, "grant.delete", "grant", row["id"],
                  {"resource": resource_id, "scope": f"project:{project_id}"})
         return {"deleted": row["id"]}
+
+    # ---- project lifecycle: plan → run → maintain → close (SPEC §5.12) -------
+
+    from . import project_lifecycle as lifecycle_mod
+    from . import project_runner as runner_mod
+
+    app.state.project_runner = runner_mod.ProjectRunner(db, orch, bus)
+    for parked in runner_mod.reconcile(db):
+        log.warning("project %s was running at shutdown — parked as paused", parked)
+
+    def _lifecycle_error(exc: Exception) -> HTTPException:
+        return HTTPException(status_code=409, detail=str(exc))
+
+    @app.get("/api/projects/{project_id}/lifecycle",
+             dependencies=[Depends(require_role("viewer"))])
+    def project_lifecycle_state(project_id: str):
+        try:
+            state = lifecycle_mod.overview(db, project_id)
+        except lifecycle_mod.LifecycleError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        state["running"] = app.state.project_runner.is_active(project_id)
+        return state
+
+    @app.post("/api/projects/{project_id}/lifecycle/{transition}")
+    async def move_project(project_id: str, transition: str,
+                           body: ProjectRunIn | None = None,
+                           auth: Auth = Depends(require_role("operator"))):
+        """One entry point for 執行 / 暫停 / 停止 / 結案 / 重啟, so the state
+        machine (not the UI) decides what is legal."""
+        runner = app.state.project_runner
+        try:
+            if transition == "stop":
+                # cancel first: a run left streaming after stop keeps spending
+                stopped = await runner.stop(project_id, actor=auth.actor)
+                status = lifecycle_mod.apply(db, project_id, "stop", auth.actor, stopped)
+                bus.emit("project.status", project_id, status=status,
+                         transition="stop")
+                return {"status": status, **stopped}
+            if transition == "pause":
+                status = lifecycle_mod.apply(db, project_id, "pause", auth.actor)
+                return {"status": status,
+                        "note": "目前任務會跑完，之後不再派下一個"}
+            if transition in ("start", "resume"):
+                status = lifecycle_mod.apply(db, project_id, transition, auth.actor)
+                started = runner.start(project_id, (body.agent_id if body else ""),
+                                       actor=auth.actor)
+                bus.emit("project.status", project_id, status=status,
+                         transition=transition)
+                return {"status": status, **started}
+            status = lifecycle_mod.apply(db, project_id, transition, auth.actor)
+            bus.emit("project.status", project_id, status=status,
+                     transition=transition)
+            return {"status": status}
+        except lifecycle_mod.LifecycleError as exc:
+            raise _lifecycle_error(exc) from exc
+        except runner_mod.PlanError as exc:
+            # the transition happened but there is nothing to run: say so and
+            # put the project back where it was
+            lifecycle_mod.apply(db, project_id, "stop", auth.actor,
+                                {"reason": "nothing to run"})
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/projects/{project_id}/decompose")
+    async def decompose_project(project_id: str, body: DecomposeIn,
+                               auth: Auth = Depends(require_role("operator"))):
+        """Hand the agreed plan to the PM agent and get a task list back. It is
+        a proposal: nothing is dispatched until a human confirms it."""
+        try:
+            tasks = await runner_mod.decompose(db, home.root, project_id,
+                                              body.agent_id, actor=auth.actor)
+        except runner_mod.PlanError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"tasks": tasks, "confirmed": False}
+
+    @app.put("/api/projects/{project_id}/tasks")
+    def save_project_tasks(project_id: str, body: TaskPlanIn,
+                           auth: Auth = Depends(require_role("operator"))):
+        """Confirm (and optionally edit) the decomposition — the human gate
+        between planning and execution."""
+        if db.one("SELECT id FROM projects WHERE id=?", (project_id,)) is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        tasks = [{"title": str(t.get("title", "")).strip(),
+                  "spec": str(t.get("spec", "")).strip(),
+                  "role": str(t.get("role", "")).strip(),
+                  **({"job_id": t["job_id"]} if t.get("job_id") else {})}
+                 for t in body.tasks if str(t.get("title", "")).strip()]
+        if not tasks:
+            raise HTTPException(status_code=400, detail="至少需要一個任務")
+        lifecycle_mod.save_task_plan(db, project_id, tasks, by=auth.actor,
+                                     confirmed=True)
+        db.audit(auth.actor, "project.tasks.confirm", "project", project_id,
+                 {"tasks": len(tasks)})
+        status = lifecycle_mod.status_of(db, project_id)
+        if status == lifecycle_mod.PLANNING:
+            status = lifecycle_mod.apply(db, project_id, "confirm_plan", auth.actor,
+                                         {"tasks": len(tasks)})
+        return {"tasks": tasks, "confirmed": True, "status": status}
 
     # ---- chat: the human input + authorisation channel (SPEC §5.11) ----------
 
@@ -1607,6 +1752,48 @@ def create_app(home: Home) -> FastAPI:
         db.audit(auth.actor, "user.create", "user", user_id, {"name": u.name, "role": u.role})
         return {"id": user_id, "token": token,
                 "note": "store this token now — it is never shown again"}
+
+    @app.get("/api/user-roles", dependencies=[Depends(require_role("viewer"))])
+    def user_roles():
+        """What each role really allows — the dropdown explains itself."""
+        return users_mod.capabilities()
+
+    @app.put("/api/users/{user_id}")
+    def update_user(user_id: str, body: UserUpdateIn,
+                    auth: Auth = Depends(require_role("admin"))):
+        if db.one("SELECT id FROM users WHERE id=?", (user_id,)) is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        if body.role:
+            try:
+                users_mod.set_role(db, user_id, body.role)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if body.name:
+            db.write("UPDATE users SET name=? WHERE id=?", (body.name, user_id))
+        db.audit(auth.actor, "user.update", "user", user_id,
+                 {"role": body.role, "name": body.name})
+        return dict(db.one("SELECT id, name, role, enabled, created_at, last_used_at "
+                           "FROM users WHERE id=?", (user_id,)))
+
+    @app.post("/api/users/{user_id}/token")
+    def rotate_user_token(user_id: str, auth: Auth = Depends(require_role("admin"))):
+        """New token, old one dead immediately (the stored hash is replaced)."""
+        try:
+            token = users_mod.rotate_token(db, user_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        db.audit(auth.actor, "user.token.rotate", "user", user_id, {})
+        return {"id": user_id, "token": token,
+                "note": "舊 token 立即失效；這個新 token 只顯示這一次"}
+
+    @app.delete("/api/users/{user_id}")
+    def delete_user(user_id: str, auth: Auth = Depends(require_role("admin"))):
+        row = db.one("SELECT name FROM users WHERE id=?", (user_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        users_mod.delete_user(db, user_id)
+        db.audit(auth.actor, "user.delete", "user", user_id, {"name": row["name"]})
+        return {"deleted": user_id}
 
     @app.get("/api/users", dependencies=[Depends(require_role("admin"))])
     def list_users():
