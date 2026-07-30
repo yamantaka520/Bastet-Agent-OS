@@ -373,3 +373,15 @@ def test_rotating_a_credential_updates_every_resource_using_it(client, tmp_path)
         assert access.env["BASTET_RES_SVC_A_KEY"] == "new"
     finally:
         db.close()
+
+
+def test_row_config_only_exposes_declared_fields(client):
+    """install/test state is state, not configuration — it must not leak into
+    the config map the UI prints field by field."""
+    rid = client.post("/api/resources", json={
+        "name": "probe me", "kind": "api", "endpoint": "https://example.invalid",
+        "secret_ref": "env:X", "config": {"auth_header": "X-Key"}}).json()["id"]
+    client.post(f"/api/resources/{rid}/test")
+    row = next(r for r in client.get("/api/resources").json() if r["id"] == rid)
+    assert set(row["config"]) == {"auth_header"}
+    assert row["test"]["status"] in ("ok", "warn", "failed")

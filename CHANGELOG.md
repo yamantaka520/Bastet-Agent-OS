@@ -8,6 +8,13 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.7.3] - 2026-07-31
+
+### Fixed
+- Resource rows no longer print `test: [object Object]`: only declared config
+  fields are exposed, with install/test kept as state.
+- The test verdict panel renders its newline instead of a literal `\n`.
+
 ## [0.7.2] - 2026-07-31
 
 ### Fixed

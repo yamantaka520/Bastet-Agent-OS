@@ -1005,7 +1005,8 @@ def create_app(home: Home) -> FastAPI:
                 "enabled": row["enabled"],
                 "secret_ref": (ref.split(":", 1)[0] + ":…") if ref else "",
                 "credential_name": credential,
-                "config": {k: v for k, v in config.items() if k != "install"},
+                "config": {k: v for k, v in config.items()
+                           if k in rk.CONFIG_FIELDS or k == "note"},
                 "install": resource_install.state_of(config),
                 "test": resource_test.state_of(config),
                 "scopes": _scope_rows(row["id"]),

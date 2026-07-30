@@ -541,7 +541,7 @@ function TestPanel({ resource, isAdmin, busy, onTest, t }: {
         <button className="ghost" onClick={() => setOpen(!open)}>
           {open ? "▾" : "▸"} {state.checked || t("res.test")}</button>
       )}
-      {open && <pre className="spec">{state.checked}\n\n{state.detail}</pre>}
+      {open && <pre className="spec">{`${state.checked}\n\n${state.detail}`}</pre>}
       {isAdmin && open && <p className="muted">{t("res.testHint")}</p>}
     </div>
   );
