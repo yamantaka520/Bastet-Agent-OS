@@ -45,6 +45,24 @@ def resolve(ref: str) -> str:
     raise SecretError(f"unknown secret ref scheme: {scheme!r}")
 
 
+def expand(db, ref: str) -> str:
+    """Resolve the `secret:<resource_id>` indirection to a concrete ref.
+
+    Resources point at saved credentials instead of copying their ref, so
+    rotating a credential in one place changes every resource that uses it.
+    Concrete refs (keyring:/file:/env:) pass straight through."""
+    if not ref.startswith("secret:"):
+        return ref
+    secret_id = ref.split(":", 1)[1]
+    row = db.one("SELECT secret_ref, name FROM resources WHERE id=? AND kind='secret'",
+                 (secret_id,))
+    if row is None:
+        raise SecretError(f"credential {secret_id} not found in the pool")
+    if not row["secret_ref"]:
+        raise SecretError(f"credential {row['name']} has no ref")
+    return row["secret_ref"]
+
+
 def store_keyring(service: str, name: str, value: str) -> str:
     """Store a value in the OS keyring and return its ref."""
     import keyring
@@ -53,7 +71,7 @@ def store_keyring(service: str, name: str, value: str) -> str:
     return f"keyring:{service}/{name}"
 
 
-KNOWN_SCHEMES = ("env:", "file:", "keyring:")
+KNOWN_SCHEMES = ("env:", "file:", "keyring:", "secret:")
 
 
 def ensure_ref(value: str, home_root, hint: str) -> str:

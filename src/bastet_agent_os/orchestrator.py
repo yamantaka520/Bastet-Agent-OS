@@ -328,16 +328,26 @@ class Orchestrator:
                 flavor = resource["api_flavor"]
             llm = {"flavor": flavor, "model": model} if (model or flavor) else None
             extra_env: dict[str, str] = self._project_secrets(job, run_id)
+            # granted pool resources: env vars + an MCP config the agent can use
+            from . import resource_access
+            access = resource_access.build(
+                self.db, self.home.root, job["project_id"],
+                self._project_team(job["project_id"]), run_id,
+                audit_actor=f"run:{run_id}")
+            extra_env.update(access.env)
             account_id = agent["account_id"] if "account_id" in agent.keys() else None
             if account_id:
                 from .executors.accounts import account_env
                 account = self.db.one("SELECT * FROM executor_accounts WHERE id=?",
                                       (account_id,))
                 if account is not None:
-                    extra_env = account_env(agent["executor_type"], account["home_dir"])
+                    # merge, never replace: the account picks the executor profile,
+                    # it must not drop the project's credentials and resources
+                    extra_env.update(account_env(agent["executor_type"],
+                                                 account["home_dir"]))
             spec = TaskSpec(
                 run_id=run_id,
-                prompt=self._stage_prompt(job, stage),
+                prompt=self._stage_prompt(job, stage, access.notes),
                 workdir=workdir,
                 timeout_s=req.timeout_s,
                 allowed_tools=req.allowed_tools or ["Read", "Edit", "Write", "Bash"],
@@ -347,6 +357,7 @@ class Orchestrator:
                 run_token=token if job["resource_id"] else None,
                 llm=llm,
                 extra_env=extra_env,
+                mcp_config=access.mcp_config_path,
                 isolation=stage.isolation,
                 container_image=json.loads(
                     self.db.one("SELECT config_json FROM projects WHERE id=?",
@@ -382,6 +393,8 @@ class Orchestrator:
             return RunResult(status="failed", summary=str(exc)[:500]), run_id
         finally:
             run_tokens.revoke_for_run(self.db, run_id)
+            from . import resource_access
+            resource_access.cleanup(self.home.root, run_id)  # MCP file holds secrets
 
     def _slot(self, grant: GrantView) -> asyncio.Semaphore:
         if grant.id not in self._grant_slots:
@@ -410,7 +423,7 @@ class Orchestrator:
 
     # -- prompt assembly (task-layer context, SPEC §5.6 minimal) --------------------
 
-    def _stage_prompt(self, job, stage: StageDef) -> str:
+    def _stage_prompt(self, job, stage: StageDef, resource_notes: str = "") -> str:
         # pipeline history / deps / memory travel via TaskSpec.context_text
         # (context engine, §5.6); the prompt carries only the spec + scaffold
         parts = []
@@ -419,6 +432,8 @@ class Orchestrator:
             # the role definition frames HOW this stage's agent should behave
             parts.append(f"## 你的角色（{stage.role}）\n{role_prompt}")
         parts += [f"# Task: {job['title']}", job["spec_md"]]
+        if resource_notes:
+            parts.append(resource_notes)
         if stage.gate == "agent-review":
             parts.append(REVIEW_INSTRUCTIONS)
             diff = self._job_diff(job)

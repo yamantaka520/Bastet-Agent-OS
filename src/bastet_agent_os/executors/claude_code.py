@@ -65,6 +65,9 @@ class ClaudeCodeExecutor:
         ]
         if task.llm and task.llm.get("model"):
             cmd += ["--model", task.llm["model"]]
+        if task.mcp_config:
+            # pool MCP resources, granted to this project (SPEC §5.1)
+            cmd += ["--mcp-config", task.mcp_config]
         env = {**os.environ, **task.extra_env}
         gateway_url = task.gateway_url
         if task.isolation == "container":

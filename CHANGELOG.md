@@ -8,6 +8,36 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.6.0] - 2026-07-31
+
+### Added — classified resource pool, MCP installs, agent-callable resources
+- Resource kinds catalog (`resource_kinds.py`): `llm / mcp / api / skill / git`
+  plus media, grouped model / tool / asset / media. Each kind declares which
+  fields the UI shows and whether a credential is required (skills need none),
+  and the same table validates the API — a new kind needs no new endpoint.
+- Visibility scope sits with the resource: create it global / team / project,
+  add or drop scopes later (`POST|DELETE /api/resources/{id}/scopes`).
+- The API-key field is a picker over saved credentials: a resource stores
+  `secret:<id>` pointing into the pool, so rotating a credential updates every
+  resource that uses it. Raw pastes still get filed at 0600 as before.
+- MCP install flow: keep the vendor's install command with the resource and run
+  it from the WebUI (`POST /api/resources/{id}/install`) — admin only, audited,
+  never implicit. Full stdout/stderr and exit code come back and stay on the
+  row, so a failed install can be debugged, the command edited, and retried.
+- Resources are now callable by the agents running a project: at run start
+  every grant covering the project turns into env vars
+  (`BASTET_RES_<NAME>_URL/_KEY/_TOKEN/_MODEL/_SOURCE`), an `mcpServers` config
+  file (`BASTET_MCP_CONFIG`, plus `--mcp-config` for claude-code), and a
+  manifest listed in the task prompt. The MCP file holds resolved credentials,
+  so it lives outside the worktree at 0600 and is deleted when the run ends.
+  Resources with no usable channel are not advertised at all.
+- Project tab: add/remove resources directly (project-scoped grants);
+  team/global access is shown as inherited and must be changed where granted.
+
+### Fixed
+- An agent bound to an executor account no longer loses the project's injected
+  credentials: account env is merged into the run env instead of replacing it.
+
 ## [0.5.0] - 2026-07-30
 
 ### Added — multi-language UI (zh-Hant / zh-Hans / en / ja / ko)

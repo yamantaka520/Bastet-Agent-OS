@@ -40,6 +40,25 @@ Built-in workflow presets keep their authored stage text: the preset name
 becomes the template id when you copy it, so the display must match what gets
 saved. Copy a preset and rewrite it in any language.
 
+## Resource pool
+
+Resources are classified (`llm` · `mcp` · `api` · `skill` · `git` · media) and
+each one carries its own visibility scope — global, team, or project. The
+credential field is a picker over the credentials saved on the Admin tab: the
+resource stores a `secret:<id>` pointer, so rotating a key updates every
+resource that uses it. Kinds that need no credential (skills) don't show one.
+
+MCP servers keep the vendor's install command; you run it from the WebUI and
+get the full output back, so a failed install can be fixed in place and
+retried. Nothing installs implicitly.
+
+Granted resources are callable by the agents running that project. At run start
+Bastet hands them over as env vars (`BASTET_RES_<NAME>_URL` / `_KEY` /
+`_TOKEN` / `_MODEL` / `_SOURCE`), an `mcpServers` config file
+(`BASTET_MCP_CONFIG`, and `--mcp-config` for Claude Code), and a manifest
+written into the task brief. The MCP file contains resolved credentials, so it
+lives outside the worktree at 0600 and is deleted when the run ends.
+
 ## Versioning
 
 `src/bastet_agent_os/__init__.py` holds the single `__version__`;

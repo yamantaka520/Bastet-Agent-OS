@@ -344,6 +344,28 @@ class Executor(Protocol):
 - 多媒體資源（image/video/music/tts/stt）M1 只定義資源類型與記帳欄位，
   executor 工具整合排 M4。
 
+**分類與 run-time 可用性（v0.6）**
+
+- `resource_kinds.py` 是單一分類表：`llm / mcp / api / skill / git` 加多媒體，
+  分成 model / tool / asset / media 四組。每個 kind 宣告 `fields`（WebUI 要顯示
+  哪些欄位）與 `auth`（required / optional / none — SKILL 就是 none），
+  同一份表同時驅動表單、API 驗證與 run-time 存取；新增 kind 不需要新端點。
+- 憑證不重打：resource 的 `secret_ref` 可以是 `secret:<resource_id>`，指向
+  資源池中已存的憑證（§5.8）。輪替憑證只改一處，引用它的資源全部跟著換。
+- MCP 安裝：廠商提供的安裝指令存在 `config_json.install_command`，由
+  `POST /api/resources/{id}/install` 明確觸發（admin only、寫稽核、絕不隱式
+  執行）。完整 stdout/stderr 與 exit code 存回資源，失敗時 WebUI 顯示日誌，
+  可改指令後重試 —— 失敗是常態流程，不是例外。
+- Agent 直接調用：run 啟動時 `resource_access.build()` 取出 grant 覆蓋此專案
+  的資源（project → team → global），交付三種形式：
+  - 環境變數 `BASTET_RES_<NAME>_URL / _KEY / _TOKEN / _MODEL / _SOURCE`
+  - MCP：`mcpServers` JSON 檔（Claude Code 格式），路徑走 `BASTET_MCP_CONFIG`，
+    claude-code executor 另外接 `--mcp-config`
+  - 清單：`BASTET_RESOURCES` 與任務 prompt 中的「可用資源」段落
+  該檔含已解析的憑證，因此放在 worktree 之外的 `<home>/run-access/<run_id>`
+  （0600），run 結束即刪除。沒有任何可用管道的資源不會出現在清單裡 —— 讓
+  agent 去呼叫一個不可能成功的資源等於浪費一整個 run。
+
 ### 5.4 工作流引擎與 Kanban
 
 #### 5.4.1 模型

@@ -191,3 +191,68 @@ async def test_role_prompt_and_project_secret_reach_the_run(orch, seeded, monkey
     assert captured["env"]["DEPLOY_TOKEN"] == "s3cr3t-value"  # scoped secret injected
     resolved = seeded.query("SELECT * FROM audit_log WHERE action='secret.resolve'")
     assert resolved, "secret resolution must be audited"
+
+
+async def test_pool_resources_reach_the_run(orch, seeded, tmp_path):
+    """A granted resource must arrive as env vars + an MCP config + a prompt
+    note — otherwise the agent has no way to call it."""
+    from bastet_agent_os.db import now as _now
+
+    key = tmp_path / "api-key"
+    key.write_text("sk-pool")
+    seeded.write("INSERT INTO resources(id, kind, name, endpoint, secret_ref, "
+                 "config_json, created_at, updated_at) "
+                 "VALUES('res-api','api','Weather','https://wx.example',?,'{}',?,?)",
+                 (f"file:{key}", _now(), _now()))
+    seeded.write("INSERT INTO grants(id, resource_id, scope_type, scope_id, created_at) "
+                 "VALUES('g-api','res-api','project','proj1',?)", (_now(),))
+    seeded.write("INSERT INTO resources(id, kind, name, config_json, created_at, "
+                 "updated_at) VALUES('res-mcp','mcp','Docs',?,?,?)",
+                 ('{"mcp_command": "npx -y @scope/docs"}', _now(), _now()))
+    seeded.write("INSERT INTO grants(id, resource_id, scope_type, scope_id, created_at) "
+                 "VALUES('g-mcp','res-mcp','team','team1',?)", (_now(),))
+
+    captured = {}
+
+    def capture(task):
+        captured["env"] = dict(task.extra_env)
+        captured["prompt"] = task.prompt
+        captured["mcp"] = task.mcp_config
+        captured["mcp_body"] = open(task.mcp_config).read() if task.mcp_config else ""
+        return RunResult(status="succeeded")
+
+    SCRIPT.append(capture)
+    orch.dispatch(req())
+    await orch.wait_idle()
+    assert captured["env"]["BASTET_RES_WEATHER_URL"] == "https://wx.example"
+    assert captured["env"]["BASTET_RES_WEATHER_KEY"] == "sk-pool"
+    assert "Weather" in captured["prompt"] and "sk-pool" not in captured["prompt"]
+    assert "@scope/docs" in captured["mcp_body"]
+    import os
+    assert not os.path.exists(captured["mcp"])  # cleaned up: the file held a secret
+
+
+async def test_executor_account_does_not_wipe_injected_credentials(orch, seeded,
+                                                                   tmp_path):
+    """Regression: binding an agent to an executor account used to *replace*
+    the run env, silently dropping every project secret and resource."""
+    from bastet_agent_os.db import now as _now
+
+    secret = tmp_path / "tok"
+    secret.write_text("keep-me")
+    seeded.write("INSERT INTO resources(id, kind, name, secret_ref, config_json, "
+                 "created_at, updated_at) VALUES('sec-k','secret','k',?,?,?,?)",
+                 (f"file:{secret}", '{"env_name": "KEEP"}', _now(), _now()))
+    seeded.write("INSERT INTO grants(id, resource_id, scope_type, scope_id, created_at) "
+                 "VALUES('g-k','sec-k','project','proj1',?)", (_now(),))
+    seeded.write("INSERT INTO executor_accounts(id, executor_type, name, home_dir, "
+                 "created_at) VALUES('acc1','fake','A',?,?)",
+                 (str(tmp_path / "profile"), _now()))
+    seeded.write("UPDATE agents SET account_id='acc1' WHERE id='fakebot'")
+
+    captured = {}
+    SCRIPT.append(lambda task: (captured.update(env=dict(task.extra_env))
+                                or RunResult(status="succeeded")))
+    orch.dispatch(req())
+    await orch.wait_idle()
+    assert captured["env"]["KEEP"] == "keep-me"

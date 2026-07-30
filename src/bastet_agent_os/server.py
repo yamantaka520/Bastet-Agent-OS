@@ -114,8 +114,29 @@ class ResourceIn(BaseModel):
     kind: str = "llm"
     endpoint: str | None = None
     api_flavor: str | None = None
-    secret_ref: str | None = None
+    secret_ref: str | None = None     # keyring:/file:/env: or secret:<id> from the pool
     config: dict[str, Any] = {}
+    scope_type: str = ""              # global|team|project — creates the grant with it
+    scope_id: str = ""
+
+
+class ResourceUpdateIn(BaseModel):
+    name: str | None = None
+    endpoint: str | None = None
+    api_flavor: str | None = None
+    secret_ref: str | None = None
+    config: dict[str, Any] | None = None
+
+
+class ScopeIn(BaseModel):
+    scope_type: str = "project"
+    scope_id: str = ""
+
+
+class AttachResourceIn(BaseModel):
+    resource_id: str
+    budget_usd: float | None = None
+    max_concurrency: int | None = None
 
 
 class GrantIn(BaseModel):
@@ -781,12 +802,15 @@ def create_app(home: Home) -> FastAPI:
                 needed.append({"stage": stage.get("name"), "role": role,
                                "agents": by_role.get(role, [])})
 
+        # project / team / global grants all make a resource callable in this
+        # project; only the project-scoped ones can be detached from here
         resources = [dict(r) for r in db.query(
-            "SELECT r.id, r.name, r.kind, g.budget_usd, g.max_concurrency, g.on_exceed "
+            "SELECT r.id, r.name, r.kind, g.id AS grant_id, g.scope_type, "
+            "g.budget_usd, g.max_concurrency, g.on_exceed "
             "FROM grants g JOIN resources r ON r.id = g.resource_id "
-            "WHERE g.enabled=1 AND r.kind != 'secret' AND "
-            "((g.scope_type='project' AND g.scope_id=?) OR "
-            " (g.scope_type='team' AND g.scope_id=?))",
+            "WHERE g.enabled=1 AND r.enabled=1 AND r.kind != 'secret' AND "
+            "(g.scope_type='global' OR (g.scope_type='project' AND g.scope_id=?) OR "
+            " (g.scope_type='team' AND g.scope_id=?)) ORDER BY r.kind, r.name",
             (project_id, project["team_id"]))]
 
         return {
@@ -806,6 +830,44 @@ def create_app(home: Home) -> FastAPI:
                 "SELECT id, title, stage, status, updated_at FROM jobs "
                 "WHERE project_id=? ORDER BY updated_at DESC LIMIT 10", (project_id,))],
         }
+
+    @app.post("/api/projects/{project_id}/resources")
+    def attach_resource(project_id: str, a: AttachResourceIn,
+                        auth: Auth = Depends(require_role("operator"))):
+        """Make a pool resource callable in this project (a project grant)."""
+        if db.one("SELECT id FROM projects WHERE id=?", (project_id,)) is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        resource = db.one("SELECT * FROM resources WHERE id=? AND kind != 'secret'",
+                          (a.resource_id,))
+        if resource is None:
+            raise HTTPException(status_code=404, detail="resource not found")
+        if db.one("SELECT id FROM grants WHERE resource_id=? AND scope_type='project' "
+                  "AND scope_id=?", (a.resource_id, project_id)):
+            raise HTTPException(status_code=409, detail="此專案已有這個資源")
+        gid = new_id("grt")
+        db.write("INSERT INTO grants(id, resource_id, scope_type, scope_id, budget_usd, "
+                 "max_concurrency, created_at) VALUES(?,?,'project',?,?,?,?)",
+                 (gid, a.resource_id, project_id, a.budget_usd, a.max_concurrency, now()))
+        db.audit(auth.actor, "grant.create", "grant", gid,
+                 {"resource": a.resource_id, "scope": f"project:{project_id}",
+                  "kind": resource["kind"]})
+        return {"id": gid, "resource": resource["name"]}
+
+    @app.delete("/api/projects/{project_id}/resources/{resource_id}")
+    def detach_resource(project_id: str, resource_id: str,
+                        auth: Auth = Depends(require_role("operator"))):
+        """Remove only this project's own grant — inherited team/global access
+        has to be removed where it was granted, and we say so."""
+        row = db.one("SELECT * FROM grants WHERE resource_id=? AND scope_type='project' "
+                     "AND scope_id=?", (resource_id, project_id))
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail="此專案沒有自己的授權（可能是從 team/全域繼承，需在該層移除）")
+        db.write("DELETE FROM grants WHERE id=?", (row["id"],))
+        db.audit(auth.actor, "grant.delete", "grant", row["id"],
+                 {"resource": resource_id, "scope": f"project:{project_id}"})
+        return {"deleted": row["id"]}
 
     # ---- WebUI login wizard (PTY over WS) -----------------------------------------
 
@@ -864,32 +926,167 @@ def create_app(home: Home) -> FastAPI:
                  "content": h.get("content"), "scope": h.get("scope"),
                  "type": h.get("type")} for h in hits]
 
+    # ---- resource pool: classified kinds, scoped visibility, installers ------
+
+    @app.get("/api/resource-kinds", dependencies=[Depends(require_role("viewer"))])
+    def resource_kinds():
+        from . import resource_kinds as rk
+        return rk.catalog()
+
+    def _scope_rows(resource_id: str) -> list[dict]:
+        return [{"grant_id": g["id"], "scope_type": g["scope_type"],
+                 "scope_id": g["scope_id"]}
+                for g in db.query("SELECT id, scope_type, scope_id FROM grants "
+                                  "WHERE resource_id=? AND enabled=1", (resource_id,))]
+
+    def _resource_row(row) -> dict:
+        """Public shape of a pool resource: config visible, secret never."""
+        from . import resource_install
+        from . import resource_kinds as rk
+        config = json.loads(row["config_json"] or "{}")
+        ref = row["secret_ref"] or ""
+        credential = None
+        if ref.startswith("secret:"):
+            saved = db.one("SELECT name FROM resources WHERE id=?", (ref.split(":", 1)[1],))
+            credential = saved["name"] if saved else "(deleted)"
+        return {"id": row["id"], "kind": row["kind"], "name": row["name"],
+                "endpoint": row["endpoint"], "api_flavor": row["api_flavor"],
+                "enabled": row["enabled"],
+                "secret_ref": (ref.split(":", 1)[0] + ":…") if ref else "",
+                "credential_name": credential,
+                "config": {k: v for k, v in config.items() if k != "install"},
+                "install": resource_install.state_of(config),
+                "scopes": _scope_rows(row["id"]),
+                "problems": rk.validate(row["kind"], row["endpoint"], ref, config)}
+
+    def _check_scope(scope_type: str, scope_id: str) -> None:
+        if scope_type not in ("global", "team", "project"):
+            raise HTTPException(status_code=400,
+                                detail="scope 必須是 global/team/project")
+        if scope_type != "global" and not scope_id:
+            raise HTTPException(status_code=400, detail="team/project 範圍需要指定 id")
+
     @app.post("/api/resources")
     def create_resource(r: ResourceIn, auth: Auth = Depends(require_role("admin"))):
+        from . import resource_kinds as rk
         try:
             secrets_store.reject_secrets_in_config(r.config)
         except secrets_store.SecretError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if r.kind not in rk.BY_ID:
+            raise HTTPException(status_code=400, detail=f"unknown kind {r.kind}")
+        if r.scope_type:
+            _check_scope(r.scope_type, r.scope_id)
+        config = {k: v for k, v in r.config.items()
+                  if k in rk.CONFIG_FIELDS or k == "note"}
         rid = new_id("res")
         ts = now()
+        # secret:<id> points at a saved credential; raw values get filed safely
         secret_ref = secrets_store.ensure_ref(r.secret_ref or "", home.root, rid) or None
+        problems = rk.validate(r.kind, r.endpoint, secret_ref, config)
         db.write(
             "INSERT INTO resources(id, kind, name, endpoint, api_flavor, secret_ref, "
             "config_json, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
             (rid, r.kind, r.name, r.endpoint, r.api_flavor, secret_ref,
-             json.dumps(r.config), ts, ts),
+             json.dumps(config), ts, ts),
         )
+        if r.scope_type:
+            db.write("INSERT INTO grants(id, resource_id, scope_type, scope_id, "
+                     "created_at) VALUES(?,?,?,?,?)",
+                     (new_id("grt"), rid, r.scope_type, r.scope_id or "*", ts))
         db.audit(auth.actor, "resource.create", "resource", rid,
                  {"kind": r.kind, "name": r.name,
-                  "secret_scheme": (r.secret_ref or "").split(":", 1)[0]})
-        return {"id": rid}
+                  "scope": f"{r.scope_type}:{r.scope_id}" if r.scope_type else None,
+                  "secret_scheme": (r.secret_ref or "").split(":", 1)[0],
+                  "problems": problems})
+        return {"id": rid, "problems": problems}
+
+    @app.put("/api/resources/{resource_id}")
+    def update_resource(resource_id: str, r: ResourceUpdateIn,
+                        auth: Auth = Depends(require_role("admin"))):
+        from . import resource_kinds as rk
+        row = db.one("SELECT * FROM resources WHERE id=?", (resource_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="resource not found")
+        config = json.loads(row["config_json"] or "{}")
+        if r.config is not None:
+            try:
+                secrets_store.reject_secrets_in_config(r.config)
+            except secrets_store.SecretError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            config.update({k: v for k, v in r.config.items()
+                           if k in rk.CONFIG_FIELDS or k == "note"})
+        secret_ref = row["secret_ref"]
+        if r.secret_ref is not None:
+            secret_ref = (secrets_store.ensure_ref(r.secret_ref, home.root, resource_id)
+                          or None)
+        db.write("UPDATE resources SET name=?, endpoint=?, api_flavor=?, secret_ref=?, "
+                 "config_json=?, updated_at=? WHERE id=?",
+                 (r.name or row["name"],
+                  r.endpoint if r.endpoint is not None else row["endpoint"],
+                  r.api_flavor if r.api_flavor is not None else row["api_flavor"],
+                  secret_ref, json.dumps(config), now(), resource_id))
+        db.audit(auth.actor, "resource.update", "resource", resource_id,
+                 {"fields": [k for k, v in r.model_dump().items() if v is not None]})
+        return _resource_row(db.one("SELECT * FROM resources WHERE id=?", (resource_id,)))
+
+    @app.delete("/api/resources/{resource_id}")
+    def delete_resource(resource_id: str, auth: Auth = Depends(require_role("admin"))):
+        row = db.one("SELECT * FROM resources WHERE id=?", (resource_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="resource not found")
+        used = db.one("SELECT COUNT(*) AS n FROM jobs WHERE resource_id=?", (resource_id,))
+        db.write("DELETE FROM grants WHERE resource_id=?", (resource_id,))
+        db.write("DELETE FROM resources WHERE id=?", (resource_id,))
+        db.audit(auth.actor, "resource.delete", "resource", resource_id,
+                 {"name": row["name"], "kind": row["kind"], "past_jobs": used["n"]})
+        return {"deleted": resource_id, "past_jobs": used["n"]}
+
+    @app.post("/api/resources/{resource_id}/scopes")
+    def add_resource_scope(resource_id: str, s: ScopeIn,
+                           auth: Auth = Depends(require_role("admin"))):
+        if db.one("SELECT id FROM resources WHERE id=?", (resource_id,)) is None:
+            raise HTTPException(status_code=404, detail="resource not found")
+        _check_scope(s.scope_type, s.scope_id)
+        scope_id = s.scope_id or "*"
+        if db.one("SELECT id FROM grants WHERE resource_id=? AND scope_type=? AND "
+                  "scope_id=?", (resource_id, s.scope_type, scope_id)):
+            raise HTTPException(status_code=409, detail="此範圍已授權")
+        gid = new_id("grt")
+        db.write("INSERT INTO grants(id, resource_id, scope_type, scope_id, created_at) "
+                 "VALUES(?,?,?,?,?)", (gid, resource_id, s.scope_type, scope_id, now()))
+        db.audit(auth.actor, "grant.create", "grant", gid,
+                 {"resource": resource_id, "scope": f"{s.scope_type}:{scope_id}"})
+        return {"id": gid}
+
+    @app.delete("/api/resources/{resource_id}/scopes/{grant_id}")
+    def drop_resource_scope(resource_id: str, grant_id: str,
+                            auth: Auth = Depends(require_role("admin"))):
+        row = db.one("SELECT * FROM grants WHERE id=? AND resource_id=?",
+                     (grant_id, resource_id))
+        if row is None:
+            raise HTTPException(status_code=404, detail="grant not found")
+        db.write("DELETE FROM grants WHERE id=?", (grant_id,))
+        db.audit(auth.actor, "grant.delete", "grant", grant_id,
+                 {"resource": resource_id,
+                  "scope": f"{row['scope_type']}:{row['scope_id']}"})
+        return {"deleted": grant_id}
+
+    @app.post("/api/resources/{resource_id}/install")
+    def install_resource(resource_id: str, auth: Auth = Depends(require_role("admin"))):
+        """Run the vendor's install command. Admin-only shell execution: the
+        command is shown in the UI before it runs and the log comes back."""
+        from . import resource_install
+        try:
+            return resource_install.run(db, resource_id, auth.actor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/resources", dependencies=[Depends(require_role("viewer"))])
     def list_resources():
-        rows = [dict(r) for r in db.query("SELECT * FROM resources ORDER BY created_at")]
-        for row in rows:
-            row["secret_ref"] = (row["secret_ref"] or "").split(":", 1)[0] + ":…"  # never echo
-        return rows
+        return [_resource_row(r) for r in
+                db.query("SELECT * FROM resources WHERE kind != 'secret' "
+                         "ORDER BY kind, created_at")]
 
     @app.post("/api/grants")
     def create_grant(g: GrantIn, auth: Auth = Depends(require_role("admin"))):

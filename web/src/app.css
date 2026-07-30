@@ -165,3 +165,21 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
                margin-bottom: .5rem; }
 .role-prompt-text { margin: .2rem 0 0; white-space: pre-wrap; }
 button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ---- resource pool (classified rows) ------------------------------------- */
+.res-group { margin-bottom: 1.1rem; }
+.res-group h3 { font-size: .82rem; text-transform: uppercase; letter-spacing: .06em;
+                color: var(--muted); margin: .8rem 0 .4rem; }
+.res-row { border: 1px solid var(--line); border-radius: 8px; padding: .55rem .7rem;
+           margin-bottom: .5rem; background: rgba(255,255,255,.015); }
+.res-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.res-head .row-ops { margin-left: auto; }
+.res-detail, .res-scopes, .res-install {
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  font-size: .82rem; color: var(--muted); margin-top: .35rem; }
+.res-install { border-top: 1px dashed var(--line); padding-top: .35rem; }
+.res-install pre { flex-basis: 100%; max-height: 16rem; overflow: auto; }
+.res-install p { flex-basis: 100%; margin: .2rem 0 0; }
+.res-field { display: flex; flex-direction: column; gap: .15rem; font-size: .75rem;
+             color: var(--muted); }
+.res-field span { padding-left: .1rem; }

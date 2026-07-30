@@ -29,6 +29,7 @@ class TaskSpec:
     isolation: str = "worktree"          # worktree|container (SPEC §5.4.3)
     container_image: str | None = None   # image for isolation=container
     extra_env: dict[str, str] = field(default_factory=dict)
+    mcp_config: str | None = None        # path to an mcpServers JSON (pool resources)
 
 
 @dataclass

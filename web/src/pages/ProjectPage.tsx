@@ -14,6 +14,7 @@ type Stage = { name: string; role?: string | null; gate: string; read_only?: boo
 type Agent = { id: string; name: string; executor_type: string; enabled: number };
 type Role = { id: string; label: string };
 type Template = { id: string };
+type PoolResource = { id: string; name: string; kind: string };
 type Overview = {
   project: { id: string; team_id: string; repo_path: string | null;
              description: string; template_id: string | null };
@@ -22,7 +23,8 @@ type Overview = {
                    agents: { agent_id: string; agent_name: string;
                              executor_type: string; preference: number }[] }[];
   assignments: { role: string; agent_id: string; agent_name: string }[];
-  resources: { id: string; name: string; kind: string; budget_usd: number | null;
+  resources: { id: string; name: string; kind: string; grant_id: string;
+               scope_type: string; budget_usd: number | null;
                max_concurrency: number | null; on_exceed: string }[];
   secrets: Secret[];
   jobs: { id: string; title: string; stage: string; status: string;
@@ -35,6 +37,7 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
   const [projects] = useList<Project>("/api/projects", props.refreshKey);
   const [templates] = useList<Template>("/api/templates", props.refreshKey);
   const [agents] = useList<Agent>("/api/agents", props.refreshKey);
+  const [pool] = useList<PoolResource>("/api/resources", props.refreshKey);
   const [roles, setRoles] = useState<Role[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [ov, setOv] = useState<Overview | null>(null);
@@ -86,6 +89,22 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
       await del(`/api/roles?project_id=${encodeURIComponent(selected)}` +
                 `&agent_id=${encodeURIComponent(agentId)}` +
                 `&role=${encodeURIComponent(role)}`);
+      load();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
+  const attachResource = async (resourceId: string) => {
+    setError("");
+    try {
+      await post(`/api/projects/${selected}/resources`, { resource_id: resourceId });
+      load();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
+  const detachResource = async (resourceId: string) => {
+    setError("");
+    try {
+      await del(`/api/projects/${selected}/resources/${resourceId}`);
       load();
     } catch (e) { setError(String((e as Error).message)); }
   };
@@ -187,15 +206,36 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
 
           <Section title={t("project.grants")}>
             <DataTable
-              head={[t("project.headResource"), t("c.kind"), t("project.headBudget"),
-                     t("project.headConcurrency"), t("project.headOnExceed")]}
+              head={[t("project.headResource"), t("c.kind"), t("project.headSource"),
+                     t("project.headBudget"), t("project.headConcurrency"),
+                     t("project.headOnExceed"), ""]}
               rows={ov.resources.map((r) => [
-                r.name, r.kind,
+                r.name, t(`res.kind.${r.kind}`, undefined, r.kind),
+                r.scope_type === "project"
+                  ? t("sec.labelProject")
+                  : <span className="card-meta">{t("project.resInherited")}（
+                      {t(r.scope_type === "team" ? "sec.labelTeam" : "sec.labelGlobal")}）
+                    </span>,
                 r.budget_usd != null ? `$${r.budget_usd}` : "∞",
                 r.max_concurrency ?? "∞", r.on_exceed,
+                r.scope_type === "project" && props.canOperate ? (
+                  <button className="ghost danger-text chip-x"
+                          title={t("project.resRemove")}
+                          onClick={() => detachResource(r.id)}>✕</button>
+                ) : null,
               ])} />
             {!ov.resources.length &&
               <p className="muted">{t("project.noGrants")}</p>}
+            {props.canOperate && (
+              <AssignInline
+                agents={pool.filter((r) =>
+                  !ov.resources.some((x) => x.id === r.id))
+                  .map((r) => ({ id: r.id, name: r.name,
+                                 executor_type: r.kind, enabled: 1 }))}
+                label={t("project.resAdd")}
+                onPick={attachResource} />
+            )}
+            <p className="muted">{t("project.resHint")}</p>
           </Section>
 
           <Section title={t("project.secrets")}>
