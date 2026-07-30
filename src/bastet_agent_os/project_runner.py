@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from typing import Any
 
 from . import project_lifecycle as lifecycle
@@ -99,18 +98,27 @@ def _planning_context(db, project_id: str) -> str:
 
 
 def parse_tasks(text: str) -> list[dict[str, str]]:
-    """Pull the task list out of the agent's answer. A model that returns prose
-    instead of JSON is a failed decomposition, not something to guess around."""
-    match = re.search(r"\{.*\}", text or "", re.S)
-    if not match:
-        raise PlanError("the PM agent did not return JSON")
-    try:
-        payload = json.loads(match.group(0))
-    except json.JSONDecodeError as exc:
-        raise PlanError(f"the PM agent's JSON did not parse: {exc}") from exc
-    raw = payload.get("tasks") if isinstance(payload, dict) else payload
-    if not isinstance(raw, list) or not raw:
-        raise PlanError("no tasks in the decomposition")
+    """Pull the task list out of the agent's answer.
+
+    Real answers are messy: prose around the JSON, a preamble object, several
+    objects in a row, or a bare array. So we scan every `{`/`[` and take the
+    first value that actually carries tasks. A model that returns only prose is
+    a failed decomposition — that we report rather than guess around."""
+    decoder = json.JSONDecoder()
+    raw: Any = None
+    for index, char in enumerate(text or ""):
+        if char not in "{[":
+            continue
+        try:
+            payload, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue                     # not the start of a JSON value
+        candidate = payload.get("tasks") if isinstance(payload, dict) else payload
+        if isinstance(candidate, list) and candidate:
+            raw = candidate
+            break
+    if raw is None:
+        raise PlanError("the PM agent did not return a JSON task list")
     tasks = []
     for item in raw[:MAX_TASKS]:
         if not isinstance(item, dict):

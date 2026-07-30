@@ -206,3 +206,20 @@ async def test_stop_cancels_jobs_in_flight(runner):
     assert db.one("SELECT status FROM jobs WHERE id='jx'")["status"] == "cancelled"
     assert db.one("SELECT status FROM runs WHERE id='rx'")["status"] == "cancelled"
     assert db.query("SELECT * FROM audit_log WHERE action='job.cancel'")
+
+
+def test_parse_tasks_survives_a_real_agent_answer():
+    """Live finding: an agent prefixed a summary object before the real one and
+    concatenated both. Greedy brace matching produced 'Extra data'."""
+    text = ('好的，我先說明思路。\n'
+            '{"summary":"先做後端再做前端","risk":"金流未定"}\n'
+            '{"tasks":[{"title":"預約 API","spec":"CRUD + 衝突檢查"},'
+            '{"title":"預約頁面","spec":"表單與時段選擇"}]}\n'
+            '以上，需要調整請告知。')
+    assert [t["title"] for t in runner_mod.parse_tasks(text)] == ["預約 API", "預約頁面"]
+    # a bare array is fine too
+    assert runner_mod.parse_tasks('[{"title":"只有一件事","spec":"做完"}]')[0]["spec"] \
+        == "做完"
+    # ```json fences and trailing commentary
+    assert len(runner_mod.parse_tasks(
+        '```json\n{"tasks":[{"title":"A","spec":"a"}]}\n```\nDone!')) == 1

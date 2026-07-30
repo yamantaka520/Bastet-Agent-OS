@@ -8,6 +8,15 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.9.1] - 2026-07-31
+
+### Fixed
+- Task-plan extraction survives a real agent answer. The first live
+  decomposition returned a summary object followed by the task object; greedy
+  brace matching spanned both and died with "Extra data". It now scans every
+  `{`/`[`, `raw_decode`s each candidate and takes the first value that actually
+  carries tasks — prose, ```json fences and trailing commentary included.
+
 ## [0.9.0] - 2026-07-31
 
 ### Added — project lifecycle, PM decomposition, run controls
