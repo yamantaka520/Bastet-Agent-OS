@@ -76,7 +76,9 @@ def run(db, resource_id: str, actor: str) -> dict[str, Any]:
 
 def _store(db, resource_id: str, config: dict[str, Any], actor: str,
            result: dict[str, Any]) -> dict[str, Any]:
-    result["detail"] = str(result.get("detail", ""))[:DETAIL_LIMIT]
+    # only the three fields the UI shows are persisted; probes may carry more
+    result = {"status": result["status"], "checked": result.get("checked", ""),
+              "detail": str(result.get("detail", ""))[:DETAIL_LIMIT]}
     config["test"] = {**result, "at": now()}
     db.write("UPDATE resources SET config_json=?, updated_at=? WHERE id=?",
              (json.dumps(config), now(), resource_id))
@@ -99,11 +101,16 @@ def _get(url: str, headers: dict[str, str]) -> dict[str, Any]:
     except httpx.HTTPError as exc:
         return {"status": "failed", "detail": f"{type(exc).__name__}: {exc}"}
     body = resp.text[:400].replace("\n", " ")
+    try:                       # keep the parsed body: summaries need all of it
+        payload = resp.json()
+    except ValueError:
+        payload = None
     if resp.status_code in (401, 403):
-        return {"status": "failed",
+        return {"status": "failed", "payload": payload,
                 "detail": f"HTTP {resp.status_code} — credential rejected. {body}"}
     if resp.status_code < 400:
-        return {"status": "ok", "detail": f"HTTP {resp.status_code}. {body}"}
+        return {"status": "ok", "payload": payload,
+                "detail": f"HTTP {resp.status_code}. {body}"}
     if resp.status_code < 500:
         return {"status": "warn",
                 "detail": f"HTTP {resp.status_code} — the host answered, so it is "
@@ -134,7 +141,7 @@ def _test_llm(row, secret: str | None) -> dict[str, Any]:
     result = _get(url, headers)
     result["checked"] = f"GET {url}"
     if result["status"] == "ok":
-        result["detail"] = _count_models(result["detail"])
+        result["detail"] = _summarise_models(result.get("payload"), result["detail"])
     if stripped:
         # the stored endpoint is an operation URL; the gateway would append its
         # own path to it at run time, so say so even when the probe passed
@@ -146,14 +153,16 @@ def _test_llm(row, secret: str | None) -> dict[str, Any]:
     return result
 
 
-def _count_models(detail: str) -> str:
-    try:
-        payload = json.loads(detail.split(". ", 1)[1])
-        models = payload.get("data") or payload.get("models") or []
-        names = [m.get("id") or m.get("name") for m in models][:5]
-        return f"credential accepted; {len(models)} models, e.g. {', '.join(n for n in names if n)}"
-    except Exception:
-        return detail
+def _summarise_models(payload: Any, fallback: str) -> str:
+    """"14 models, e.g. …" beats 400 characters of raw JSON."""
+    if not isinstance(payload, dict):
+        return fallback
+    models = payload.get("data") or payload.get("models") or []
+    if not isinstance(models, list) or not models:
+        return fallback
+    names = [m.get("id") or m.get("name") for m in models if isinstance(m, dict)]
+    shown = ", ".join(n for n in names[:6] if n)
+    return f"credential accepted; {len(models)} models available, e.g. {shown}"
 
 
 def _test_http_endpoint(row, config: dict[str, Any], secret: str | None) -> dict[str, Any]:

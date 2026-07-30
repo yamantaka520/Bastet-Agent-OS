@@ -90,7 +90,7 @@ def test_llm_check_lists_models_and_never_spends_tokens(db, stub, tmp_path):
     add(db, "llm-ok", "llm", endpoint=f"{stub}/v1", flavor="openai", ref=f"file:{key}")
     state = resource_test.run(db, "llm-ok", "tester")
     assert state["status"] == "ok"
-    assert "2 models" in state["detail"] and "gpt-5" in state["detail"]
+    assert "2 models available" in state["detail"] and "gpt-5" in state["detail"]
     assert state["checked"] == f"GET {stub}/v1/models"   # a listing, not a completion
 
 
@@ -244,3 +244,4 @@ def test_operation_url_endpoint_is_flagged_before_a_run_wastes_it(db, stub, tmp_
     assert state["checked"] == f"GET {stub}/v1/models"
     assert state["status"] == "warn" and "operation URL" in state["detail"]
     assert "credential accepted" in state["detail"]   # the key itself is fine
+    assert "payload" not in state                     # probe internals stay internal

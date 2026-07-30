@@ -8,6 +8,14 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.7.2] - 2026-07-31
+
+### Fixed
+- LLM test summary reads the whole response instead of a 400-character snippet,
+  so it reports "credential accepted; 14 models available, e.g. …" rather than
+  falling back to raw JSON. Probe internals no longer leak into the stored
+  verdict.
+
 ## [0.7.1] - 2026-07-31
 
 ### Fixed
