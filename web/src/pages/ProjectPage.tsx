@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, del, post, put } from "../api";
+import { useT, useVocab } from "../i18n";
 import { DataTable, Section, useList } from "../ui";
 import { Secret, scopeText } from "./Secrets";
 
@@ -29,6 +30,8 @@ type Overview = {
 };
 
 export default function ProjectPage(props: { canOperate: boolean; refreshKey: number }) {
+  const t = useT();
+  const vocab = useVocab();
   const [projects] = useList<Project>("/api/projects", props.refreshKey);
   const [templates] = useList<Template>("/api/templates", props.refreshKey);
   const [agents] = useList<Agent>("/api/agents", props.refreshKey);
@@ -55,7 +58,9 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
   }, [selected]);
   useEffect(load, [load, props.refreshKey]);
 
-  const roleLabel = (id: string) => roles.find((r) => r.id === id)?.label ?? id;
+  // localised by stable role id; falls back to whatever the catalog sent
+  const roleLabel = (id: string) =>
+    vocab.roleLabel(id, roles.find((r) => r.id === id)?.label ?? id);
 
   const saveProject = async () => {
     setError("");
@@ -94,14 +99,14 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
   };
 
   if (!projects.length) {
-    return <div className="page"><p className="muted">
-      還沒有專案 — 到「組織」頁的 Teams → Projects 建立第一個。</p></div>;
+    return <div className="page">
+      <p className="muted">{t("project.noneYet")}</p></div>;
   }
 
   return (
     <div className="page">
       <div className="toolbar">
-        <span className="muted">專案：</span>
+        <span className="muted">{t("project.selector")}</span>
         <select value={selected} onChange={(e) => setSelected(e.target.value)}>
           {projects.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
         </select>
@@ -111,41 +116,41 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
 
       {ov && (
         <>
-          <Section title="專案內容">
+          <Section title={t("project.content")}>
             <div className="inline-form">
-              <input placeholder="repo 路徑（Bastet 主機上）" style={{ width: "22rem" }}
+              <input placeholder={t("project.repoPh")} style={{ width: "22rem" }}
                      value={edit.repo} disabled={!props.canOperate}
                      onChange={(e) => setEdit({ ...edit, repo: e.target.value })} />
-              <input placeholder="專案說明（會成為任務背景）" style={{ flex: 1 }}
+              <input placeholder={t("project.descPh")} style={{ flex: 1 }}
                      value={edit.desc} disabled={!props.canOperate}
                      onChange={(e) => setEdit({ ...edit, desc: e.target.value })} />
-              {props.canOperate && <button onClick={saveProject}>儲存</button>}
+              {props.canOperate && <button onClick={saveProject}>{t("c.save")}</button>}
             </div>
           </Section>
 
-          <Section title="套用的工作流 與 角色 Agent 指派">
+          <Section title={t("project.workflowBlock")}>
             <div className="inline-form">
-              <span className="muted">工作流：</span>
+              <span className="muted">{t("project.workflowLabel")}</span>
               <select value={ov.project.template_id ?? ""} disabled={!props.canOperate}
                       onChange={(e) => setTemplate(e.target.value)}>
-                <option value="">（未指派）</option>
+                <option value="">{t("project.workflowNone")}</option>
                 {templates.map((t) => <option key={t.id} value={t.id}>{t.id}</option>)}
               </select>
               {!ov.project.template_id &&
-                <span className="muted">未指派時，派工會走單階段流程。</span>}
+                <span className="muted">{t("project.workflowNoneHint")}</span>}
             </div>
             {!!ov.stages.length && (
               <DataTable
-                head={["#", "階段", "需要角色", "已指派 Agent", ""]}
+                head={["#", t("c.stage"), t("project.headRole"), t("project.headAssigned"), ""]}
                 rows={ov.stages.map((st, i) => {
                   const cov = ov.role_coverage.find((c) => c.stage === st.name);
                   const agentsForRole = cov?.agents ?? [];
                   return [
                     i + 1,
                     st.name + (st.read_only ? " 🔒" : ""),
-                    st.role ? roleLabel(st.role) : <span className="muted">不指定</span>,
+                    st.role ? roleLabel(st.role) : <span className="muted">{t("project.roleAny")}</span>,
                     !st.role
-                      ? <span className="muted">用專案預設 agent</span>
+                      ? <span className="muted">{t("project.roleAnyHint")}</span>
                       : agentsForRole.length
                         ? (
                           <span className="role-agents">
@@ -154,7 +159,8 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
                                 {a.agent_name}
                                 <span className="card-meta"> ({a.executor_type})</span>
                                 {props.canOperate && (
-                                  <button className="ghost chip-x" title="移除此指派"
+                                  <button className="ghost chip-x"
+                                          title={t("project.removeAssign")}
                                           onClick={() => unassignRole(st.role as string,
                                                                      a.agent_id)}>✕</button>
                                 )}
@@ -162,50 +168,51 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
                             ))}
                           </span>
                         )
-                        : <span className="danger-text">⚠ 缺人</span>,
+                        : <span className="danger-text">{t("project.missing")}</span>,
                     // assignment stays editable: add another agent or swap by
                     // removing the chip above — never a one-shot decision
                     st.role && props.canOperate ? (
                       <AssignInline
                         agents={agents.filter((a) =>
                           !agentsForRole.some((x) => x.agent_id === a.id))}
-                        label={agentsForRole.length ? "加入/更換…" : "指派 Agent…"}
+                        label={agentsForRole.length ? t("project.assignSwap")
+                                                    : t("project.assignPick")}
                         onPick={(aid) => assignRole(st.role as string, aid)} />
                     ) : null,
                   ];
                 })} />
             )}
-            <p className="muted">指派可隨時調整：✕ 移除、下拉選單加入其他 Agent。
-              同一角色指派多個 Agent 時，優先順序最高者執行（在「組織」頁調整優先順序）。</p>
+            <p className="muted">{t("project.assignHint")}</p>
           </Section>
 
-          <Section title="資源與預算授權">
+          <Section title={t("project.grants")}>
             <DataTable
-              head={["資源", "類型", "預算", "併發上限", "超額行為"]}
+              head={[t("project.headResource"), t("c.kind"), t("project.headBudget"),
+                     t("project.headConcurrency"), t("project.headOnExceed")]}
               rows={ov.resources.map((r) => [
                 r.name, r.kind,
                 r.budget_usd != null ? `$${r.budget_usd}` : "∞",
                 r.max_concurrency ?? "∞", r.on_exceed,
               ])} />
-            {!ov.resources.length && <p className="muted">尚無授權 —
-              到「資源」頁為此專案（或其團隊）建立 grant。</p>}
+            {!ov.resources.length &&
+              <p className="muted">{t("project.noGrants")}</p>}
           </Section>
 
-          <Section title="可用憑證（含團隊/全域繼承）">
+          <Section title={t("project.secrets")}>
             <DataTable
-              head={["名稱", "可見範圍", "注入環境變數", "備註"]}
-              rows={ov.secrets.map((s) => [s.name, scopeText(s),
+              head={[t("c.name"), t("sec.headScope"), t("sec.headEnv"), t("c.note")]}
+              rows={ov.secrets.map((s) => [s.name, scopeText(s, t),
                                            s.env_name ?? "—", s.note])} />
-            {!ov.secrets.length && <p className="muted">尚無可用憑證 —
-              到「管理」頁新增，範圍選這個專案或其團隊。</p>}
+            {!ov.secrets.length &&
+              <p className="muted">{t("project.noSecrets")}</p>}
           </Section>
 
-          <Section title="近期任務">
+          <Section title={t("project.jobs")}>
             <DataTable
-              head={["任務", "階段", "狀態", "更新時間"]}
+              head={[t("project.headJob"), t("c.stage"), t("c.status"), t("c.updatedAt")]}
               rows={ov.jobs.map((j) => [j.title, j.stage, j.status,
                                         j.updated_at?.replace("T", " ") ?? ""])} />
-            {!ov.jobs.length && <p className="muted">尚無任務 — 到「看板」派第一個。</p>}
+            {!ov.jobs.length && <p className="muted">{t("project.noJobs")}</p>}
           </Section>
         </>
       )}
@@ -213,12 +220,13 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
   );
 }
 
-function AssignInline({ agents, onPick, label = "指派 Agent…" }: {
-  agents: Agent[]; onPick: (agentId: string) => void; label?: string;
+function AssignInline({ agents, onPick, label }: {
+  agents: Agent[]; onPick: (agentId: string) => void; label: string;
 }) {
+  const t = useT();
   const [value, setValue] = useState("");
   if (!agents.filter((a) => a.enabled).length) {
-    return <span className="muted">（無其他可用 Agent）</span>;
+    return <span className="muted">{t("project.noOtherAgents")}</span>;
   }
   return (
     <span className="row-ops">
@@ -229,7 +237,7 @@ function AssignInline({ agents, onPick, label = "指派 Agent…" }: {
         ))}
       </select>
       <button className="ghost" disabled={!value}
-              onClick={() => { onPick(value); setValue(""); }}>套用</button>
+              onClick={() => { onPick(value); setValue(""); }}>{t("c.apply")}</button>
     </span>
   );
 }

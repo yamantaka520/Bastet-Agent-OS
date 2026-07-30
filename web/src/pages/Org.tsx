@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, del, post, put } from "../api";
 import LoginWizard from "../LoginWizard";
 import RoleAssignSection from "./RoleAssign";
+import { useT } from "../i18n";
 import { DataTable, InlineForm, Section, useList } from "../ui";
 
 type Project = { id: string; team_id: string; repo_path: string | null };
@@ -59,6 +60,7 @@ function RoleAssignBridge({ canOperate, projects, agents }:
 
 function TeamsProjectsSection({ canOperate, projects, reloadProjects }:
   { canOperate: boolean; projects: Project[]; reloadProjects: () => void }) {
+  const t = useT();
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
   const [team, setTeam] = useState("");
   const [error, setError] = useState("");
@@ -73,13 +75,13 @@ function TeamsProjectsSection({ canOperate, projects, reloadProjects }:
   useEffect(loadTeams, [loadTeams]);
 
   return (
-    <Section title="Teams → Projects（與 AMOS 1:1，階層管理）">
+    <Section title={t("org.teams")}>
       {canOperate && (
         <>
           <InlineForm
-            fields={[{ name: "id", placeholder: "新 team id" },
-                     { name: "name", placeholder: "顯示名稱（可空）" }]}
-            submit="＋ team"
+            fields={[{ name: "id", placeholder: t("org.newTeamId") },
+                     { name: "name", placeholder: t("org.teamNamePh") }]}
+            submit={t("org.addTeam")}
             onSubmit={async (v) => {
               await post("/api/teams", { id: v.id, name: v.name });
               loadTeams();
@@ -94,15 +96,15 @@ function TeamsProjectsSection({ canOperate, projects, reloadProjects }:
           {error && <p className="error">{error}</p>}
         </>
       )}
-      <p className="muted">repo 路徑指的是<b>執行 bastet serve 的那台主機</b>上的路徑
-        （worktree 與 agent 都在該主機上跑），不是你目前瀏覽器所在電腦的路徑。</p>
-      {teams.map((t) => {
-        const inTeam = projects.filter((p) => p.team_id === t.id);
+      <p className="muted">{t("org.repoHint")}</p>
+      {teams.map((team) => {
+        const inTeam = projects.filter((p) => p.team_id === team.id);
         return (
-          <div key={t.id} className="fed-team">
-            <b>🏷 {t.name}</b>
+          <div key={team.id} className="fed-team">
+            <b>🏷 {team.name}</b>
             <ul>
-              {inTeam.length === 0 && <li className="muted">（尚無專案）</li>}
+              {inTeam.length === 0 &&
+                <li className="muted">{t("org.noProjectsInTeam")}</li>}
               {inTeam.map((p) => (
                 <li key={p.id}>📁 {p.id}
                   <span className="card-meta"> {p.repo_path ?? ""}</span></li>
@@ -117,13 +119,14 @@ function TeamsProjectsSection({ canOperate, projects, reloadProjects }:
 
 function ProjectAdd({ team, onDone, onError }:
   { team: string; onDone: () => void; onError: (e: string) => void }) {
+  const t = useT();
   const [id, setId] = useState("");
   const [repo, setRepo] = useState("");
   return (
     <>
-      <input placeholder="project id" value={id}
+      <input placeholder={t("org.projectIdPh")} value={id}
              onChange={(e) => setId(e.target.value)} />
-      <input placeholder="repo 路徑（Bastet 主機上的路徑）" style={{ width: "20rem" }}
+      <input placeholder={t("org.repoPh")} style={{ width: "20rem" }}
              value={repo} onChange={(e) => setRepo(e.target.value)} />
       <button disabled={!id || !repo || !team} onClick={async () => {
         onError("");
@@ -132,13 +135,14 @@ function ProjectAdd({ team, onDone, onError }:
           setId(""); setRepo("");
           onDone();
         } catch (e) { onError(String((e as Error).message)); }
-      }}>＋ project</button>
+      }}>{t("org.addProject")}</button>
     </>
   );
 }
 
 function AgentsSection({ canOperate, agents, reloadAgents }:
   { canOperate: boolean; agents: Agent[]; reloadAgents: () => void }) {
+  const t = useT();
   const [executors, setExecutors] = useState<Executor[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [form, setForm] = useState({ id: "", name: "", executor: "claude-code",
@@ -223,7 +227,7 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
   };
 
   const renameAccount = async (a: Account) => {
-    const name = window.prompt("新名稱", a.name);
+    const name = window.prompt(t("org.newNamePrompt"), a.name);
     if (!name) return;
     await put(`/api/executor-accounts/${a.id}`, { name });
     loadAccounts();
@@ -239,28 +243,28 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
   };
 
   return (
-    <Section title="Agents (executor bindings)">
+    <Section title={t("org.agents")}>
       {canOperate && (
         <>
           <div className="inline-form">
-            <input placeholder="agent id" value={form.id}
+            <input placeholder={t("org.agentIdPh")} value={form.id}
                    onChange={(e) => setForm({ ...form, id: e.target.value })} />
-            <input placeholder="display name" value={form.name}
+            <input placeholder={t("org.agentNamePh")} value={form.name}
                    onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <select value={form.executor}
                     onChange={(e) => setForm({ ...form, executor: e.target.value,
                                                account: "" })}>
               {executors.map((e) => (
                 <option key={e.kind} value={e.kind}>
-                  {e.name}{!e.installed ? "（未安裝）"
-                          : !e.configured ? "（未設定）" : ""}
+                  {e.name}{!e.installed ? t("org.notInstalled")
+                          : !e.configured ? t("org.notConfigured") : ""}
                 </option>
               ))}
             </select>
             {selected?.supports_accounts && (
               <select value={form.account}
                       onChange={(e) => setForm({ ...form, account: e.target.value })}>
-                <option value="">全域登入（預設）</option>
+                <option value="">{t("org.accountGlobal")}</option>
                 {typeAccounts.map((a) => (
                   <option key={a.id} value={a.id}>{a.name}（{a.status}）</option>
                 ))}
@@ -269,39 +273,40 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
             {(selected?.models.length ?? 0) > 0 && (
               <select value={form.model}
                       onChange={(e) => setForm({ ...form, model: e.target.value })}>
-                <option value="">官方預設模型</option>
+                <option value="">{t("org.modelDefault")}</option>
                 {selected!.models.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             )}
-            <button onClick={addAgent} disabled={!form.id}>add</button>
+            <button onClick={addAgent} disabled={!form.id}>{t("c.add")}</button>
             {selected && selected.kind !== "bastet-lite" && (
               <button className={selected.configured ? "ghost" : ""} onClick={() =>
                 setWizard({ title: selected.name, executorType: selected.kind,
                             accountId: null })}>
-                WebUI 登入（全域）{!selected.configured && " ←"}</button>
+                {t("org.webLogin")}{!selected.configured && " ←"}</button>
             )}
           </div>
           {selected?.supports_accounts && (
             <div className="inline-form">
-              <input placeholder={`新增 ${form.executor} 帳號名稱`} value={newAccountName}
+              <input placeholder={t("org.newAccountPh", { executor: form.executor })}
+                     value={newAccountName}
                      onChange={(e) => setNewAccountName(e.target.value)} />
               <button className="ghost" onClick={addAccount}
-                      disabled={!newAccountName}>＋ 帳號</button>
+                      disabled={!newAccountName}>{t("org.addAccount")}</button>
             </div>
           )}
           {selected && !selected.supports_accounts && (
             <p className="muted">{selected.auth_note === "global-only"
-              ? "此 executor 僅支援全域登入（單一帳號）— 用上方「WebUI 登入（全域）」按鈕完成驗證。"
-              : "此 executor 的憑證來自資源池，不需要帳號。"}</p>
+              ? t("org.globalOnlyNote") : t("org.poolNote")}</p>
           )}
           {created && (
-            <p className="notice">在你的終端執行完成登入：
+            <p className="notice">{t("org.terminalNote")}
               <code>{created.login_instruction}</code></p>
           )}
           {error && <p className="error">{error}</p>}
         </>
       )}
-      <DataTable head={["id", "name", "executor", "account", "model", "enabled", ""]}
+      <DataTable head={["id", t("c.name"), "executor", "account", "model",
+                        "enabled", ""]}
                  rows={agents.map((a) => (
         editing === a.id ? [
           a.id,
@@ -310,31 +315,32 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
             {executors.map((e) => <option key={e.kind} value={e.kind}>{e.kind}</option>)}
           </select>,
           <select key="a" defaultValue={a.account_id ?? ""} id={`edit-acct-${a.id}`}>
-            <option value="">全域登入</option>
+            <option value="">{t("org.accountGlobalShort")}</option>
             {accounts.filter((x) => x.executor_type === a.executor_type)
                      .map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
           </select>,
           <select key="m" defaultValue={agentModel(a)} id={`edit-model-${a.id}`}>
-            <option value="">官方預設</option>
+            <option value="">{t("c.defaultModel")}</option>
             {(executors.find((e) => e.kind === a.executor_type)?.models ?? [])
               .map((m) => <option key={m} value={m}>{m}</option>)}
           </select>,
           a.enabled ? "✅" : "⛔",
           <span key="ops" className="row-ops">
-            <button onClick={() => saveEdit(a.id)}>存</button>
+            <button onClick={() => saveEdit(a.id)}>{t("c.save")}</button>
             <button className="ghost" onClick={() => setEditing(null)}>✕</button>
           </span>,
         ] : [
           a.id, a.name, a.executor_type, accountName(a.account_id ?? null),
-          agentModel(a) || "官方預設",
+          agentModel(a) || t("c.defaultModel"),
           a.enabled ? "✅" : "⛔",
           canOperate ? (
             <span key="ops" className="row-ops">
-              <button className="ghost" onClick={() => setEditing(a.id)}>編輯</button>
+              <button className="ghost"
+                      onClick={() => setEditing(a.id)}>{t("c.edit")}</button>
               <button className="ghost" onClick={() => toggleAgent(a)}>
-                {a.enabled ? "停用" : "啟用"}</button>
+                {a.enabled ? t("c.disable") : t("c.enable")}</button>
               <button className="ghost danger-text"
-                      onClick={() => removeAgent(a.id)}>刪除</button>
+                      onClick={() => removeAgent(a.id)}>{t("c.delete")}</button>
             </span>
           ) : null,
         ]))} />
@@ -349,9 +355,10 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
       )}
       {accounts.length > 0 && (
         <>
-          <h3>Executor 帳號</h3>
-          <DataTable head={["name", "executor", "status", "今日用量", "7 日用量",
-                            "登入指令", ""]}
+          <h3>{t("org.accountsTitle")}</h3>
+          <DataTable head={[t("c.name"), "executor", t("c.status"),
+                            t("org.usageToday"), t("org.usage7d"),
+                            t("org.loginCommand"), ""]}
                      rows={accounts.map((a) => [a.name, a.executor_type, a.status,
                        <span key="u1" className="detail">
                          {a.usage_today.runs} runs ·
@@ -367,16 +374,17 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
                            <button className="ghost" onClick={() =>
                              setWizard({ title: `${a.name}（${a.executor_type}）`,
                                          executorType: a.executor_type,
-                                         accountId: a.id })}>登入</button>
+                                         accountId: a.id })}>{t("c.login")}</button>
                            <button className="ghost" onClick={async () =>
                              setQuota({ ...quota,
                                [a.id]: await api<Quota>(
                                  `/api/executor-accounts/${a.id}/quota`) })}>
-                             額度</button>
+                             {t("org.quota")}</button>
                            <button className="ghost" onClick={() => renameAccount(a)}>
-                             改名</button>
+                             {t("c.rename")}</button>
                            <button className="ghost danger-text"
-                                   onClick={() => removeAccount(a.id)}>刪除</button>
+                                   onClick={() =>
+                                     removeAccount(a.id)}>{t("c.delete")}</button>
                          </span>
                        ) : null])} />
           {Object.entries(quota).map(([accountId, q]) => (
@@ -385,9 +393,12 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
               {q.error ?? q.unsupported ?? (
                 <>
                   {q.plan}｜{(q.windows ?? []).map((w) =>
-                    `${w.label} 已用 ${w.used_percent}%（${w.resets_at
-                      ? "重置 " + new Date(w.resets_at).toLocaleString() : "—"}）`
-                  ).join("｜") || "無視窗資料"}
+                    `${t("org.quotaUsed", { label: w.label, pct: w.used_percent })}` +
+                    `（${w.resets_at
+                      ? t("org.quotaResets",
+                          { when: new Date(w.resets_at).toLocaleString() })
+                      : "—"}）`
+                  ).join("｜") || t("org.quotaNoWindows")}
                   <span className="muted">（{q.note}）</span>
                 </>
               )}
@@ -401,6 +412,7 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
 
 function FederationSection({ canOperate, onBound }:
   { canOperate: boolean; onBound: () => void }) {
+  const t = useT();
   const [org, setOrg] = useState<OrgView | null>(null);
   const [binding, setBinding] = useState<string | null>(null);
   const [repo, setRepo] = useState("");
@@ -425,27 +437,31 @@ function FederationSection({ canOperate, onBound }:
   };
 
   return (
-    <Section title="Federation — shared AMOS org view">
-      {!org?.amos && <p className="muted">AMOS unavailable — org view offline.</p>}
+    <Section title={t("org.federation")}>
+      {!org?.amos && <p className="muted">{t("org.amosOffline")}</p>}
       {org?.teams.map((team) => (
         <div key={team.id} className="fed-team">
           <b>🏷 {team.name}</b>
-          <span className="card-meta"> members: {team.members.join(", ") || "—"}</span>
+          <span className="card-meta"> {t("org.members")}: {team.members.join(", ")
+            || "—"}</span>
           <ul>
             {team.projects.map((p) => (
               <li key={p.id}>
                 {p.bound ? "🔗" : "◌"} {p.id}
-                <span className="card-meta"> ({p.members.length} members)</span>
+                <span className="card-meta">
+                  （{t("org.memberCount", { n: p.members.length })}）</span>
                 {!p.bound && canOperate && (
                   binding === p.id ? (
                     <span className="inline-form" style={{ marginLeft: ".5rem" }}>
-                      <input placeholder="/path/to/local/repo" value={repo}
+                      <input placeholder={t("org.bindPh")} value={repo}
                              onChange={(e) => setRepo(e.target.value)} />
-                      <button onClick={() => bind(p.id)} disabled={!repo}>bind</button>
+                      <button onClick={() => bind(p.id)}
+                              disabled={!repo}>{t("org.bind")}</button>
                       <button className="ghost" onClick={() => setBinding(null)}>✕</button>
                     </span>
                   ) : (
-                    <button className="ghost" onClick={() => setBinding(p.id)}>bind…</button>
+                    <button className="ghost"
+                            onClick={() => setBinding(p.id)}>{t("org.bindOpen")}</button>
                   )
                 )}
               </li>
@@ -454,11 +470,10 @@ function FederationSection({ canOperate, onBound }:
         </div>
       ))}
       {!!org?.local_only.length && (
-        <p className="muted">local-only projects (no AMOS record): {org.local_only.join(", ")}</p>
+        <p className="muted">{t("org.localOnly",
+          { list: org.local_only.join(", ") })}</p>
       )}
-      <p className="muted">Teams/projects/members converge across nodes via AMOS
-        federation; a project synced from another node shows here as ◌ until you
-        bind it to a local repo. Resources, grants and jobs stay per-node.</p>
+      <p className="muted">{t("org.federationHint")}</p>
     </Section>
   );
 }

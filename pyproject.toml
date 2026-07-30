@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bastet-agent-os"
-version = "0.0.1.dev0"
+dynamic = ["version"]
 description = "Local-first operating system for AI-agent teams: resource governance, gated workflows, and multi-project orchestration on top of Agent Memory OS."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -35,6 +35,9 @@ keyring = ["keyring"]
 
 [project.scripts]
 bastet = "bastet_agent_os.cli:app"
+
+[tool.hatch.version]
+path = "src/bastet_agent_os/__init__.py"
 
 [project.entry-points."bastet.executors"]
 # executor plugins register here; see SPEC.md §5.1

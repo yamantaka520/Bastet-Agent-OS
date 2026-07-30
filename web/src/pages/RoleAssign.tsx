@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, del, post } from "../api";
+import { useT, useVocab } from "../i18n";
 import { Section } from "../ui";
 
 /** Project-centric role assignment: one block per project, many agent→role
@@ -14,6 +15,8 @@ type Role = { id: string; label: string; hint: string };
 export default function RoleAssignSection({ canOperate, projects, agents, roles }: {
   canOperate: boolean; projects: Project[]; agents: Agent[]; roles: Role[];
 }) {
+  const t = useT();
+  const vocab = useVocab();
   const [rows, setRows] = useState<Assignment[]>([]);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<Record<string, { agent: string; role: string;
@@ -24,7 +27,8 @@ export default function RoleAssignSection({ canOperate, projects, agents, roles 
   }, []);
   useEffect(load, [load]);
 
-  const roleLabel = (id: string) => roles.find((r) => r.id === id)?.label ?? id;
+  const roleLabel = (id: string) =>
+    vocab.roleLabel(id, roles.find((r) => r.id === id)?.label ?? id);
   const draftFor = (pid: string) => draft[pid] ?? { agent: "", role: "", pref: "0" };
   const setDraftFor = (pid: string, patch: Partial<{ agent: string; role: string;
                                                      pref: string }>) =>
@@ -52,9 +56,9 @@ export default function RoleAssignSection({ canOperate, projects, agents, roles 
   };
 
   return (
-    <Section title="角色指派（以專案為單位）">
+    <Section title={t("role.assign")}>
       {error && <p className="error">{error}</p>}
-      {!projects.length && <p className="muted">先建立專案，才能指派角色。</p>}
+      {!projects.length && <p className="muted">{t("role.needProject")}</p>}
       {projects.map((p) => {
         const mine = rows.filter((r) => r.project_id === p.id);
         const byRole: Record<string, Assignment[]> = {};
@@ -64,9 +68,9 @@ export default function RoleAssignSection({ canOperate, projects, agents, roles 
           <div key={p.id} className="role-block">
             <div className="role-head">
               <b>📁 {p.id}</b>
-              <span className="card-meta">{mine.length} 筆指派</span>
+              <span className="card-meta">{t("role.countAssigned", { n: mine.length })}</span>
             </div>
-            {!mine.length && <p className="muted">尚未指派任何角色。</p>}
+            {!mine.length && <p className="muted">{t("role.noneAssigned")}</p>}
             {Object.entries(byRole).map(([role, list]) => (
               <div key={role} className="role-row">
                 <span className="role-name">👤 {roleLabel(role)}</span>
@@ -75,7 +79,8 @@ export default function RoleAssignSection({ canOperate, projects, agents, roles 
                     <span key={a.agent_id} className="role-chip">
                       {a.agent_name}
                       <span className="card-meta"> ({a.executor_type}
-                        {list.length > 1 ? ` · 優先 ${a.preference}` : ""})</span>
+                        {list.length > 1
+                          ? ` · ${t("role.prefShort", { n: a.preference })}` : ""})</span>
                       {canOperate && (
                         <button className="ghost chip-x"
                                 onClick={() => remove(a)}>✕</button>
@@ -89,35 +94,31 @@ export default function RoleAssignSection({ canOperate, projects, agents, roles 
               <div className="inline-form">
                 <select value={d.agent}
                         onChange={(e) => setDraftFor(p.id, { agent: e.target.value })}>
-                  <option value="">選擇 Agent…</option>
+                  <option value="">{t("role.pickAgent")}</option>
                   {agents.filter((a) => a.enabled).map((a) => (
                     <option key={a.id} value={a.id}>{a.name}（{a.executor_type}）</option>
                   ))}
                 </select>
                 <select value={d.role}
                         onChange={(e) => setDraftFor(p.id, { role: e.target.value })}>
-                  <option value="">選擇角色…</option>
+                  <option value="">{t("role.pickRole")}</option>
                   {roles.map((r) => (
-                    <option key={r.id} value={r.id}>{r.label}</option>
+                    <option key={r.id} value={r.id}>{roleLabel(r.id)}</option>
                   ))}
                 </select>
-                <label className="chk">優先順序
+                <label className="chk">{t("role.preference")}
                   <input type="number" min={0} max={99} style={{ width: "4.5rem" }}
                          value={d.pref}
                          onChange={(e) => setDraftFor(p.id, { pref: e.target.value })} />
                 </label>
                 <button disabled={!d.agent || !d.role}
-                        onClick={() => add(p.id)}>＋ 指派</button>
+                        onClick={() => add(p.id)}>{t("role.addAssign")}</button>
               </div>
             )}
           </div>
         );
       })}
-      <p className="muted">
-        同一個專案可以有多個 Agent、多個角色；同一個角色也能有多個 Agent。
-        <b>優先順序</b>是同角色多人時的挑選依據 —— 工作流跑到需要該角色的階段時，
-        Bastet 會選數字最大的那個 Agent（其餘視為備援）。
-      </p>
+      <p className="muted">{t("role.assignHint")}</p>
     </Section>
   );
 }

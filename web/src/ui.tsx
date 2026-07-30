@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
+import { useT } from "./i18n";
 
 /** List loader; re-fetches when `refreshKey` changes (WS events bump it). */
 export function useList<T>(path: string, refreshKey?: number): [T[], () => void] {
@@ -25,7 +26,8 @@ export function Section(props: { title: string; children: React.ReactNode;
 }
 
 export function DataTable(props: { head: string[]; rows: React.ReactNode[][] }) {
-  if (!props.rows.length) return <p className="muted">— empty —</p>;
+  const t = useT();
+  if (!props.rows.length) return <p className="muted">{t("c.empty")}</p>;
   return (
     <div className="scroll-x">
       <table>

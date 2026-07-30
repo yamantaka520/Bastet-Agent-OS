@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, del, post } from "../api";
 import RolePromptsSection from "./RolePrompts";
+import { useT, useVocab, type T } from "../i18n";
 import { Section, useList } from "../ui";
 
 type Stage = {
@@ -19,6 +20,8 @@ type Project = { id: string; team_id: string; default_template_id: string | null
 const BLANK_STAGE: Stage = { name: "", role: null, gate: "auto" };
 
 export default function TemplatesPage(props: { canOperate: boolean; refreshKey: number }) {
+  const t = useT();
+  const vocab = useVocab();
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [templates, reloadTemplates] = useList<Template>("/api/templates", props.refreshKey);
   const [projects, reloadProjects] = useList<Project>("/api/projects", props.refreshKey);
@@ -30,10 +33,14 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
     api<Catalog>("/api/workflow-catalog").then(setCatalog).catch(() => {});
   }, []);
 
-  const roleLabel = (id?: string | null) =>
-    catalog?.roles.find((r) => r.id === id)?.label ?? (id || "未指定角色");
-  const gateInfo = (id: string) =>
-    catalog?.gates.find((g) => g.id === id) ?? { id, label: id, icon: "•", hint: "" };
+  const roleLabel = (id?: string | null) => id
+    ? vocab.roleLabel(id, catalog?.roles.find((r) => r.id === id)?.label ?? id)
+    : t("tpl.roleUnset");
+  const gateInfo = (id: string) => {
+    const g = catalog?.gates.find((x) => x.id === id);
+    return { id, icon: g?.icon ?? "•", hint: g?.hint ?? "",
+             label: vocab.gateLabel(id, g?.label ?? id) };
+  };
 
   const parseStages = (json: string): Stage[] => {
     try { return JSON.parse(json) as Stage[]; } catch { return []; }
@@ -42,7 +49,8 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
   const refreshAll = () => { reloadTemplates(); reloadProjects(); };
 
   const copyToMine = (name: string, stages: Stage[]) => {
-    setBuilder({ name: `${name} (我的版本)`, stages: stages.map((s) => ({ ...s })) });
+    setBuilder({ name: `${name}${t("tpl.myCopySuffix")}`,
+                 stages: stages.map((s) => ({ ...s })) });
     setError("");
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   };
@@ -71,7 +79,7 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
         ...(s.max_retries ? { max_retries: Number(s.max_retries) } : {}),
         ...(s.desc ? { desc: s.desc } : {}),
       }));
-    if (!clean.length) { setError("至少需要一個階段"); return; }
+    if (!clean.length) { setError(t("tpl.needStage")); return; }
     try {
       await post("/api/templates", { name: builder.name.trim(), stages: clean });
       setBuilder(null);
@@ -86,26 +94,28 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
     <div className="page">
       {error && <p className="error">{error}</p>}
 
-      <Section title="工作流範本庫（內建，點選展開流程）">
+      <Section title={t("tpl.library")}>
         <div className="wf-cards">
           {(catalog?.presets ?? []).map((p) => (
             <button key={p.id} className={`wf-card ${openId === p.id ? "active" : ""}`}
                     onClick={() => setOpenId(openId === p.id ? null : p.id)}>
               <b>{p.name}</b>
-              <span className="card-meta">{p.stages.length} 個階段</span>
+              <span className="card-meta">
+                {t("tpl.stageCount", { n: p.stages.length })}</span>
               <span className="card-meta">{p.description}</span>
             </button>
           ))}
         </div>
         {(catalog?.presets ?? []).filter((p) => p.id === openId).map((p) => (
           <div key={p.id} className="wf-detail">
-            <Flow stages={p.stages} roleLabel={roleLabel} gateInfo={gateInfo} />
-            <StageTable stages={p.stages} roleLabel={roleLabel} gateInfo={gateInfo} />
+            <Flow stages={p.stages} roleLabel={roleLabel} gateInfo={gateInfo} t={t} />
+            <StageTable stages={p.stages} roleLabel={roleLabel} gateInfo={gateInfo}
+                        t={t} />
             {props.canOperate && (
               <div className="inline-form">
                 <button onClick={() => copyToMine(p.name, p.stages)}>
-                  複製為我的範本並編輯</button>
-                <AssignPicker projects={projects} label="直接指派到專案"
+                  {t("tpl.copyEdit")}</button>
+                <AssignPicker projects={projects} label={t("tpl.assignDirect")}
                               onPick={async (projectId) => {
                                 // presets live in code; materialize before assigning
                                 await post("/api/templates",
@@ -118,39 +128,43 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
         ))}
       </Section>
 
-      <Section title="我的範本">
-        {!templates.length && <p className="muted">還沒有自己的範本 —
-          從上面的範本庫複製一份開始，或用下方的編輯器從零建立。</p>}
-        {templates.map((t) => {
-          const stages = parseStages(t.stages_json);
-          const open = openId === `mine:${t.id}`;
+      <Section title={t("tpl.mine")}>
+        {!templates.length && <p className="muted">{t("tpl.noneMine")}</p>}
+        {templates.map((tpl) => {
+          const stages = parseStages(tpl.stages_json);
+          const open = openId === `mine:${tpl.id}`;
           return (
-            <div key={t.id} className="wf-mine">
+            <div key={tpl.id} className="wf-mine">
               <div className="wf-mine-head">
                 <button className="ghost" onClick={() =>
-                  setOpenId(open ? null : `mine:${t.id}`)}>{open ? "▾" : "▸"} {t.id}</button>
-                <span className="card-meta">v{t.version} · {stages.length} 階段
-                  {t.assigned_projects.length
-                    ? ` · 已指派：${t.assigned_projects.join(", ")}`
-                    : " · 尚未指派"}</span>
+                  setOpenId(open ? null : `mine:${tpl.id}`)}>
+                  {open ? "▾" : "▸"} {tpl.id}</button>
+                <span className="card-meta">v{tpl.version} ·{" "}
+                  {t("tpl.stagesShort", { n: stages.length })} ·{" "}
+                  {tpl.assigned_projects.length
+                    ? t("tpl.assignedTo", { list: tpl.assigned_projects.join(", ") })
+                    : t("tpl.unassignedYet")}</span>
                 {props.canOperate && (
                   <span className="row-ops">
-                    <button className="ghost" onClick={() => copyToMine(t.id, stages)}>
-                      編輯/另存</button>
-                    <AssignPicker projects={projects} label="指派"
-                                  onPick={(pid) => assign(pid, t.id)} />
+                    <button className="ghost"
+                            onClick={() => copyToMine(tpl.id, stages)}>
+                      {t("tpl.editSaveAs")}</button>
+                    <AssignPicker projects={projects} label={t("c.assign")}
+                                  onPick={(pid) => assign(pid, tpl.id)} />
                     <button className="ghost danger-text" onClick={async () => {
                       setError("");
-                      try { await del(`/api/templates/${t.id}`); refreshAll(); }
+                      try { await del(`/api/templates/${tpl.id}`); refreshAll(); }
                       catch (e) { setError(String((e as Error).message)); }
-                    }}>刪除</button>
+                    }}>{t("c.delete")}</button>
                   </span>
                 )}
               </div>
               {open && (
                 <>
-                  <Flow stages={stages} roleLabel={roleLabel} gateInfo={gateInfo} />
-                  <StageTable stages={stages} roleLabel={roleLabel} gateInfo={gateInfo} />
+                  <Flow stages={stages} roleLabel={roleLabel} gateInfo={gateInfo}
+                        t={t} />
+                  <StageTable stages={stages} roleLabel={roleLabel}
+                              gateInfo={gateInfo} t={t} />
                 </>
               )}
             </div>
@@ -160,46 +174,49 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
 
       <RolePromptsSection canOperate={props.canOperate} />
 
-      <Section title="專案 ↔ 工作流對應">
-        <h3>等待指派（{unassigned.length}）</h3>
-        {!unassigned.length && <p className="muted">所有專案都已指派工作流 ✅</p>}
+      <Section title={t("tpl.mapping")}>
+        <h3>{t("tpl.awaiting", { n: unassigned.length })}</h3>
+        {!unassigned.length && <p className="muted">{t("tpl.allAssigned")}</p>}
         {unassigned.map((p) => (
           <div key={p.id} className="wf-assign-row">
             <span>📁 <b>{p.id}</b> <span className="card-meta">{p.team_id}</span></span>
             {props.canOperate && (
-              <TemplatePicker templates={templates} label="選擇工作流"
+              <TemplatePicker templates={templates} label={t("tpl.pickWorkflow")}
                               onPick={(tid) => assign(p.id, tid)} />
             )}
           </div>
         ))}
-        <h3>已指派（{assigned.length}）</h3>
-        {!assigned.length && <p className="muted">尚無專案指派工作流。</p>}
+        <h3>{t("tpl.assignedHead", { n: assigned.length })}</h3>
+        {!assigned.length && <p className="muted">{t("tpl.noneAssigned")}</p>}
         {assigned.map((p) => (
           <div key={p.id} className="wf-assign-row">
             <span>📁 <b>{p.id}</b> → <b>{p.default_template_id}</b></span>
             {props.canOperate && (
               <span className="row-ops">
-                <TemplatePicker templates={templates} label="改為"
+                <TemplatePicker templates={templates} label={t("tpl.changeTo")}
                                 onPick={(tid) => assign(p.id, tid)} />
-                <button className="ghost" onClick={() => assign(p.id, null)}>取消指派</button>
+                <button className="ghost"
+                        onClick={() => assign(p.id, null)}>{t("c.unassign")}</button>
               </span>
             )}
           </div>
         ))}
-        <p className="muted">指派後，該專案的派工若未指定範本就會自動走這條工作流。</p>
+        <p className="muted">{t("tpl.mappingHint")}</p>
+        <p className="muted">{t("tpl.presetLangNote")}</p>
       </Section>
 
       {props.canOperate && (
-        <Section title="範本編輯器"
+        <Section title={t("tpl.editor")}
                  action={!builder ? (
-                   <button onClick={() => setBuilder({ name: "", stages: [{ ...BLANK_STAGE }] })}>
-                     ＋ 從零建立</button>
+                   <button onClick={() =>
+                     setBuilder({ name: "", stages: [{ ...BLANK_STAGE }] })}>
+                     {t("tpl.fromScratch")}</button>
                  ) : undefined}>
-          {!builder && <p className="muted">按右上角建立，或從範本庫/我的範本複製一份來編輯。</p>}
+          {!builder && <p className="muted">{t("tpl.editorHint")}</p>}
           {builder && catalog && (
             <Builder builder={builder} catalog={catalog} setBuilder={setBuilder}
                      onSave={saveBuilder} onCancel={() => setBuilder(null)}
-                     roleLabel={roleLabel} gateInfo={gateInfo} />
+                     roleLabel={roleLabel} gateInfo={gateInfo} t={t} />
           )}
         </Section>
       )}
@@ -208,9 +225,9 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
 }
 
 /** Horizontal flow diagram: one box per stage, arrows between. */
-function Flow({ stages, roleLabel, gateInfo }: {
+function Flow({ stages, roleLabel, gateInfo, t }: {
   stages: Stage[]; roleLabel: (id?: string | null) => string;
-  gateInfo: (id: string) => Gate;
+  gateInfo: (id: string) => Gate; t: T;
 }) {
   return (
     <div className="flow">
@@ -218,10 +235,10 @@ function Flow({ stages, roleLabel, gateInfo }: {
         <div key={i} className="flow-item">
           <div className={`flow-node gate-${s.gate}`}>
             <span className="flow-idx">{i + 1}</span>
-            <b>{s.name || "（未命名）"}</b>
+            <b>{s.name || t("tpl.unnamed")}</b>
             <span className="flow-role">👤 {roleLabel(s.role)}</span>
             <span className="flow-gate">{gateInfo(s.gate).icon} {gateInfo(s.gate).label}</span>
-            {s.read_only && <span className="flow-tag">唯讀</span>}
+            {s.read_only && <span className="flow-tag">{t("tpl.readOnlyTag")}</span>}
           </div>
           {i < stages.length - 1 && <span className="flow-arrow">→</span>}
         </div>
@@ -230,15 +247,16 @@ function Flow({ stages, roleLabel, gateInfo }: {
   );
 }
 
-function StageTable({ stages, roleLabel, gateInfo }: {
+function StageTable({ stages, roleLabel, gateInfo, t }: {
   stages: Stage[]; roleLabel: (id?: string | null) => string;
-  gateInfo: (id: string) => Gate;
+  gateInfo: (id: string) => Gate; t: T;
 }) {
   return (
     <div className="scroll-x">
       <table>
-        <thead><tr><th>#</th><th>階段</th><th>負責角色</th><th>關卡</th>
-          <th>說明</th><th>重試</th></tr></thead>
+        <thead><tr><th>#</th><th>{t("c.stage")}</th><th>{t("tpl.headOwner")}</th>
+          <th>{t("tpl.headGate")}</th><th>{t("tpl.headDesc")}</th>
+          <th>{t("tpl.headRetry")}</th></tr></thead>
         <tbody>
           {stages.map((s, i) => (
             <tr key={i}>
@@ -261,6 +279,7 @@ function StageTable({ stages, roleLabel, gateInfo }: {
 function AssignPicker({ projects, label, onPick }: {
   projects: Project[]; label: string; onPick: (projectId: string) => void;
 }) {
+  const t = useT();
   const [value, setValue] = useState("");
   return (
     <span className="row-ops">
@@ -269,7 +288,7 @@ function AssignPicker({ projects, label, onPick }: {
         {projects.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
       </select>
       <button className="ghost" disabled={!value}
-              onClick={() => { onPick(value); setValue(""); }}>指派</button>
+              onClick={() => { onPick(value); setValue(""); }}>{t("c.assign")}</button>
     </span>
   );
 }
@@ -277,26 +296,29 @@ function AssignPicker({ projects, label, onPick }: {
 function TemplatePicker({ templates, label, onPick }: {
   templates: Template[]; label: string; onPick: (templateId: string) => void;
 }) {
+  const t = useT();
   const [value, setValue] = useState("");
   return (
     <span className="row-ops">
       <select value={value} onChange={(e) => setValue(e.target.value)}>
         <option value="">{label}…</option>
-        {templates.map((t) => <option key={t.id} value={t.id}>{t.id}</option>)}
+        {templates.map((x) => <option key={x.id} value={x.id}>{x.id}</option>)}
       </select>
       <button className="ghost" disabled={!value}
-              onClick={() => { onPick(value); setValue(""); }}>套用</button>
+              onClick={() => { onPick(value); setValue(""); }}>{t("c.apply")}</button>
     </span>
   );
 }
 
 /** Form-based stage builder: no JSON, live diagram preview. */
-function Builder({ builder, catalog, setBuilder, onSave, onCancel, roleLabel, gateInfo }: {
+function Builder({ builder, catalog, setBuilder, onSave, onCancel, roleLabel,
+                  gateInfo, t }: {
   builder: { name: string; stages: Stage[] };
   catalog: Catalog;
   setBuilder: (b: { name: string; stages: Stage[] }) => void;
   onSave: () => void; onCancel: () => void;
   roleLabel: (id?: string | null) => string; gateInfo: (id: string) => Gate;
+  t: T;
 }) {
   const update = (i: number, patch: Partial<Stage>) => {
     const stages = builder.stages.map((s, idx) => (idx === i ? { ...s, ...patch } : s));
@@ -315,58 +337,62 @@ function Builder({ builder, catalog, setBuilder, onSave, onCancel, roleLabel, ga
   return (
     <>
       <div className="inline-form">
-        <input placeholder="範本名稱（例：我的網站開發流程）" style={{ width: "22rem" }}
+        <input placeholder={t("tpl.namePh")} style={{ width: "22rem" }}
                value={builder.name}
                onChange={(e) => setBuilder({ ...builder, name: e.target.value })} />
-        <button onClick={onSave} disabled={!builder.name.trim()}>儲存範本</button>
-        <button className="ghost" onClick={onCancel}>取消</button>
+        <button onClick={onSave}
+                disabled={!builder.name.trim()}>{t("tpl.saveTemplate")}</button>
+        <button className="ghost" onClick={onCancel}>{t("c.cancel")}</button>
       </div>
 
-      <Flow stages={builder.stages} roleLabel={roleLabel} gateInfo={gateInfo} />
+      <Flow stages={builder.stages} roleLabel={roleLabel} gateInfo={gateInfo}
+            t={t} />
 
       {builder.stages.map((s, i) => (
         <div key={i} className="stage-editor">
           <div className="stage-editor-head">
-            <b>階段 {i + 1}</b>
+            <b>{t("tpl.stageN", { n: i + 1 })}</b>
             <span className="row-ops">
               <button className="ghost" onClick={() => move(i, -1)}>↑</button>
               <button className="ghost" onClick={() => move(i, 1)}>↓</button>
-              <button className="ghost danger-text" onClick={() => remove(i)}>移除</button>
+              <button className="ghost danger-text"
+                      onClick={() => remove(i)}>{t("c.remove")}</button>
             </span>
           </div>
           <div className="inline-form">
-            <input placeholder="階段名稱（例：後端實作）" value={s.name}
+            <input placeholder={t("tpl.stageNamePh")} value={s.name}
                    onChange={(e) => update(i, { name: e.target.value })} />
             <select value={s.role ?? ""}
                     onChange={(e) => update(i, { role: e.target.value || null })}>
-              <option value="">不指定角色（用專案預設 agent）</option>
+              <option value="">{t("tpl.roleNone")}</option>
               {catalog.roles.map((r) => (
-                <option key={r.id} value={r.id}>{r.label}</option>
+                <option key={r.id} value={r.id}>{roleLabel(r.id)}</option>
               ))}
             </select>
             <select value={s.gate}
                     onChange={(e) => update(i, { gate: e.target.value })}>
               {catalog.gates.map((g) => (
-                <option key={g.id} value={g.id}>{g.icon} {g.label}</option>
+                <option key={g.id} value={g.id}>
+                  {gateInfo(g.id).icon} {gateInfo(g.id).label}</option>
               ))}
             </select>
             {s.gate === "tests-pass" && (
-              <input placeholder="測試指令（例：pytest -q）" style={{ width: "16rem" }}
+              <input placeholder={t("tpl.testCmdPh")} style={{ width: "16rem" }}
                      value={s.gate_config?.command ?? ""}
                      onChange={(e) => update(i, { gate_config: { command: e.target.value } })} />
             )}
             <label className="chk">
               <input type="checkbox" checked={!!s.read_only}
                      onChange={(e) => update(i, { read_only: e.target.checked })} />
-              唯讀（審查用）
+              {t("tpl.readOnly")}
             </label>
-            <label className="chk">重試
+            <label className="chk">{t("tpl.retries")}
               <input type="number" min={0} max={3} style={{ width: "4rem" }}
                      value={s.max_retries ?? 0}
                      onChange={(e) => update(i, { max_retries: Number(e.target.value) })} />
             </label>
           </div>
-          <input placeholder="這個階段要做什麼（會寫進 agent 的任務說明）"
+          <input placeholder={t("tpl.stageDescPh")}
                  style={{ width: "100%" }} value={s.desc ?? ""}
                  onChange={(e) => update(i, { desc: e.target.value })} />
           <p className="muted">{gateInfo(s.gate).hint}</p>
@@ -375,7 +401,7 @@ function Builder({ builder, catalog, setBuilder, onSave, onCancel, roleLabel, ga
 
       <button className="ghost" onClick={() =>
         setBuilder({ ...builder, stages: [...builder.stages, { ...BLANK_STAGE }] })}>
-        ＋ 新增階段</button>
+        {t("tpl.addStage")}</button>
     </>
   );
 }

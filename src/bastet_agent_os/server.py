@@ -1320,6 +1320,13 @@ def create_app(home: Home) -> FastAPI:
             pump.cancel()
             login_manager.unsubscribe(session_id, queue)
 
+    # ---- version (unauthenticated: the UI shows it before you have a token) ---
+
+    @app.get("/api/version")
+    def version():
+        from . import __version__
+        return {"name": "Bastet Agent OS", "version": __version__}
+
     # ---- Kanban UI (built by `npm run build` in web/) -------------------------
 
     ui_dist = Path(__file__).parent / "ui_dist"

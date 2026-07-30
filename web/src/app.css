@@ -25,6 +25,10 @@ input, select { background: var(--panel); color: var(--text); border: 1px solid 
 header { display: flex; align-items: center; gap: 1rem; padding: .6rem 1rem;
          border-bottom: 1px solid var(--line); background: var(--panel); }
 header h1 { font-size: 1.05rem; margin: 0; }
+/* version badge: small enough to read as metadata, never as part of the name */
+.ver { font-size: .68rem; font-weight: 400; color: var(--muted);
+       margin-left: .35rem; vertical-align: .15em; letter-spacing: .02em; }
+.lang-picker { font-size: .8rem; padding: .15rem .3rem; }
 .cost { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .board { flex: 1; display: flex; gap: .8rem; padding: 1rem; overflow-x: auto;

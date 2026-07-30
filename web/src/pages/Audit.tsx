@@ -1,13 +1,15 @@
+import { useT } from "../i18n";
 import { DataTable, Section, useList } from "../ui";
 
 type AuditRow = { at: string; actor: string; action: string;
                   target_type: string; target_id: string; detail_json: string };
 
 export default function AuditPage(props: { refreshKey: number }) {
+  const t = useT();
   const [rows] = useList<AuditRow>(`/api/audit?limit=200&_=${props.refreshKey}`);
   return (
     <div className="page">
-      <Section title="Audit log (append-only, hash-chained)">
+      <Section title={t("aud.title")}>
         <DataTable
           head={["at", "actor", "action", "target", "detail"]}
           rows={rows.map((r) => [

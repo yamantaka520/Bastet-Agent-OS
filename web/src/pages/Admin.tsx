@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import { del, post } from "../api";
 import SecretsSection from "./Secrets";
+import { useT } from "../i18n";
 import { DataTable, InlineForm, Section, useList } from "../ui";
 
 const CHANNEL_STATUS: Record<string, string> = {
-  polling: "🟢 輪詢中",
-  credential_error: "🔴 憑證錯誤",
-  restart_needed: "🟡 待重啟",
-  disabled: "⚪ 已停用",
+  polling: "adm.chPolling", credential_error: "adm.chCredError",
+  restart_needed: "adm.chRestart", disabled: "adm.chDisabled",
 };
 
 type User = { id: string; name: string; role: string; enabled: number;
@@ -18,6 +17,7 @@ type Channel = { id: string; kind: string; name: string | null; secret_ref: stri
 type ProjectRow = { id: string; team_id: string };
 
 export default function AdminPage(props: { refreshKey: number }) {
+  const t = useT();
   const [projects] = useList<ProjectRow>("/api/projects", props.refreshKey);
   const teams = [...new Set(projects.map((p) => p.team_id))];
   const [users, reloadUsers] = useList<User>("/api/users", props.refreshKey);
@@ -34,7 +34,7 @@ export default function AdminPage(props: { refreshKey: number }) {
     && pairedChannel.paired_users.length > pairing.baseline);
   useEffect(() => {
     if (!pairing || pairDone) return;
-    const timer = setInterval(reloadChannels, 3000);  // WS 之外的保險輪詢
+    const timer = setInterval(reloadChannels, 3000);  // belt-and-braces poll
     return () => clearInterval(timer);
   }, [pairing, pairDone, reloadChannels]);
 
@@ -46,11 +46,11 @@ export default function AdminPage(props: { refreshKey: number }) {
 
   return (
     <div className="page">
-      <Section title="Users">
+      <Section title={t("adm.users")}>
         <InlineForm
-          fields={[{ name: "name", placeholder: "name" },
-                   { name: "role", placeholder: "viewer|operator|admin" }]}
-          submit="add"
+          fields={[{ name: "name", placeholder: t("adm.namePh") },
+                   { name: "role", placeholder: t("adm.rolePh") }]}
+          submit={t("c.add")}
           onSubmit={async (v) => {
             const created = await post<{ id: string; token: string }>(
               "/api/users", { name: v.name, role: v.role || "operator" });
@@ -58,61 +58,61 @@ export default function AdminPage(props: { refreshKey: number }) {
             reloadUsers();
           }} />
         {freshToken && (
-          <p className="notice">token（只顯示這一次）：<code>{freshToken}</code></p>
+          <p className="notice">{t("adm.tokenOnce")}<code>{freshToken}</code></p>
         )}
         <DataTable
-          head={["id", "name", "role", "enabled", "last used", ""]}
+          head={["id", t("c.name"), t("c.role"), "enabled", t("adm.headLastUsed"), ""]}
           rows={users.map((u) => [
             u.id, u.name, u.role, u.enabled ? "✅" : "⛔", u.last_used_at ?? "—",
             <button key={u.id} className="ghost" onClick={async () => {
               await post(`/api/users/${u.id}/enabled`, { enabled: !u.enabled });
               reloadUsers();
-            }}>{u.enabled ? "disable" : "enable"}</button>,
+            }}>{u.enabled ? t("c.disable") : t("c.enable")}</button>,
           ])} />
       </Section>
 
       <SecretsSection projects={projects} teams={teams} />
 
-      <Section title="Channels (Telegram)">
+      <Section title={t("adm.channels")}>
         <InlineForm
-          fields={[{ name: "name", placeholder: "名稱（例：值班通知）" },
-                   { name: "secret_ref",
-                     placeholder: "bot token（可直接貼原文，會自動安全存放）",
+          fields={[{ name: "name", placeholder: t("adm.channelNamePh") },
+                   { name: "secret_ref", placeholder: t("adm.botTokenPh"),
                      width: "24rem" }]}
-          submit="add telegram"
+          submit={t("adm.addTelegram")}
           onSubmit={async (v) => {
             await post("/api/channels", { kind: "telegram", name: v.name,
                                           secret_ref: v.secret_ref });
             reloadChannels();
           }} />
         <DataTable
-          head={["名稱", "kind", "secret", "狀態", "已配對", ""]}
+          head={[t("c.name"), "kind", "secret", t("c.status"), t("adm.headPaired"), ""]}
           rows={channels.map((c) => [
             c.name ?? c.kind, c.kind, c.secret_ref,
-            CHANNEL_STATUS[c.status] ?? c.status,
+            CHANNEL_STATUS[c.status] ? t(CHANNEL_STATUS[c.status]) : c.status,
             c.paired_users.join(", ") || "—",
             <span key={c.id} className="row-ops">
-              <button className="ghost" onClick={() => startPair(c)}>pair…</button>
+              <button className="ghost" onClick={() => startPair(c)}>{t("adm.pair")}</button>
               <button className="ghost" onClick={async () => {
                 await post(`/api/channels/${c.id}/enabled`, { enabled: !c.enabled });
                 reloadChannels();
-              }}>{c.enabled ? "停用" : "啟用"}</button>
+              }}>{c.enabled ? t("c.disable") : t("c.enable")}</button>
               <button className="ghost danger-text" onClick={async () => {
                 await del(`/api/channels/${c.id}`);
                 reloadChannels();
-              }}>刪除</button>
+              }}>{t("c.delete")}</button>
             </span>,
           ])} />
         {pairing && !pairDone && (
-          <p className="notice">⏳ 對 bot 傳：<code>/pair {pairing.code}</code>
-            （15 分鐘內有效）— 等待配對中，完成會自動顯示…</p>
+          <p className="notice">{t("adm.pairWaiting", { code: pairing.code })}</p>
         )}
         {pairing && pairDone && (
-          <p className="notice">✅ 配對完成：{pairedChannel!.paired_users.join(", ")}
-            <button className="ghost" onClick={() => setPairing(null)}>知道了</button>
+          <p className="notice">
+            {t("adm.pairDone", { users: pairedChannel!.paired_users.join(", ") })}
+            <button className="ghost"
+                    onClick={() => setPairing(null)}>{t("adm.gotIt")}</button>
           </p>
         )}
-        <p className="muted">新增 channel 後需重啟 <code>bastet serve</code> 才會開始輪詢。</p>
+        <p className="muted">{t("adm.restartHint")}</p>
       </Section>
     </div>
   );

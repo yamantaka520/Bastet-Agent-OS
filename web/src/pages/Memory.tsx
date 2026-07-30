@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { api } from "../api";
+import { useT } from "../i18n";
 import { Section } from "../ui";
 
 type Hit = { id: string; score: number; content: string; scope: string; type: string };
 
 export default function MemoryPage() {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [error, setError] = useState("");
@@ -20,16 +22,16 @@ export default function MemoryPage() {
 
   return (
     <div className="page">
-      <Section title="Team memory — Agent Memory OS">
+      <Section title={t("mem.title")}>
         <div className="inline-form">
-          <input placeholder="搜尋團隊記憶（keyword 或關聯召回）" value={query}
+          <input placeholder={t("mem.searchPh")} value={query}
                  style={{ width: "24rem" }}
                  onChange={(e) => setQuery(e.target.value)}
                  onKeyDown={(e) => e.key === "Enter" && query && search()} />
-          <button onClick={search} disabled={!query}>search</button>
+          <button onClick={search} disabled={!query}>{t("c.search")}</button>
         </div>
         {error && <p className="error">{error}</p>}
-        {hits !== null && hits.length === 0 && <p className="muted">no matches</p>}
+        {hits !== null && hits.length === 0 && <p className="muted">{t("c.noMatches")}</p>}
         {hits?.map((h) => (
           <article key={h.id} className="memory-hit">
             <div className="card-meta">
@@ -38,11 +40,9 @@ export default function MemoryPage() {
             <div>{h.content}</div>
           </article>
         ))}
-        <p className="muted">記憶由 <a href="https://github.com/yamantaka520/Agent-Memory-OS"
-          target="_blank" rel="noreferrer">Agent Memory OS</a> 提供：ACL 過濾後的
-          team/project 記憶；每個 run 的 context 也經由它的 context pack 組裝
-          （見 audit 的 context.assembled 事件）。完整管理介面用
-          <code>agent-memory-web</code>。</p>
+        <p className="muted">{t("mem.hint")}{" "}
+          <a href="https://github.com/yamantaka520/Agent-Memory-OS"
+             target="_blank" rel="noreferrer">Agent Memory OS</a></p>
       </Section>
     </div>
   );

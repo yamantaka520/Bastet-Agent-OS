@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, getToken, setToken, openEventSocket, Me } from "./api";
+import { LanguagePicker, useT } from "./i18n";
 import AdminPage from "./pages/Admin";
 import AuditPage from "./pages/Audit";
 import BoardPage from "./pages/Board";
@@ -11,17 +12,28 @@ import TemplatesPage from "./pages/Templates";
 
 const ROLE_RANK: Record<string, number> = { viewer: 0, operator: 1, admin: 2 };
 
-type Tab = { key: string; label: string; minRole: string };
+type Tab = { key: string; minRole: string };
 const TABS: Tab[] = [
-  { key: "board", label: "看板", minRole: "viewer" },
-  { key: "project", label: "專案", minRole: "viewer" },
-  { key: "resources", label: "資源", minRole: "viewer" },
-  { key: "org", label: "組織", minRole: "viewer" },
-  { key: "templates", label: "模板", minRole: "viewer" },
-  { key: "memory", label: "記憶", minRole: "viewer" },
-  { key: "admin", label: "管理", minRole: "admin" },
-  { key: "audit", label: "稽核", minRole: "viewer" },
+  { key: "board", minRole: "viewer" },
+  { key: "project", minRole: "viewer" },
+  { key: "resources", minRole: "viewer" },
+  { key: "org", minRole: "viewer" },
+  { key: "templates", minRole: "viewer" },
+  { key: "memory", minRole: "viewer" },
+  { key: "admin", minRole: "admin" },
+  { key: "audit", minRole: "viewer" },
 ];
+
+/** Version comes from the server (unauthenticated) so it is the version that
+ *  is actually running, not what the bundle was built against. */
+function useVersion(): string {
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    api<{ version: string }>("/api/version")
+      .then((v) => setVersion(v.version)).catch(() => {});
+  }, []);
+  return version;
+}
 
 export default function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -34,6 +46,8 @@ export default function App() {
 }
 
 function TokenGate({ onOk }: { onOk: (me: Me) => void }) {
+  const t = useT();
+  const version = useVersion();
   const [value, setValue] = useState(getToken());
   const [error, setError] = useState("");
   const submit = async () => {
@@ -41,25 +55,29 @@ function TokenGate({ onOk }: { onOk: (me: Me) => void }) {
     try {
       onOk(await api<Me>("/api/me"));
     } catch {
-      setError("token rejected — check ~/.bastet/api_token");
+      setError(t("app.tokenRejected"));
     }
   };
   return (
     <div className="center">
       <div className="token-card">
-        <h1>🐈 Bastet</h1>
-        <p>Paste your API token (<code>~/.bastet/api_token</code> or a user token):</p>
+        <h1>🐈 Bastet {version && <small className="ver">v{version}</small>}</h1>
+        <p>{t("app.tokenPrompt")}<br />
+          <code>{t("app.tokenHint")}</code></p>
         <input type="password" value={value} autoFocus
                onChange={(e) => setValue(e.target.value)}
                onKeyDown={(e) => e.key === "Enter" && submit()} />
-        <button onClick={submit}>Connect</button>
+        <button onClick={submit}>{t("app.connect")}</button>
         {error && <p className="error">{error}</p>}
+        <div className="row"><LanguagePicker /></div>
       </div>
     </div>
   );
 }
 
 function Workbench({ me }: { me: Me }) {
+  const t = useT();
+  const version = useVersion();
   const [tab, setTab] = useState("board");
   const [projects, setProjects] = useState<{ id: string }[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -92,11 +110,12 @@ function Workbench({ me }: { me: Me }) {
   return (
     <div className="app">
       <header>
-        <h1>🐈 Bastet Agent OS</h1>
+        <h1>🐈 Bastet Agent OS
+          {version && <small className="ver">v{version}</small>}</h1>
         <nav>
-          {TABS.filter((t) => rank >= ROLE_RANK[t.minRole]).map((t) => (
-            <button key={t.key} className={tab === t.key ? "tab active" : "tab"}
-                    onClick={() => setTab(t.key)}>{t.label}</button>
+          {TABS.filter((x) => rank >= ROLE_RANK[x.minRole]).map((x) => (
+            <button key={x.key} className={tab === x.key ? "tab active" : "tab"}
+                    onClick={() => setTab(x.key)}>{t(`tab.${x.key}`)}</button>
           ))}
         </nav>
         {tab === "board" && (
@@ -105,13 +124,14 @@ function Workbench({ me }: { me: Me }) {
           </select>
         )}
         <span className="me">{me.name} · {me.role}</span>
-        <button className="ghost" onClick={() => setRefreshKey((k) => k + 1)}>↻</button>
+        <LanguagePicker />
+        <button className="ghost" title={t("app.refresh")}
+                onClick={() => setRefreshKey((k) => k + 1)}>↻</button>
       </header>
 
       {tab === "board" && (projectId
         ? <BoardPage projectId={projectId} refreshKey={refreshKey} canOperate={canOperate} />
-        : <div className="page"><p className="muted">尚無專案 —
-            到「組織」頁建立第一個專案。</p></div>)}
+        : <div className="page"><p className="muted">{t("app.noProjects")}</p></div>)}
       {tab === "project" && <ProjectPage canOperate={canOperate} refreshKey={refreshKey} />}
       {tab === "resources" && <ResourcesPage isAdmin={isAdmin} refreshKey={refreshKey} />}
       {tab === "org" && <OrgPage canOperate={canOperate} refreshKey={refreshKey} />}

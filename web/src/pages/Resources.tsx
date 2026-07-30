@@ -1,4 +1,5 @@
-import { api, post, UsageRow } from "../api";
+import { post, UsageRow } from "../api";
+import { useT } from "../i18n";
 import { DataTable, InlineForm, Section, useList } from "../ui";
 
 type Resource = { id: string; kind: string; name: string; endpoint: string | null;
@@ -8,6 +9,7 @@ type Grant = { id: string; resource_id: string; scope_type: string; scope_id: st
                on_exceed: string; enabled: number };
 
 export default function ResourcesPage(props: { isAdmin: boolean; refreshKey: number }) {
+  const t = useT();
   const [resources, reloadResources] = useList<Resource>("/api/resources");
   const [grants, reloadGrants] = useList<Grant>("/api/grants");
   const [usage] = useList<UsageRow>("/api/usage");
@@ -20,7 +22,7 @@ export default function ResourcesPage(props: { isAdmin: boolean; refreshKey: num
 
   return (
     <div className="page">
-      <Section title="Resources">
+      <Section title={t("res.resources")}>
         {props.isAdmin && (
           <InlineForm
             fields={[{ name: "name", placeholder: "name" },
@@ -28,7 +30,7 @@ export default function ResourcesPage(props: { isAdmin: boolean; refreshKey: num
                      { name: "endpoint", placeholder: "endpoint base URL", width: "16rem" },
                      { name: "flavor", placeholder: "openai|anthropic" },
                      { name: "secret_ref", placeholder: "keyring:svc/name | env:NAME", width: "14rem" }]}
-            submit="add"
+            submit={t("c.add")}
             onSubmit={async (v) => {
               await post("/api/resources", { name: v.name, kind: v.kind || "llm",
                 endpoint: v.endpoint || null, api_flavor: v.flavor || null,
@@ -45,12 +47,12 @@ export default function ResourcesPage(props: { isAdmin: boolean; refreshKey: num
               <button className="ghost" onClick={async () => {
                 await post(`/api/resources/${r.id}/enabled`, { enabled: !r.enabled });
                 reloadResources();
-              }}>{r.enabled ? "disable" : "enable"}</button>
+              }}>{r.enabled ? t("c.disable") : t("c.enable")}</button>
             ) : null,
           ])} />
       </Section>
 
-      <Section title="Grants">
+      <Section title={t("res.grants")}>
         {props.isAdmin && (
           <InlineForm
             fields={[{ name: "resource", placeholder: "resource name/id" },
@@ -90,7 +92,7 @@ export default function ResourcesPage(props: { isAdmin: boolean; refreshKey: num
           })} />
       </Section>
 
-      <Section title="Usage by project / agent">
+      <Section title={t("res.usage")}>
         <DataTable
           head={["project", "agent", "precision", "runs", "in", "out", "cache read", "cost"]}
           rows={usage.map((u) => [

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api, post, Interaction, Job, JobDetail, UsageRow,
 } from "../api";
+import { useT } from "../i18n";
 
 const STATUS_BADGE: Record<string, string> = {
   in_progress: "🔵", blocked: "🟠", done: "✅", cancelled: "⚪", open: "⚪",
@@ -9,6 +10,7 @@ const STATUS_BADGE: Record<string, string> = {
 
 export default function BoardPage(props: { projectId: string; refreshKey: number;
                                            canOperate: boolean }) {
+  const t = useT();
   const { projectId, refreshKey } = props;
   const [jobs, setJobs] = useState<Job[]>([]);
   const [usage, setUsage] = useState<UsageRow[]>([]);
@@ -28,7 +30,7 @@ export default function BoardPage(props: { projectId: string; refreshKey: number
       <div className="toolbar">
         <span className="cost">Σ ${totalCost.toFixed(4)}</span>
         {props.canOperate && (
-          <button onClick={() => setShowDispatch(true)}>＋ dispatch</button>
+          <button onClick={() => setShowDispatch(true)}>{t("board.dispatch")}</button>
         )}
       </div>
       <Board jobs={jobs} onSelect={setSelected} />
@@ -45,6 +47,7 @@ export default function BoardPage(props: { projectId: string; refreshKey: number
 }
 
 function Board({ jobs, onSelect }: { jobs: Job[]; onSelect: (id: string) => void }) {
+  const t = useT();
   const columns = useMemo(() => {
     const names: string[] = [];
     for (const job of jobs) {
@@ -66,7 +69,8 @@ function Board({ jobs, onSelect }: { jobs: Job[]; onSelect: (id: string) => void
     <main className="board">
       {columns.map((col) => (
         <section key={col} className="column">
-          <h2>{col} <span className="count">{inColumn(col).length}</span></h2>
+          <h2>{col === "done" ? t("board.colDone") : col}
+            <span className="count">{inColumn(col).length}</span></h2>
           {inColumn(col).map((job) => (
             <button key={job.id} className={`card ${job.status}`}
                     onClick={() => onSelect(job.id)}>
@@ -81,6 +85,7 @@ function Board({ jobs, onSelect }: { jobs: Job[]; onSelect: (id: string) => void
 }
 
 function DispatchModal({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+  const t = useT();
   const [agents, setAgents] = useState<{ id: string }[]>([]);
   const [templates, setTemplates] = useState<{ id: string }[]>([]);
   const [resources, setResources] = useState<{ id: string; name: string; kind: string }[]>([]);
@@ -115,10 +120,10 @@ function DispatchModal({ projectId, onClose }: { projectId: string; onClose: () 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Dispatch a job</h2>
-        <input placeholder="title" value={form.title}
+        <h2>{t("board.dispatchTitle")}</h2>
+        <input placeholder={t("board.titlePh")} value={form.title}
                onChange={(e) => setForm({ ...form, title: e.target.value })} />
-        <textarea placeholder="task prompt / spec" rows={5} value={form.prompt}
+        <textarea placeholder={t("board.promptPh")} rows={5} value={form.prompt}
                   onChange={(e) => setForm({ ...form, prompt: e.target.value })} />
         <div className="row">
           <select value={form.agent_id}
@@ -127,18 +132,19 @@ function DispatchModal({ projectId, onClose }: { projectId: string; onClose: () 
           </select>
           <select value={form.template_id}
                   onChange={(e) => setForm({ ...form, template_id: e.target.value })}>
-            <option value="">single-stage</option>
+            <option value="">{t("board.singleStage")}</option>
             {templates.map((t) => <option key={t.id} value={t.id}>{t.id}</option>)}
           </select>
           <select value={form.resource_id}
                   onChange={(e) => setForm({ ...form, resource_id: e.target.value })}>
-            <option value="">direct (subscription)</option>
+            <option value="">{t("board.direct")}</option>
             {resources.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         </div>
         <div className="row">
-          <button onClick={go} disabled={!form.prompt || !form.agent_id}>Dispatch</button>
-          <button className="ghost" onClick={onClose}>Cancel</button>
+          <button onClick={go}
+                  disabled={!form.prompt || !form.agent_id}>{t("board.go")}</button>
+          <button className="ghost" onClick={onClose}>{t("c.cancel")}</button>
         </div>
         {error && <p className="error">{error}</p>}
       </div>
@@ -148,6 +154,7 @@ function DispatchModal({ projectId, onClose }: { projectId: string; onClose: () 
 
 function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   { jobId: string; canOperate: boolean; onClose: () => void; onChanged: () => void }) {
+  const t = useT();
   const [job, setJob] = useState<JobDetail | null>(null);
   const [comment, setComment] = useState("");
   const [interactions, setInteractions] = useState<Record<string, Interaction[]>>({});
@@ -193,17 +200,18 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
     <aside className="drawer">
       <button className="ghost close" onClick={onClose}>✕</button>
       <h2>{job.title}</h2>
-      <p className="card-meta">{job.id} · stage <b>{job.stage}</b> · {job.status}</p>
+      <p className="card-meta">{job.id} · {t("board.jobStage")} <b>{job.stage}</b> · {job.status}</p>
       <pre className="spec">{job.spec_md}</pre>
 
       {canOperate && waitingApproval && (
         <div className="approval">
-          <h3>⏸ waiting for your approval</h3>
-          <input placeholder="comment (optional)" value={comment}
+          <h3>{t("board.waitingApproval")}</h3>
+          <input placeholder={t("board.commentPh")} value={comment}
                  onChange={(e) => setComment(e.target.value)} />
           <div>
-            <button onClick={() => decide(true)}>Approve</button>
-            <button className="danger" onClick={() => decide(false)}>Reject</button>
+            <button onClick={() => decide(true)}>{t("board.approve")}</button>
+            <button className="danger"
+                    onClick={() => decide(false)}>{t("board.reject")}</button>
           </div>
         </div>
       )}
@@ -211,17 +219,18 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
       {canOperate && Object.entries(interactions).map(([runId, items]) =>
         items.filter((i) => i.status === "pending").map((i) => (
           <div className="approval" key={i.request_id}>
-            <h3>✋ {i.kind} — run {runId}</h3>
+            <h3>✋ {i.kind} — run {runId} · {t("board.needsYou")}</h3>
             <pre className="spec">{i.payload_json}</pre>
             <div>
-              <button onClick={() => answer(runId, i.request_id, true)}>Allow</button>
-              <button className="danger"
-                      onClick={() => answer(runId, i.request_id, false)}>Deny</button>
+              <button onClick={() =>
+                answer(runId, i.request_id, true)}>{t("board.allow")}</button>
+              <button className="danger" onClick={() =>
+                answer(runId, i.request_id, false)}>{t("board.deny")}</button>
             </div>
           </div>
         )))}
 
-      <h3>Runs</h3>
+      <h3>{t("board.runs")}</h3>
       <table>
         <thead><tr><th>stage</th><th>#</th><th>agent</th><th>status</th><th>cost</th></tr></thead>
         <tbody>
@@ -235,12 +244,12 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
         </tbody>
       </table>
 
-      <h3>Gates</h3>
+      <h3>{t("board.gates")}</h3>
       <ul className="gates">
         {job.gates.map((g, i) => (
           <li key={i}>
             <b>{g.gate_type}</b> → {g.verdict}
-            <span className="card-meta"> by {g.reviewer_kind}:{g.reviewer_id}</span>
+            <span className="card-meta"> {t("board.by")} {g.reviewer_kind}:{g.reviewer_id}</span>
             {g.detail_md && <div className="gate-detail">{g.detail_md}</div>}
           </li>
         ))}
@@ -248,7 +257,7 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
 
       {diff && (
         <>
-          <h3>Diff</h3>
+          <h3>{t("board.diff")}</h3>
           <pre className="spec diff">{diff}</pre>
         </>
       )}

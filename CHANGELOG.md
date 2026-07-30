@@ -3,7 +3,31 @@
 All notable changes to Bastet Agent OS. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
-## [Unreleased]
+Every user-visible change bumps `__version__` in
+`src/bastet_agent_os/__init__.py` and adds a section here; `web/package.json`
+follows the same number and the WebUI prints it beside the title.
+`tests/test_version.py` fails the build if the three drift apart.
+
+## [0.5.0] - 2026-07-30
+
+### Added — multi-language UI (zh-Hant / zh-Hans / en / ja / ko)
+- `web/src/i18n/`: every visible string goes through `t()`. `zh-Hant.ts` is the
+  canonical dictionary and the other four locales are typed against it, so a
+  missing translation is a compile error rather than a Chinese string leaking
+  into an English page. New UI work must add keys there.
+- Locale picked from `localStorage` → `navigator.languages` (zh-TW/HK/MO →
+  traditional, other zh → simplified), switchable in the header and remembered
+  per browser; `<html lang>` follows it.
+- Workflow vocabulary (14 roles, 4 gate types) is localised by its stable id,
+  so a stage that stores `role: "reviewer"` renders as 審查者 / 审查者 /
+  Reviewer / レビュアー / 검토자. Built-in preset stage text stays as authored:
+  the preset name becomes the template id on copy, so translating the display
+  would desync it from what is saved.
+- Version badge next to the title, from the new unauthenticated
+  `GET /api/version`; `pyproject.toml` now takes its version from
+  `__init__.py` (single source of truth).
+
+## [0.4.0] - 2026-07-29
 
 ### Added — one-click install, executor accounts, memory view
 - `install.sh`: one-click installer (macOS/Linux) — Bastet + latest Agent
