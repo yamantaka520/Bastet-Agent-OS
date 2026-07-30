@@ -168,6 +168,9 @@ def test_job_detail_returns_the_failure_reason(tmp_path):
     try:
         db.write("INSERT INTO projects(id, team_id, repo_path, created_at, updated_at) "
                  "VALUES('p','t','/x',?,?)", (now(), now()))
+        db.write("INSERT INTO agents(id, amos_agent_id, name, executor_type, "
+                 "created_at, updated_at) VALUES('a','a','A','fake',?,?)",
+                 (now(), now()))
         db.write("INSERT INTO jobs(id, project_id, stages_snapshot_json, title, stage, "
                  "status, created_at, updated_at) VALUES('j','p','[]','t','s',"
                  "'blocked',?,?)", (now(), now()))
