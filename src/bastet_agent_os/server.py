@@ -325,6 +325,55 @@ def create_app(home: Home) -> FastAPI:
             log.warning("AMOS unavailable (%s); org sync skipped", type(exc).__name__)
             return None
 
+    def _sync_project_membership(project_id: str, agent_id: str) -> bool:
+        """Make a role assignment real in AMOS too.
+
+        Bastet's project_agent_roles says WHO plays a role; AMOS project
+        membership is what gates that agent's access to the project's memory
+        (and what the federation org view counts). Assigning a role without
+        this leaves the agent outside the project's memory scope.
+        AMOS invariant: project members must be team members first."""
+        client = amos_client()
+        if client is None:
+            return False
+        project = db.one("SELECT team_id FROM projects WHERE id=?", (project_id,))
+        agent = db.one("SELECT amos_agent_id FROM agents WHERE id=?", (agent_id,))
+        if project is None or agent is None:
+            return False
+        try:
+            client.register_agent(agent["amos_agent_id"])
+            client.add_team_member(project["team_id"], agent["amos_agent_id"])
+            client.add_project_member(project_id, agent["amos_agent_id"])
+            return True
+        except Exception as exc:
+            log.warning("AMOS membership sync failed (%s/%s): %s",
+                        project_id, agent_id, exc)
+            return False
+
+    def _drop_project_membership(project_id: str, agent_id: str) -> None:
+        """Called when an agent holds no more roles in the project — its
+        project-scoped memory access goes with the last role. Team membership
+        is left alone (other projects may rely on it)."""
+        client = amos_client()
+        agent = db.one("SELECT amos_agent_id FROM agents WHERE id=?", (agent_id,))
+        if client is None or agent is None:
+            return
+        try:
+            client.remove_project_member(project_id, agent["amos_agent_id"])
+        except Exception as exc:
+            log.warning("AMOS membership removal failed: %s", exc)
+
+    def _reconcile_memberships() -> int:
+        """Idempotent backfill: every existing role assignment gets its AMOS
+        membership. Runs at startup so assignments made before this existed
+        (or while AMOS was down) converge."""
+        synced = 0
+        for row in db.query("SELECT DISTINCT project_id, agent_id FROM "
+                            "project_agent_roles"):
+            if _sync_project_membership(row["project_id"], row["agent_id"]):
+                synced += 1
+        return synced
+
     # ---- endpoints ----------------------------------------------------------
 
     @app.post("/api/projects")
@@ -952,18 +1001,27 @@ def create_app(home: Home) -> FastAPI:
                        "agent_id=? AND role=?", (project_id, agent_id, role))
         if cur.rowcount != 1:
             raise HTTPException(status_code=404, detail="assignment not found")
+        remaining = db.one("SELECT COUNT(*) AS n FROM project_agent_roles "
+                           "WHERE project_id=? AND agent_id=?",
+                           (project_id, agent_id))["n"]
+        if not remaining:
+            _drop_project_membership(project_id, agent_id)
         db.audit(auth.actor, "role.unassign", "project", project_id,
-                 {"agent": agent_id, "role": role})
-        return {"removed": True}
+                 {"agent": agent_id, "role": role,
+                  "membership_removed": not remaining})
+        return {"removed": True, "membership_removed": not remaining}
 
     @app.post("/api/roles")
     def assign_role(r: RoleIn, auth: Auth = Depends(require_role("operator"))):
         db.write("INSERT OR REPLACE INTO project_agent_roles(project_id, agent_id, role, "
                  "preference) VALUES(?,?,?,?)",
                  (r.project_id, r.agent_id, r.role, r.preference))
+        member = _sync_project_membership(r.project_id, r.agent_id)
         db.audit(auth.actor, "role.assign", "project", r.project_id,
-                 {"agent": r.agent_id, "role": r.role})
-        return {"ok": True}
+                 {"agent": r.agent_id, "role": r.role, "amos_member": member})
+        return {"ok": True, "amos_member": member,
+                "note": ("已同步為 AMOS 專案成員（可讀取該專案記憶）" if member
+                         else "AMOS 無法連線 — 成員身分待下次啟動自動補上")}
 
     @app.get("/api/jobs", dependencies=[Depends(require_role("viewer"))])
     def list_jobs(project_id: str | None = None, limit: int = 50):
@@ -1283,5 +1341,9 @@ def create_app(home: Home) -> FastAPI:
 table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #ccc;padding:.4rem .6rem;text-align:left}}</style>
 <h1>🐈 Bastet Agent OS</h1><p>M1 minimal status page. Recent runs:</p>
 <table><tr><th>run</th><th>title</th><th>status</th><th>cost</th><th>precision</th></tr>{rows}</table>"""
+
+    synced = _reconcile_memberships()
+    if synced:
+        log.info("AMOS membership reconciled for %d role assignments", synced)
 
     return app

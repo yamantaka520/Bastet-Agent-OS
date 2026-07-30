@@ -64,3 +64,30 @@ def test_local_only_projects_are_listed(fed):
     amos.delete_project("proj-remote")  # deletion propagated from another node
     org = client.get("/api/org").json()
     assert "proj-remote" in org["local_only"]  # local binding/history survives
+
+
+def test_role_assignment_syncs_amos_membership(fed):
+    """Assigning a role must make the agent a real AMOS project member —
+    that membership is what gates project-scoped memory access."""
+    client, amos = fed
+    client.post("/api/org/bind", json={"project_id": "proj-remote",
+                                       "repo_path": "/tmp/repo"})
+    client.post("/api/agents", json={"id": "ag-worker", "name": "Worker",
+                                     "executor_type": "claude-code"})
+
+    resp = client.post("/api/roles", json={"project_id": "proj-remote",
+                                           "agent_id": "ag-worker",
+                                           "role": "engineer"})
+    assert resp.status_code == 200 and resp.json()["amos_member"] is True
+    project = next(p for p in amos.list_projects() if p["id"] == "proj-remote")
+    assert "ag-worker" in project["members"]        # org view now counts it
+
+    # a second role keeps membership; dropping the last one revokes it
+    client.post("/api/roles", json={"project_id": "proj-remote",
+                                    "agent_id": "ag-worker", "role": "reviewer"})
+    client.delete("/api/roles?project_id=proj-remote&agent_id=ag-worker&role=engineer")
+    project = next(p for p in amos.list_projects() if p["id"] == "proj-remote")
+    assert "ag-worker" in project["members"]
+    client.delete("/api/roles?project_id=proj-remote&agent_id=ag-worker&role=reviewer")
+    project = next(p for p in amos.list_projects() if p["id"] == "proj-remote")
+    assert "ag-worker" not in project["members"]
