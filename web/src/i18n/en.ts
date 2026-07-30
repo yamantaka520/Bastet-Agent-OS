@@ -364,6 +364,7 @@ const en: Dict = {
   "res.test.failed": "test failed",
   "res.testAt": "tested {when}",
   "res.testHint": "The test does what an agent would: an LLM lists models (no tokens spent), an MCP server completes an initialize handshake, a skill source is looked for on the Bastet host, and a git token is verified against the provider.",
+  "res.problem.endpoint-is-operation-url": "endpoint is a full operation URL (use the base)",
 };
 
 export default en;

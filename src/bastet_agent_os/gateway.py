@@ -134,7 +134,8 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
             body = inject_stream_options(body)
 
         try:
-            api_key = secrets_store.resolve(resource["secret_ref"])
+            api_key = secrets_store.resolve(
+                secrets_store.expand(ctx.db, resource["secret_ref"] or ""))
         except secrets_store.SecretError as exc:
             ctx.reservations.settle(grant)
             return JSONResponse({"error": f"resource credential error: {exc}"}, status_code=502)
@@ -245,7 +246,8 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
             return JSONResponse({"error": str(exc)}, status_code=429)
 
         try:
-            api_key = secrets_store.resolve(resource["secret_ref"])
+            api_key = secrets_store.resolve(
+                secrets_store.expand(ctx.db, resource["secret_ref"] or ""))
         except secrets_store.SecretError as exc:
             ctx.reservations.settle(grant)
             return JSONResponse({"error": f"resource credential error: {exc}"}, status_code=502)

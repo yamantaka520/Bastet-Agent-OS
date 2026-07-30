@@ -364,6 +364,7 @@ const ko: Dict = {
   "res.test.failed": "테스트 실패",
   "res.testAt": "{when} 에 테스트",
   "res.testHint": "테스트는 agent 가 실제로 하는 방식으로 확인합니다: LLM 은 모델 목록（토큰 소모 없음）, MCP 는 initialize 핸드셰이크, 스킬은 출처가 Bastet 호스트에 있는지, Git 은 토큰이 유효한지 검증합니다.",
+  "res.problem.endpoint-is-operation-url": "엔드포인트가 전체 작업 URL 입니다（기본 URL 을 입력하세요）",
 };
 
 export default ko;

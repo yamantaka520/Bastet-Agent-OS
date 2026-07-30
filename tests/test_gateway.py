@@ -86,3 +86,25 @@ def test_terminal_run_is_rejected(gateway_client):
     resp = client.post("/v1/messages", json={"model": "x", "messages": []},
                        headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 401
+
+
+def test_resource_credential_can_point_into_the_credential_pool(gateway_client,
+                                                                tmp_path):
+    """Resources created through the WebUI picker store secret:<id>. The gateway
+    must follow that pointer, or every such resource 502s on first use."""
+    client, db, captured = gateway_client
+    from bastet_agent_os.db import now as _now
+
+    key = tmp_path / "pooled"
+    key.write_text("sk-pooled")
+    db.write("INSERT INTO resources(id, kind, name, secret_ref, config_json, "
+             "created_at, updated_at) VALUES('sec-p','secret','shared',?,'{}',?,?)",
+             (f"file:{key}", _now(), _now()))
+    db.write("UPDATE resources SET secret_ref='secret:sec-p' WHERE id='res1'")
+
+    token = run_tokens.issue(db, "run1", ttl_seconds=60)
+    resp = client.post("/v1/messages", json={"model": "claude-sonnet-4-20250514",
+                                             "messages": []},
+                       headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    assert captured["headers"]["x-api-key"] == "sk-pooled"

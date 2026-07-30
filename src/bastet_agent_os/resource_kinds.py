@@ -50,6 +50,21 @@ CONFIG_FIELDS = {"default_model", "mcp_transport", "mcp_command", "mcp_url",
 MCP_TRANSPORTS = ("stdio", "http")
 GIT_PROVIDERS = ("github", "gitlab", "custom")
 
+# People paste the vendor's example URL, which is the operation, not the base.
+# The gateway appends the operation path itself, so storing a full one produces
+# .../chat/completions/v1/chat/completions at run time — catch it while editing.
+OPERATION_SUFFIXES = ("/chat/completions", "/completions", "/messages",
+                      "/responses", "/embeddings")
+
+
+def base_endpoint(endpoint: str | None) -> tuple[str, bool]:
+    """Strip a trailing operation path. Returns (base, stripped_anything)."""
+    base = (endpoint or "").rstrip("/")
+    for suffix in OPERATION_SUFFIXES:
+        if base.lower().endswith(suffix):
+            return base[: -len(suffix)].rstrip("/"), True
+    return base, False
+
 
 def catalog() -> dict[str, Any]:
     """Everything the UI needs to render the pool: kinds, groups, enums."""
@@ -93,6 +108,11 @@ def validate(kind: str, endpoint: str | None, secret_ref: str | None,
             problems.append("mcp-url-missing")
     if kind == "api" and not endpoint:
         problems.append("endpoint-missing")
+    if kind in ("llm", "image", "video", "music", "tts", "stt"):
+        if not endpoint:
+            problems.append("endpoint-missing")
+        elif base_endpoint(endpoint)[1]:
+            problems.append("endpoint-is-operation-url")
     if kind == "skill" and not config.get("skill_source"):
         problems.append("skill-source-missing")
     if kind == "git":

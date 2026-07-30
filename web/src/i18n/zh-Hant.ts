@@ -383,6 +383,7 @@ const zhHant = {
   "res.test.failed": "測試失敗",
   "res.testAt": "測試於 {when}",
   "res.testHint": "測試會用 agent 實際會走的方式檢查：LLM 列出模型（不會消耗 token）、MCP 完成一次 initialize 交握、Skill 檢查來源是否存在於 Bastet 主機、Git 驗證 token 可用。",
+  "res.problem.endpoint-is-operation-url": "端點是完整的操作網址（應填基底網址）",
 } as const;
 
 export type Dict = { [K in keyof typeof zhHant]: string };

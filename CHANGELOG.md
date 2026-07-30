@@ -8,6 +8,19 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.7.1] - 2026-07-31
+
+### Fixed
+- The gateway now follows a resource's `secret:<id>` credential pointer. Every
+  resource created with the new credential picker would have failed its first
+  metered request with "unknown secret ref scheme: 'secret'" — found by testing
+  a real resource with the new test button.
+- An endpoint stored as a full operation URL (`…/chat/completions`) is flagged
+  while editing instead of failing at dispatch: the gateway appends its own
+  operation path, so such a resource would request
+  `…/chat/completions/v1/chat/completions`. The LLM test probes the base so the
+  check is still fair, and warns about the shape even when the credential works.
+
 ## [0.7.0] - 2026-07-31
 
 ### Added — per-resource test button

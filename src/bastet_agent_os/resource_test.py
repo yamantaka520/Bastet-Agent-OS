@@ -114,7 +114,9 @@ def _get(url: str, headers: dict[str, str]) -> dict[str, Any]:
 def _test_llm(row, secret: str | None) -> dict[str, Any]:
     """List models: the cheapest call that proves endpoint + key together.
     Deliberately no completion request — testing must not cost tokens."""
-    base = _base(row["endpoint"])
+    from .resource_kinds import base_endpoint
+
+    base, stripped = base_endpoint(row["endpoint"])
     if not base:
         return {"status": "failed", "checked": "endpoint",
                 "detail": "no endpoint configured"}
@@ -133,6 +135,14 @@ def _test_llm(row, secret: str | None) -> dict[str, Any]:
     result["checked"] = f"GET {url}"
     if result["status"] == "ok":
         result["detail"] = _count_models(result["detail"])
+    if stripped:
+        # the stored endpoint is an operation URL; the gateway would append its
+        # own path to it at run time, so say so even when the probe passed
+        result["status"] = "warn" if result["status"] == "ok" else result["status"]
+        result["detail"] = (f"{result['detail']} — the stored endpoint is a full "
+                            f"operation URL; the pool wants the base "
+                            f"({base}), or runs will hit "
+                            f"{_base(row['endpoint'])}/v1/chat/completions.")
     return result
 
 

@@ -222,3 +222,25 @@ def test_test_endpoint_records_and_audits_the_verdict(tmp_path, stub):
     assert any(r["action"] == "resource.test.ok"
                for r in client.get("/api/audit?limit=50").json())
     assert client.post("/api/resources/res_ghost/test").status_code == 400
+
+
+# ---- endpoint shape: the mistake that only shows up at run time --------------------
+
+def test_operation_url_endpoint_is_flagged_before_a_run_wastes_it(db, stub, tmp_path):
+    """The gateway appends its own operation path, so storing a full
+    chat/completions URL breaks at dispatch time. Say it at config time."""
+    from bastet_agent_os import resource_kinds
+    full = f"{stub}/v1/chat/completions"
+    assert resource_kinds.validate("llm", full, "env:K", {}) \
+        == ["endpoint-is-operation-url"]
+    assert resource_kinds.base_endpoint(full) == (f"{stub}/v1", True)
+    assert resource_kinds.base_endpoint(f"{stub}/v1") == (f"{stub}/v1", False)
+
+    key = tmp_path / "k"
+    key.write_text("good")
+    add(db, "llm-op", "llm", endpoint=full, flavor="openai", ref=f"file:{key}")
+    state = resource_test.run(db, "llm-op", "tester")
+    # probed the base (so the check is fair) and still warned about the shape
+    assert state["checked"] == f"GET {stub}/v1/models"
+    assert state["status"] == "warn" and "operation URL" in state["detail"]
+    assert "credential accepted" in state["detail"]   # the key itself is fine

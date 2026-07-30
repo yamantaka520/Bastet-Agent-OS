@@ -384,6 +384,7 @@ const zhHans: Dict = {
   "res.test.failed": "测试失败",
   "res.testAt": "测试于 {when}",
   "res.testHint": "测试会用 agent 实际会走的方式检查：LLM 列出模型（不会消耗 token）、MCP 完成一次 initialize 握手、Skill 检查来源是否存在于 Bastet 主机、Git 验证 token 可用。",
+  "res.problem.endpoint-is-operation-url": "端点是完整的操作网址（应填基础网址）",
 };
 
 export default zhHans;

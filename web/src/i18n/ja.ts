@@ -364,6 +364,7 @@ const ja: Dict = {
   "res.test.failed": "テスト失敗",
   "res.testAt": "テスト実行 {when}",
   "res.testHint": "テストは agent が実際に行う方法で確認します：LLM はモデル一覧（トークンは消費しません）、MCP は initialize ハンドシェイク、スキルは取得元が Bastet ホストに存在するか、Git はトークンが使えるかを検証します。",
+  "res.problem.endpoint-is-operation-url": "エンドポイントが操作 URL です（ベース URL を指定してください）",
 };
 
 export default ja;
