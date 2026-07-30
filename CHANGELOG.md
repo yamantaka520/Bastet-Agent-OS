@@ -8,6 +8,15 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.9.5] - 2026-07-31
+
+### Fixed
+- A run where nothing could be dispatched (no agent assigned to the tasks' roles
+  and no fallback) left the project sitting in `running` with no work and no
+  runner — `maybe_complete` had zero jobs to count. The runner now settles
+  honestly: back to `ready`, with `project.runner.idle` in the audit log and a
+  hint to assign agents. Found by running the control path on the host.
+
 ## [0.9.4] - 2026-07-31
 
 ### Fixed

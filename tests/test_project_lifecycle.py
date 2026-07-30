@@ -244,3 +244,24 @@ def test_executors_do_not_truncate_the_payload_summary():
     payload = json.dumps({"tasks": tasks}, ensure_ascii=False)
     assert len(payload) > 2000
     assert len(runner_mod.parse_tasks(payload)) == 8
+
+
+async def test_a_project_with_no_agents_does_not_sit_in_running_forever(runner):
+    """Live finding: every task was skipped (no agent assigned), so no job
+    existed, maybe_complete had nothing to count, and the project stayed
+    'running' with no runner behind it."""
+    r, _, db = runner
+    db.write("DELETE FROM project_agent_roles WHERE project_id='proj1'")
+    lifecycle.save_task_plan(db, "proj1", [{"title": "T1", "spec": "one"}],
+                             by="pm", confirmed=True)
+    lifecycle.apply(db, "proj1", "confirm_plan")
+    lifecycle.apply(db, "proj1", "start")
+
+    r.start("proj1", "")                 # no fallback agent either
+    for _ in range(200):
+        if lifecycle.status_of(db, "proj1") != lifecycle.RUNNING:
+            break
+        await asyncio.sleep(0.02)
+    assert lifecycle.status_of(db, "proj1") == lifecycle.READY   # honestly parked
+    assert db.query("SELECT * FROM audit_log WHERE action='project.runner.idle'")
+    assert db.query("SELECT * FROM audit_log WHERE action='project.task.skipped'")

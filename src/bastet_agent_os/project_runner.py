@@ -276,7 +276,26 @@ class ProjectRunner:
             self._remember_job(project_id, index, job_id)
             if await self._await_job(project_id, job_id) is None:
                 return
-        lifecycle.maybe_complete(self.db, project_id, actor or "runner")
+        self._settle(project_id, actor or "runner")
+
+    def _settle(self, project_id: str, actor: str) -> None:
+        """The loop ran out of tasks. Either everything finished (→ maintenance,
+        awaiting acceptance) or nothing could be dispatched at all — in which
+        case say so and go back to ready instead of sitting in `running` with no
+        work and no runner."""
+        if lifecycle.maybe_complete(self.db, project_id, actor):
+            return
+        if lifecycle.status_of(self.db, project_id) != lifecycle.RUNNING:
+            return
+        progress = lifecycle.job_progress(self.db, project_id)
+        if progress["active"] or progress["blocked"]:
+            return                      # something is still moving; leave it
+        lifecycle.apply(self.db, project_id, "stop", actor,
+                        {"reason": "runner had nothing it could dispatch",
+                         "jobs": progress})
+        self.db.audit(actor, "project.runner.idle", "project", project_id,
+                      {"hint": "assign agents to the project's roles, or pick a "
+                               "fallback agent when starting"})
 
     def _agent_for(self, project_id: str, task: dict, fallback: str) -> str | None:
         """A task may name a role; otherwise use the caller's agent, otherwise
