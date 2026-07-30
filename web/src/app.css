@@ -205,7 +205,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
                  margin-bottom: .2rem; }
 .chat-msg-body { white-space: pre-wrap; word-break: break-word; }
 .chat-files { display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .35rem; }
-.chat-compose textarea { width: 100%; }
+.chat-compose textarea { width: 100%; min-height: 4.5rem; max-height: 20rem;
+                         resize: vertical; overflow-y: auto; line-height: 1.5; }
 .chat-pending { border: 1px solid var(--warn, #d9a05b); border-radius: 8px;
                 padding: .5rem .6rem; }
 .chat-pending-row { display: flex; align-items: center; gap: .6rem;

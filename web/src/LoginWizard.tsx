@@ -4,6 +4,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { del, openLoginSocket, post } from "./api";
 import { useT } from "./i18n";
+import { onEnterSubmit } from "./ui";
 
 /** Guided login: the executor's login command runs in a server-side PTY and
  *  this is a REAL terminal for it (xterm.js) — arrow keys, Enter, full TUI
@@ -92,7 +93,7 @@ export default function LoginWizard({ title, executorType, accountId, onClose }:
             ))}
             <input placeholder={t("lw.pastePh")} value={paste} style={{ flex: 1 }}
                    onChange={(e) => setPaste(e.target.value)}
-                   onKeyDown={(e) => e.key === "Enter" && sendPaste()} />
+                   onKeyDown={onEnterSubmit(sendPaste)} />
             <button onClick={sendPaste} disabled={!paste}>{t("c.send")}</button>
           </div>
         )}

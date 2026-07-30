@@ -8,6 +8,23 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.9.6] - 2026-07-31
+
+### Fixed
+- Long chat messages are no longer cut off while being typed. Two causes, both
+  fixed: (1) with a CJK input method Enter commits the candidate being composed,
+  and the raw `Enter` handler treated that as "send", firing off a half-typed
+  message — a shared `onEnterSubmit()` now ignores composition (`isComposing`,
+  `keyCode 229`, `Process`) and Shift+Enter, and every Enter-to-submit box in the
+  UI goes through it; (2) the draft lived in the component that reloads on every
+  WS event, so a background event arriving mid-composition wiped the characters
+  in flight — the composer is now its own component owning its draft, and the
+  conversation pauses its background reloads while a message is unsent.
+- The message box grows with the text (up to 20rem, then scrolls) instead of
+  hiding a long message inside three rows, and attachments can be cleared.
+- `tests/test_i18n.py` fails if a raw Enter handler or an externally-owned chat
+  draft comes back.
+
 ## [0.9.5] - 2026-07-31
 
 ### Fixed

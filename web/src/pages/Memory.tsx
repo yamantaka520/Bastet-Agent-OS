@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import { useT } from "../i18n";
-import { Section } from "../ui";
+import { Section, onEnterSubmit } from "../ui";
 
 type Hit = { id: string; score: number; content: string; scope: string; type: string };
 
@@ -27,7 +27,7 @@ export default function MemoryPage() {
           <input placeholder={t("mem.searchPh")} value={query}
                  style={{ width: "24rem" }}
                  onChange={(e) => setQuery(e.target.value)}
-                 onKeyDown={(e) => e.key === "Enter" && query && search()} />
+                 onKeyDown={onEnterSubmit(() => query && search())} />
           <button onClick={search} disabled={!query}>{t("c.search")}</button>
         </div>
         {error && <p className="error">{error}</p>}

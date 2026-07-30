@@ -2,6 +2,26 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import { useT } from "./i18n";
 
+/** Enter-to-submit that survives an IME.
+ *
+ *  With a Chinese/Japanese/Korean input method, Enter commits the candidate the
+ *  user is composing — it is not "send". Firing on that key sends a half-typed
+ *  message and truncates what they were writing, so composition (and Shift for
+ *  a newline) must be checked first. `keyCode === 229` catches browsers that
+ *  report a generic "Process" key instead of setting isComposing. */
+export function onEnterSubmit(submit: () => void, allowShiftNewline = true) {
+  return (event: React.KeyboardEvent) => {
+    const native = event.nativeEvent as KeyboardEvent;
+    if (native.isComposing || native.keyCode === 229 || event.key === "Process") {
+      return;
+    }
+    if (event.key !== "Enter") return;
+    if (allowShiftNewline && event.shiftKey) return;
+    event.preventDefault();
+    submit();
+  };
+}
+
 /** List loader; re-fetches when `refreshKey` changes (WS events bump it). */
 export function useList<T>(path: string, refreshKey?: number): [T[], () => void] {
   const [rows, setRows] = useState<T[]>([]);

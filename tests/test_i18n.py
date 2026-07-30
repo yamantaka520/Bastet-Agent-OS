@@ -40,6 +40,27 @@ def test_every_translated_key_exists():
     assert used - canonical == set()
 
 
+def test_enter_to_submit_goes_through_the_ime_safe_helper():
+    """With a CJK input method, Enter commits the candidate being composed. A
+    raw `e.key === "Enter"` handler sends a half-typed message — which is
+    exactly what truncated long chat messages."""
+    offenders = {p.name for p in components()
+                 if 'e.key === "Enter"' in p.read_text()
+                 or 'event.key === "Enter"' in p.read_text()}
+    assert offenders - {"ui.tsx"} == set(), (
+        "use onEnterSubmit() from ui.tsx instead of a raw Enter handler")
+
+
+def test_chat_composer_owns_its_own_draft():
+    """The draft must not live in a component that reloads on WS events: a
+    re-render during composition drops the characters being composed."""
+    chat = (WEB / "pages" / "Chat.tsx").read_text()
+    assert "function Composer(" in chat
+    composer = chat.split("function Composer(", 1)[1]
+    assert "useState(\"\")" in composer          # draft state is local to it
+    assert "onEnterSubmit(submit)" in composer
+
+
 def test_no_hardcoded_cjk_outside_the_dictionaries():
     """New UI strings must land in i18n/, not inline in a component."""
     offenders = {p.name: CJK_RE.findall(p.read_text())[:3]

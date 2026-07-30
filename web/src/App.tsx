@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, getToken, setToken, openEventSocket, Me } from "./api";
 import { LanguagePicker, useT } from "./i18n";
+import { onEnterSubmit } from "./ui";
 import AdminPage from "./pages/Admin";
 import AuditPage from "./pages/Audit";
 import BoardPage from "./pages/Board";
@@ -68,7 +69,7 @@ function TokenGate({ onOk }: { onOk: (me: Me) => void }) {
           <code>{t("app.tokenHint")}</code></p>
         <input type="password" value={value} autoFocus
                onChange={(e) => setValue(e.target.value)}
-               onKeyDown={(e) => e.key === "Enter" && submit()} />
+               onKeyDown={onEnterSubmit(submit)} />
         <button onClick={submit}>{t("app.connect")}</button>
         {error && <p className="error">{error}</p>}
         <div className="row"><LanguagePicker /></div>

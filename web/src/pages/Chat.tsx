@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, del, post, put, getToken } from "../api";
 import { useT, type T } from "../i18n";
-import { Section, useList } from "../ui";
+import { Section, onEnterSubmit, useList } from "../ui";
 
 /** The human end of the loop: plan a project by talking about it, hand over
  *  files, then dispatch or authorise from the same place. Sessions are bound to
@@ -170,9 +170,10 @@ function Conversation({ sessionId, agents, responders, canOperate, refreshKey,
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [pending, setPending] = useState<Pending[]>([]);
-  const [draft, setDraft] = useState("");
-  const [files, setFiles] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
+  // while the user is mid-message we must not re-render the composer: a WS
+  // event arriving during IME composition drops the text being composed
+  const typing = useRef(false);
   const [error, setError] = useState("");
   const [dispatchAgent, setDispatchAgent] = useState("");
   const [dispatchTitle, setDispatchTitle] = useState("");
@@ -187,41 +188,39 @@ function Conversation({ sessionId, agents, responders, canOperate, refreshKey,
         setPending(body.pending_approvals);
       }).catch((e) => setError(String((e as Error).message)));
   }, [sessionId]);
-  useEffect(load, [load, refreshKey]);
+  useEffect(() => {
+    if (typing.current) return;     // never refresh out from under a half-typed message
+    load();
+  }, [load, refreshKey]);
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); },
             [messages.length, busy]);
 
-  const upload = async (picked: FileList | null) => {
-    if (!picked?.length) return;
+  const upload = async (file: File): Promise<Attachment | null> => {
     setError("");
-    for (const file of Array.from(picked)) {
-      const form = new FormData();
-      form.append("file", file);
-      const resp = await fetch(`/api/chat/sessions/${sessionId}/files`, {
-        method: "POST", body: form,
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      if (!resp.ok) { setError(await resp.text()); return; }
-      const item: Attachment = await resp.json();
-      setFiles((old) => [...old, item]);
-    }
+    const form = new FormData();
+    form.append("file", file);
+    const resp = await fetch(`/api/chat/sessions/${sessionId}/files`, {
+      method: "POST", body: form,
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!resp.ok) { setError(await resp.text()); return null; }
+    return await resp.json();
   };
 
-  const send = async () => {
-    if (!draft.trim() && !files.length) return;
+  const send = async (content: string, attachmentIds: string[]) => {
     setBusy(true);
     setError("");
     try {
       const body = await post<{ messages: Message[] }>(
         `/api/chat/sessions/${sessionId}/messages`,
-        { content: draft, attachment_ids: files.map((f) => f.id) });
+        { content, attachment_ids: attachmentIds });
       setMessages(body.messages);
-      setDraft("");
-      setFiles([]);
       onChanged();
+      return true;
     } catch (e) {
       setError(String((e as Error).message));
       load();                       // the user's message is kept even on failure
+      return false;
     } finally { setBusy(false); }
   };
 
@@ -327,30 +326,8 @@ function Conversation({ sessionId, agents, responders, canOperate, refreshKey,
 
       {canOperate && (
         <>
-          <div className="chat-compose">
-            <textarea rows={3} value={draft} placeholder={t("chat.messagePh")}
-                      onChange={(e) => setDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          if (!busy) send();
-                        }
-                      }} />
-            <div className="row">
-              <label className="ghost file-btn">
-                {t("chat.attach")}
-                <input type="file" multiple style={{ display: "none" }}
-                       onChange={(e) => upload(e.target.files)} />
-              </label>
-              {!!files.length && (
-                <span className="muted">{t("chat.attached", { n: files.length })}：
-                  {files.map((f) => f.name).join(", ")}</span>
-              )}
-              <button onClick={send}
-                      disabled={busy || (!draft.trim() && !files.length)}>
-                {busy ? t("chat.thinking") : t("c.send")}</button>
-            </div>
-          </div>
+          <Composer busy={busy} onSend={send} onUpload={upload} t={t}
+                    onTypingChange={(active) => { typing.current = active; }} />
 
           {session.scope_type === "project" && (
             <div className="chat-dispatch">
@@ -377,5 +354,73 @@ function Conversation({ sessionId, agents, responders, canOperate, refreshKey,
         </>
       )}
     </>
+  );
+}
+
+/** The message box, deliberately its own component with its own state.
+ *
+ *  Chat lives next to a live event stream, and a re-render arriving mid-IME
+ *  composition wipes the characters being composed — so nothing outside this
+ *  component may own the draft. It also grows with the text instead of hiding a
+ *  long message inside three rows, and it reports whether the user has
+ *  something unsent so the conversation can pause its background reloads. */
+function Composer({ busy, onSend, onUpload, onTypingChange, t }: {
+  busy: boolean;
+  onSend: (content: string, attachmentIds: string[]) => Promise<boolean>;
+  onUpload: (file: File) => Promise<Attachment | null>;
+  onTypingChange: (active: boolean) => void; t: T;
+}) {
+  const [draft, setDraft] = useState("");
+  const [files, setFiles] = useState<Attachment[]>([]);
+  const box = useRef<HTMLTextAreaElement>(null);
+
+  const grow = () => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 320)}px`;
+  };
+  useEffect(grow, [draft]);
+  useEffect(() => { onTypingChange(!!draft.trim() || !!files.length); },
+            [draft, files, onTypingChange]);
+
+  const submit = async () => {
+    if (busy || (!draft.trim() && !files.length)) return;
+    const sent = await onSend(draft, files.map((f) => f.id));
+    if (sent) {
+      setDraft("");
+      setFiles([]);
+      onTypingChange(false);
+    }
+  };
+
+  const pick = async (picked: FileList | null) => {
+    for (const file of Array.from(picked ?? [])) {
+      const item = await onUpload(file);
+      if (item) setFiles((old) => [...old, item]);
+    }
+  };
+
+  return (
+    <div className="chat-compose">
+      <textarea ref={box} rows={3} value={draft} placeholder={t("chat.messagePh")}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onEnterSubmit(submit)} />
+      <div className="row">
+        <label className="ghost file-btn">
+          {t("chat.attach")}
+          <input type="file" multiple style={{ display: "none" }}
+                 onChange={(e) => { pick(e.target.files); e.target.value = ""; }} />
+        </label>
+        {!!files.length && (
+          <span className="muted">{t("chat.attached", { n: files.length })}：
+            {files.map((f) => f.name).join(", ")}
+            <button className="ghost chip-x" onClick={() => setFiles([])}>✕</button>
+          </span>
+        )}
+        <button onClick={submit} disabled={busy || (!draft.trim() && !files.length)}>
+          {busy ? t("chat.thinking") : t("c.send")}</button>
+      </div>
+    </div>
   );
 }
