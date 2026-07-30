@@ -38,6 +38,12 @@ class RunEvent:
     data: dict[str, Any] = field(default_factory=dict)
 
 
+# The summary is not a label: chat replies and PM task plans ARE this string,
+# so a small cap silently corrupts them (a cut-off JSON list parses as nothing).
+# Still bounded, to keep a runaway agent out of the DB.
+SUMMARY_LIMIT = 200_000
+
+
 @dataclass
 class RunResult:
     status: str                          # succeeded|failed|cancelled|timeout

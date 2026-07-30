@@ -25,7 +25,7 @@ import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
-from .base import RunEvent, RunResult, TaskSpec, register_builtin
+from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
 
 GRACE_SECONDS = 10
 
@@ -174,7 +174,7 @@ class AgyExecutor:
         return RunResult(
             status=status,
             summary=(str(envelope.get("response") or envelope.get("error") or "")
-                     or "\n".join(handle.stderr_tail[-5:]))[:2000],
+                     or "\n".join(handle.stderr_tail[-5:]))[:SUMMARY_LIMIT],
             tokens_in=int(usage.get("input_tokens") or 0),
             # thinking tokens are output-side, like codex's reasoning tokens
             tokens_out=(int(usage.get("output_tokens") or 0)

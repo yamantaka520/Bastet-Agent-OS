@@ -223,3 +223,24 @@ def test_parse_tasks_survives_a_real_agent_answer():
     # ```json fences and trailing commentary
     assert len(runner_mod.parse_tasks(
         '```json\n{"tasks":[{"title":"A","spec":"a"}]}\n```\nDone!')) == 1
+
+
+def test_executors_do_not_truncate_the_payload_summary():
+    """Live finding: every executor capped summary at 2000 chars. That is fine
+    for a label but the summary IS the payload for chat replies and task plans —
+    a cut-off JSON list parses as nothing at all."""
+    from pathlib import Path
+
+    from bastet_agent_os.executors.base import SUMMARY_LIMIT
+
+    assert SUMMARY_LIMIT >= 100_000
+    executors = Path("src/bastet_agent_os/executors")
+    offenders = [p.name for p in executors.glob("*.py")
+                 if "[:2000]" in p.read_text()]
+    assert offenders == []
+
+    # a plan longer than the old cap must still parse
+    tasks = [{"title": f"任務 {i}", "spec": "細節 " * 200} for i in range(8)]
+    payload = json.dumps({"tasks": tasks}, ensure_ascii=False)
+    assert len(payload) > 2000
+    assert len(runner_mod.parse_tasks(payload)) == 8

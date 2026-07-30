@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..pricing import Usage
-from .base import RunEvent, RunResult, TaskSpec, register_builtin
+from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
 
 GRACE_SECONDS = 10
 
@@ -205,7 +205,7 @@ class CodexExecutor:
 
         return RunResult(
             status=status,
-            summary=(handle.summary or handle.failed_reason)[:2000],
+            summary=(handle.summary or handle.failed_reason)[:SUMMARY_LIMIT],
             tokens_in=handle.usage.tokens_in,
             tokens_out=handle.usage.tokens_out,
             cache_read=handle.usage.cache_read,

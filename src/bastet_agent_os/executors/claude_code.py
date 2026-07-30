@@ -20,7 +20,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from .base import RunEvent, RunResult, TaskSpec, register_builtin
+from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
 
 GRACE_SECONDS = 10  # SIGTERM -> grace -> SIGKILL
 
@@ -190,7 +190,7 @@ class ClaudeCodeExecutor:
 
         return RunResult(
             status=status,
-            summary=str(event.get("result") or error_tail or "")[:2000],
+            summary=str(event.get("result") or error_tail or "")[:SUMMARY_LIMIT],
             tokens_in=int(usage.get("input_tokens") or 0),
             tokens_out=int(usage.get("output_tokens") or 0),
             cache_read=int(usage.get("cache_read_input_tokens") or 0),

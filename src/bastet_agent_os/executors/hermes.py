@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..workflow import read_verdict
-from .base import RunEvent, RunResult, TaskSpec, register_builtin
+from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
 
 GRACE_SECONDS = 10
 DEFAULT_TOOLSETS = "terminal"
@@ -165,7 +165,7 @@ class HermesExecutor:
         summary = handle.stdout_text.strip() or "\n".join(handle.stderr_tail[-5:])
         return RunResult(
             status=status,
-            summary=summary[:2000],
+            summary=summary[:SUMMARY_LIMIT],
             # tokens/cost come from the gateway ledger (the only inference path)
             precision="estimated" if (handle.timed_out or handle.cancelled) else "reported",
             structured_verdict=read_verdict(handle.task.workdir),

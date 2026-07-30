@@ -8,6 +8,16 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.9.3] - 2026-07-31
+
+### Fixed
+- Executors no longer truncate the run summary at 2000 characters. That cap was
+  written when the summary was a human-readable label; chat replies and PM task
+  plans *are* that string, so a long answer came back cut mid-sentence and a
+  task plan longer than 2KB parsed as nothing. One shared `SUMMARY_LIMIT`
+  (200KB) across all seven executors, with a test that fails if the old cap
+  comes back. Found by the first real decomposition on the validation host.
+
 ## [0.9.2] - 2026-07-31
 
 ### Fixed

@@ -27,7 +27,7 @@ import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
-from .base import RunEvent, RunResult, TaskSpec, register_builtin
+from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
 
 GRACE_SECONDS = 10
 MAX_TURNS = 40
@@ -198,7 +198,7 @@ class GrokExecutor:
         return RunResult(
             status=status,
             summary=(summary or handle.failed_reason
-                     or "\n".join(handle.stderr_tail[-5:]))[:2000],
+                     or "\n".join(handle.stderr_tail[-5:]))[:SUMMARY_LIMIT],
             # headless output has no usage; the gateway ledger is the only
             # precise source — direct-path numbers would be a guess
             precision="estimated",

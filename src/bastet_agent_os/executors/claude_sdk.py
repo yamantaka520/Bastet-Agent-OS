@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..workflow import read_verdict
-from .base import RunEvent, RunResult, TaskSpec, register_builtin
+from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
 
 INTERACTION_TIMEOUT_S = 600  # unattended fallback: deny after this long
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Write"]  # Write carries the verdict file
@@ -162,7 +162,7 @@ class ClaudeSdkExecutor:
         return RunResult(
             status=status,
             summary=(str(getattr(message, "result", "")) or handle.summary
-                     or handle.error)[:2000],
+                     or handle.error)[:SUMMARY_LIMIT],
             tokens_in=int(usage.get("input_tokens") or 0),
             tokens_out=int(usage.get("output_tokens") or 0),
             cache_read=int(usage.get("cache_read_input_tokens") or 0),
