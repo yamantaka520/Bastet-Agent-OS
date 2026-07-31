@@ -8,6 +8,15 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.14.2] - 2026-07-31
+
+### Fixed
+- Retry now picks up a template that was **edited**, not only one that was
+  swapped. The refresh compared template ids, so fixing a stage's test command in
+  place (same template, new version) left the retry running the old command — the
+  single most common reason to retry at all. It now compares the stages and
+  reports what it refreshed to (`網頁開發 v2`).
+
 ## [0.14.1] - 2026-07-31
 
 ### Fixed — a private key could not be entered at all

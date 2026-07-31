@@ -423,16 +423,23 @@ class Orchestrator:
             project = self.db.one("SELECT default_template_id FROM projects WHERE id=?",
                                   (job["project_id"],))
             template_id = project["default_template_id"] if project else None
-            if template_id and template_id != job["template_id"]:
+            if template_id:
                 template = self.db.one(
-                    "SELECT stages_json FROM workflow_templates WHERE id=?",
+                    "SELECT stages_json, version FROM workflow_templates WHERE id=?",
                     (template_id,))
-                if template is not None:
+                # compare the STAGES, not the template id: fixing a stage's test
+                # command edits the same template in place, and that is the most
+                # common reason to retry at all
+                changed = template is not None and (
+                    template_id != job["template_id"]
+                    or json.loads(template["stages_json"])
+                    != json.loads(job["stages_snapshot_json"]))
+                if template is not None and changed:
                     fresh = parse_stages(json.loads(template["stages_json"]))
                     names = [st.name for st in fresh]
                     if job["stage"] in names:      # keep our place in the pipeline
                         stages = fresh
-                        refreshed_from = template_id
+                        refreshed_from = f"{template_id} v{template['version']}"
                         self.db.write(
                             "UPDATE jobs SET template_id=?, stages_snapshot_json=? "
                             "WHERE id=?",

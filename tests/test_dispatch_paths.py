@@ -6,10 +6,11 @@ orchestrator quietly ran the agent in that empty non-repo, and the executor
 reported the failure with an empty string. Five separate holes.
 """
 
+import json
 import subprocess
 
 import pytest
-from fake_executor import SCRIPT, req
+from fake_executor import SCRIPT, add_template, req
 
 from bastet_agent_os.config import check_repo_path, expand_repo_path, is_git_repo
 from bastet_agent_os.executors.base import RunResult
@@ -271,7 +272,7 @@ async def test_retry_picks_up_the_projects_current_workflow_and_spec(orch, seede
                                 or RunResult(status="succeeded")))
     SCRIPT.append(RunResult(status="succeeded"))     # the new second stage
     out = orch.retry(job_id, spec="corrected spec with the real requirements")
-    assert out["workflow_refreshed"] == "new"
+    assert out["workflow_refreshed"] == "new v1"
     await orch.wait_idle()
 
     job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
@@ -326,3 +327,33 @@ async def test_reconcile_heals_a_project_whose_state_predates_the_fix(orch, seed
 
     again = lifecycle.reconcile(seeded, "proj1")
     assert again == {"linked": 0, "status": None}            # idempotent
+
+
+async def test_retry_picks_up_an_edited_template_not_just_a_swapped_one(orch, seeded):
+    """Live case: the E2E stage's test command was fixed in place (same template,
+    new version) and the retry kept running the old command, because the refresh
+    only triggered when the project switched to a *different* template."""
+    add_template(seeded, "web", [{"name": "e2e", "gate": "tests-pass",
+                                  "gate_config": {"command": "npm run test:e2e"}}])
+    seeded.write("UPDATE projects SET default_template_id='web' WHERE id='proj1'")
+    SCRIPT.append(RunResult(status="succeeded"))
+    job_id = orch.dispatch(req(template_id="web"))
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] \
+        == "blocked"                       # npm is not there: config error
+
+    # fix the command in place, exactly as the Templates tab now allows
+    # (same id, version + 1 — what POST /api/templates does)
+    seeded.write("INSERT OR REPLACE INTO workflow_templates(id, name, version, "
+                 "stages_json) VALUES('web','web',2,?)",
+                 (json.dumps([{"name": "e2e", "gate": "tests-pass",
+                               "gate_config": {"command": "exit 0"}}]),))
+    SCRIPT.append(RunResult(status="succeeded"))
+    out = orch.retry(job_id)
+    assert out["workflow_refreshed"] == "web v2"     # it noticed the stages changed
+    await orch.wait_idle()
+
+    snapshot = json.loads(seeded.one("SELECT stages_snapshot_json FROM jobs WHERE id=?",
+                                     (job_id,))["stages_snapshot_json"])
+    assert snapshot[0]["gate_config"]["command"] == "exit 0"
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
