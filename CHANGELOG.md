@@ -8,6 +8,25 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.18.2] - 2026-07-31
+
+### Added — the documentation set
+Everything was in a single README and a Chinese SPEC. Split into the shape Agent
+Memory OS uses, so the same questions have the same answers in both projects:
+
+- `docs/USER_GUIDE.md` — every tab and every CLI command, end to end
+- `docs/INSTALLATION.md` — install.sh flags, executor logins, service, upgrading
+- `docs/HISTORY.md` — the project journey, the design log, and the mistakes that
+  changed how the code is written
+- `docs/ROADMAP.md` — what is next, and what is deliberately not
+- `README.zh-Hant.md` — the full README in traditional Chinese
+- `PROGRESS.md` — current status, what was verified on the validation host, and
+  what is still open
+- `COMPATIBILITY.md`, `CONTRIBUTING.md`, `SECURITY.md`
+
+`SPEC.md` gains milestone M6 and design decisions D15–D17 (the rework loop, work
+preservation, and run memory for every executor).
+
 ## [0.18.1] - 2026-07-31
 
 ### Added — a project can be deleted

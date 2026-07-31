@@ -1,111 +1,170 @@
-# Bastet Agent OS
-
-> ⚠️ Pre-alpha — design phase (M0 complete). See [SPEC.md](SPEC.md) for the full design.
+# 🐈 Bastet Agent OS
 
 **A local-first operating system for AI-agent teams.** Bastet organizes the
-agents you already use — Claude Code (headless or Agent SDK), Codex CLI,
-Hermes, Grok Build, Google Antigravity (`agy`), or any OpenAI/Claude-compatible
-endpoint — into teams with roles, gated workflows, and centrally governed
-resources, so multiple projects can run concurrently under control.
+agents you already use — Claude Code (CLI or Agent SDK), Codex CLI, Grok Build,
+Google Antigravity (`agy`), Hermes, or any OpenAI/Claude-compatible endpoint —
+into teams with roles, gated workflows, and centrally governed resources, so
+several projects can run concurrently under control.
 
-Bastet is a **control plane, not another agent framework**: execution comes
-from orchestrating existing agents; its moat is governance and memory —
+Bastet is a **control plane, not another agent framework**. Execution comes from
+orchestrating agents that already exist; what Bastet adds is governance, a
+workflow engine that keeps going when things fail, and team memory.
 
-- **Resource pool** — allocation, quotas, budgets, metering, and routing for
-  LLM / MCP / media resources through a built-in OpenAI/Claude-compatible
-  gateway.
-- **Gated workflows** — stage pipelines (plan → implement → test → code
-  review → security review → merge) with a Kanban view, git-worktree or
-  container isolation per run, and an append-only audit log.
-- **Team memory** — built on [Agent Memory OS](https://github.com/yamantaka520/Agent-Memory-OS):
-  teams/projects with a hard ACL, associative recall, dynamic token-budgeted
-  context packs, and cross-node federation.
+Linux · macOS · Windows · WebUI + CLI · Apache-2.0 ·
+[繁體中文說明](README.zh-Hant.md)
 
-Linux · macOS · Windows / WebUI + CLI / Apache-2.0.
+## Why
 
-## Languages
+Running one coding agent is easy. Running a *team* of them across several
+projects is where it falls apart:
 
-The WebUI ships in **繁體中文 · 简体中文 · English · 日本語 · 한국어**. The locale
-is picked from the browser (`zh-TW/HK/MO` → traditional, other `zh` →
-simplified) and switchable from the header; the choice is remembered per
-browser. Workflow roles and gate types are localised by their stable ids, so a
-stage stored as `role: "reviewer"` reads correctly in every language.
+- A failing test stops everything and waits for a human, even though the agent
+  that wrote the code is the one equipped to fix it.
+- Nobody can say afterwards what ran, on whose account, at what cost.
+- Every project starts from zero, because nothing the agents learned was kept.
+- Credentials end up pasted into a dozen config files.
+- "Which of these six CLIs is out of date?" has no answer.
 
-Adding UI strings: put them in `web/src/i18n/zh-Hant.ts` (the canonical
-dictionary) and translate in the other four files — they are typed against it,
-so a missing key fails `npm run build`, and `tests/test_i18n.py` fails on a
-hard-coded string that skipped `t()`.
+Bastet answers those in one place, on your own machine, with an append-only
+audit trail behind every state change.
 
-Built-in workflow presets keep their authored stage text: the preset name
-becomes the template id when you copy it, so the display must match what gets
-saved. Copy a preset and rewrite it in any language.
+## Features
 
-## Project lifecycle
+- **A workflow engine that continues.** Stage pipelines (plan → implement →
+  test → review → merge) with four gate types. A failed gate hands the card
+  *back* to a stage that can fix it, with the failure output attached, and the
+  pipeline carries on. It stops for a human only when it genuinely cannot
+  proceed. → [When a gate says no](#when-a-gate-says-no)
+- **Project lifecycle with a light.** planning → ready → running ⇄ paused →
+  maintenance → closed, as a real state machine: only declared transitions, each
+  one audited. Run / pause / stop controls on the card.
+- **Kanban board.** Task cards move across stage columns live over WebSocket;
+  each card shows its title, stage, status and how many times it was reworked.
+- **Resource pool + metering gateway.** LLM / MCP / API / skill / git resources
+  with per-resource visibility (global / team / project), a credential picker
+  that stores a reference rather than a copy, a real test button per resource,
+  and an OpenAI/Claude-compatible gateway that meters what runs spend.
+- **Team memory.** Built on [Agent Memory OS](https://github.com/yamantaka520/Agent-Memory-OS):
+  every run writes what it did, what a gate rejected and how the job ended,
+  attributed to the agent that ran and scoped to the project. Context packs are
+  read *as that agent*, so AMOS's ACL applies.
+- **Chat as the input channel.** Plan a project by talking to an agent or a pool
+  LLM, attach files and screenshots, then dispatch from the conversation.
+  Telegram is the second such channel, with inline approvals.
+- **Governance you can read.** Three-tier roles, per-user tokens, budgets and
+  concurrency caps per grant, worktree or container isolation per run, and a
+  hash-chained audit log with search.
+- **Five-language WebUI.** 繁體中文 · 简体中文 · English · 日本語 · 한국어.
 
-A project has a state, shown as a light on its card: **planning → ready →
-running ⇄ paused → maintenance → closed** (and reopen). Only declared
-transitions are allowed and each one is audited, so the light is the truth, not
-a guess derived from job rows.
+## How it compares
 
-Between planning and execution sits a human. The project-manager agent turns the
-agreed plan into a task list (read-only: it sees the repo, the workflow stages
-and the planning conversation), you edit and confirm it, and only then does the
-runner dispatch — task by task, each following the project's workflow and role
-assignments. A task waiting at a gate keeps the runner waiting; it never
-approves anything itself. When every task settles the project moves to
-maintenance, awaiting your acceptance.
+|  | Bastet Agent OS | An agent framework (LangGraph, CrewAI…) | A hosted agent platform |
+|---|---|---|---|
+| What it is | control plane over agents you already run | the agent runtime itself | someone else's runtime |
+| Where it runs | your machine / your LAN | your process | their cloud |
+| Execution | delegates to claude / codex / grok / agy / hermes | you write the loop | their loop |
+| On failure | hands the work back to a stage that can fix it | your code decides | opaque |
+| Accounting | usage ledger + audit log per run | none | their dashboard |
+| Memory | AMOS, requester-scoped ACL | none / bring your own | their store |
+| Credentials | referenced from one place, never copied | in your config | uploaded |
 
-Controls on the card: ▶ run, ⏸ pause (stops the *next* dispatch, current task
-finishes), ■ stop (cancels what is in flight), close, reopen. Tasks are ordinary
-jobs, so they show up on the Kanban board and move across stage columns.
+Bastet does not replace an agent framework — you can run one *inside* a stage.
 
-## Chat: the human end of the loop
+## Install
 
-The 對話 tab is where a person plans the project by talking about it. A session
-picks who answers — an **agent** (through its own executor and account,
-read-only, with the project's repo in view) or a **pool LLM** — and a scope:
-project, team, or global. Project scope carries the real project state into the
-prompt: description, repo, workflow, team roles, recent jobs, and the resources
-it may use.
+One command on the machine that will run the control plane:
 
-Sessions are stored per project, so the discussion can't drift from the org the
-runs execute against. Files, documents and screenshots go in (text is inlined,
-images ride along where the wire supports it), every turn is written to Agent
-Memory OS in the session's scope so the next run inherits it, and the session is
-also where authorisation happens: pending human-approval gates are listed with
-Approve/Reject, and the whole discussion can be dispatched as a job. The agent
-never dispatches itself — a person presses the button.
+```bash
+curl -fsSL https://raw.githubusercontent.com/yamantaka520/Bastet-Agent-OS/main/install.sh | bash
+```
 
-Telegram is the second such channel: give a channel a responder and a project on
-the Admin tab, and plain messages to the bot are answered in a per-user session
-that survives restarts, attachments included.
+It creates `~/.bastet/venv`, installs Bastet + Agent Memory OS + the Claude Agent
+SDK + pytest, installs the executor CLIs with their vendors' own installers, runs
+`bastet init`, and finishes with `bastet doctor`. Details, flags and the
+per-executor login steps: [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-## Resource pool
+From a clone, for development:
 
-Resources are classified (`llm` · `mcp` · `api` · `skill` · `git` · media) and
-each one carries its own visibility scope — global, team, or project. The
-credential field is a picker over the credentials saved on the Admin tab: the
-resource stores a `secret:<id>` pointer, so rotating a key updates every
-resource that uses it. Kinds that need no credential (skills) don't show one.
+```bash
+pip install -e '.[dev]'
+bastet init            # ~/.bastet: db, api token, config
+bastet serve           # control plane + gateway on 127.0.0.1:8890
+```
 
-MCP servers keep the vendor's install command; you run it from the WebUI and
-get the full output back, so a failed install can be fixed in place and
-retried. Nothing installs implicitly.
+The WebUI is at `http://127.0.0.1:8890/ui` — paste the token from
+`~/.bastet/api_token`.
 
-Every resource has a **test button**: it does what an agent would, per kind —
-lists models for an LLM (a listing, never a completion, so testing costs no
-tokens), completes a real MCP `initialize` handshake and reports the server's
-tool list, checks a skill source exists on the Bastet host, verifies a git token
-against the provider. The verdict is three-state: `ok`, `warn` (it answered, but
-not the way we hoped — reachable-but-404 is a different bug from host-down), and
-`failed`, with the exact request that was made.
+## Quickstart
 
-Granted resources are callable by the agents running that project. At run start
-Bastet hands them over as env vars (`BASTET_RES_<NAME>_URL` / `_KEY` /
-`_TOKEN` / `_MODEL` / `_SOURCE`), an `mcpServers` config file
-(`BASTET_MCP_CONFIG`, and `--mcp-config` for Claude Code), and a manifest
-written into the task brief. The MCP file contains resolved credentials, so it
-lives outside the worktree at 0600 and is deleted when the run ends.
+```bash
+# an org: a team, a project bound to a real repo, an agent
+bastet team add meow "Meow Team"
+bastet project add catswalker ~/Github/catswalker --team meow
+bastet agent add cc-worker --name "Claude Code Worker" --executor claude-code
+
+# a workflow, then work through it
+bastet template add standard-dev.yaml
+bastet role-assign catswalker cc-worker engineer
+bastet dispatch catswalker "Fix the failing test in tests/test_booking.py" \
+  --agent cc-worker --template standard-dev
+
+bastet runs                  # what is running
+bastet run <run_id>          # detail: usage ledger, diff artifact
+bastet usage                 # cost by project / agent / precision
+bastet audit                 # append-only trail
+bastet doctor                # health, including gate tools
+```
+
+To meter traffic through the gateway instead of a subscription CLI, register an
+LLM resource and pass `--resource`:
+
+```bash
+bastet resource add anthropic-api --endpoint https://api.anthropic.com \
+  --flavor anthropic --secret-ref keyring:bastet/anthropic
+bastet grant add <resource_id> project:catswalker --budget-usd 5 --max-concurrency 2
+bastet dispatch catswalker "..." --agent cc-worker --resource <resource_id>
+```
+
+Full walkthrough of every tab and command:
+[docs/USER_GUIDE.md](docs/USER_GUIDE.md).
+
+## Architecture
+
+```
+                    ┌─────────────────────────────────────────┐
+   WebUI (React) ───┤  FastAPI: REST + WebSocket event bus    │
+   CLI (Typer)   ───┤  auth: api token · user tokens · roles  │
+   Telegram      ───┤                                         │
+                    └───────┬──────────────────┬──────────────┘
+                            │                  │
+                  ┌─────────▼────────┐  ┌──────▼──────────────┐
+                  │  Orchestrator    │  │  Gateway /v1/*      │
+                  │  stages · gates  │  │  OpenAI + Anthropic │
+                  │  rework loop     │  │  metering, budgets  │
+                  └───┬──────────┬───┘  └──────┬──────────────┘
+                      │          │             │
+        ┌─────────────▼───┐  ┌───▼──────────┐  │
+        │ Executor plugin │  │ git worktree │  │
+        │ claude-code     │  │ or container │  │
+        │ claude-sdk      │  │ per run      │  │
+        │ codex · grok    │  └──────────────┘  │
+        │ agy · hermes    │                    │
+        │ bastet-lite ────┼────────────────────┘
+        └─────────────────┘
+                      │
+        ┌─────────────▼───────────────────────────────────┐
+        │ SQLite (WAL): projects · jobs · runs · gates     │
+        │ usage_ledger · grants · audit_log (hash chain)   │
+        └─────────────┬───────────────────────────────────┘
+                      │
+        ┌─────────────▼───────────────────────────────────┐
+        │ Agent Memory OS: team/project ACL, context packs │
+        └─────────────────────────────────────────────────┘
+```
+
+Design rationale and the data model: [SPEC.md](SPEC.md). How the project got
+here, and why each decision went the way it did:
+[docs/HISTORY.md](docs/HISTORY.md).
 
 ## When a gate says no
 
@@ -115,9 +174,9 @@ reviewers to the last stage that writes — carrying the gate's real output, and
 the pipeline continues without anyone being asked to intervene.
 
 The brief that travels with it names the shortcuts explicitly: do not edit the
-test command, delete the test, make the assertion trivially true, add skip/xfail,
-or touch the workflow config. The cheapest way to pass a gate is to weaken it,
-and an agent told only "make it green" will.
+test command, delete the test, make the assertion trivially true, add
+skip/xfail, or touch the workflow config. The cheapest way to pass a gate is to
+weaken it, and an agent told only "make it green" will.
 
 Three things still stop and ask you:
 
@@ -135,6 +194,72 @@ Each hand-back is audited as `job.rework` and counted on the card. The
 notification for one reads as progress (what failed, who is fixing it, cycle N of
 M); the notification for a genuine stop carries the failing output and a retry
 button.
+
+## Project lifecycle
+
+A project has a state, shown as a light on its card: **planning → ready →
+running ⇄ paused → maintenance → closed** (and reopen). Only declared
+transitions are allowed and each one is audited, so the light is the truth, not
+a guess derived from job rows.
+
+Between planning and execution sits a human. The project-manager agent turns the
+agreed plan into a task list (read-only: it sees the repo, the workflow stages
+and the planning conversation), you edit and confirm it, and only then does the
+runner dispatch — task by task, each following the project's workflow and role
+assignments. A task waiting at a gate keeps the runner waiting; it never
+approves anything itself. When every task settles the project moves to
+maintenance, awaiting your acceptance.
+
+Controls on the card: ▶ run, ⏸ pause (stops the *next* dispatch, current task
+finishes), ■ stop (cancels what is in flight), close, reopen, delete.
+
+## Chat: the human end of the loop
+
+The 對話 tab is where a person plans the project by talking about it. A session
+picks who answers — an **agent** (through its own executor and account,
+read-only, with the project's repo in view) or a **pool LLM** — and a scope:
+project, team, or global. Project scope carries the real project state into the
+prompt: description, repo, workflow, team roles, recent jobs, and the resources
+it may use.
+
+Sessions are stored per project, so the discussion cannot drift from the org the
+runs execute against. Files, documents and screenshots go in, every turn is
+written to Agent Memory OS in the session's scope, and the session is also where
+authorisation happens: pending human-approval gates are listed with
+Approve/Reject, and the whole discussion can be dispatched as a job. The agent
+never dispatches itself — a person presses the button.
+
+Telegram is the second such channel: give a channel a responder and a project on
+the Admin tab, and plain messages to the bot are answered in a per-user session
+that survives restarts, attachments included.
+
+## Resource pool
+
+Resources are classified (`llm` · `mcp` · `api` · `skill` · `git` · media) and
+each one carries its own visibility scope — global, team, or project. The
+credential field is a picker over the credentials saved on the Admin tab: the
+resource stores a `secret:<id>` pointer, so rotating a key updates every
+resource that uses it. Kinds that need no credential (skills) don't show one.
+
+MCP servers keep the vendor's install command; you run it from the WebUI and get
+the full output back, so a failed install can be fixed in place and retried.
+Nothing installs implicitly.
+
+Every resource has a **test button**: it does what an agent would, per kind —
+lists models for an LLM (a listing, never a completion, so testing costs no
+tokens), completes a real MCP `initialize` handshake and reports the server's
+tool list, checks a skill source exists on the Bastet host, verifies a git
+credential against the provider over HTTPS or SSH. The verdict is three-state:
+`ok`, `warn` (it answered, but not the way we hoped — reachable-but-404 is a
+different bug from host-down), and `failed`, with the exact request that was
+made.
+
+Granted resources are callable by the agents running that project. At run start
+Bastet hands them over as env vars (`BASTET_RES_<NAME>_URL` / `_KEY` / `_TOKEN` /
+`_MODEL` / `_SOURCE`), an `mcpServers` config file (`BASTET_MCP_CONFIG`, and
+`--mcp-config` for Claude Code), and a manifest written into the task brief. The
+MCP file contains resolved credentials, so it lives outside the worktree at 0600
+and is deleted when the run ends.
 
 ## Workflow gate tools
 
@@ -154,21 +279,8 @@ runner wins. For a project with its own environment, put the explicit path in th
 template's command (`.venv/bin/pytest -q`, `npx vitest run`).
 
 A command that cannot run at all is reported as a configuration problem rather
-than a failing test — re-running the agent cannot fix a missing script.
-
-## Keeping it current
-
-Bastet runs other people's tools, so the Admin tab lists each component — Bastet
-itself, Agent Memory OS, the Claude Agent SDK, pytest, and the `claude` /
-`codex` / `grok` / `agy` / `hermes` CLIs — with its installed and available
-version, updatable one at a time or all at once.
-
-Nothing updates itself. Changing the agents underneath a running project is not
-something you could reason about afterwards, so an update happens when you press
-the button and is audited. A component whose available version cannot be
-determined (an official install script with no version query) reports `unknown`
-instead of implying it is current, and an installer that ran cleanly without
-moving the version reports `unchanged` rather than claiming success.
+than a failing test — and handed back to an agent that can add the missing
+script or dependency, with instructions not to fake a green exit.
 
 ## Team memory
 
@@ -181,71 +293,85 @@ Semantic recall needs `turbovec` (it ships with `agent-memory-os[full]`). Withou
 it AMOS silently falls back to keyword matching, so the memory tab states which
 mode is live and the maintenance card lists the package.
 
+## Keeping it current
+
+Bastet runs other people's tools, so the Admin tab lists each component — Bastet
+itself, Agent Memory OS, turbovec, the Claude Agent SDK, pytest, and the `claude`
+/ `codex` / `grok` / `agy` / `hermes` CLIs — with its installed and available
+version, updatable one at a time or all at once.
+
+Nothing updates itself. Changing the agents underneath a running project is not
+something you could reason about afterwards, so an update happens when you press
+the button and is audited. A component whose available version cannot be
+determined (an official install script with no version query) reports `unknown`
+instead of implying it is current, and an installer that ran cleanly without
+moving the version reports `unchanged` rather than claiming success.
+
+## Languages
+
+The WebUI ships in **繁體中文 · 简体中文 · English · 日本語 · 한국어**. The locale
+is picked from the browser (`zh-TW/HK/MO` → traditional, other `zh` →
+simplified) and switchable from the header; the choice is remembered per browser.
+Workflow roles and gate types are localised by their stable ids, so a stage
+stored as `role: "reviewer"` reads correctly in every language.
+
+Adding UI strings: put them in `web/src/i18n/zh-Hant.ts` (the canonical
+dictionary) and translate in the other four files — they are typed against it, so
+a missing key fails `npm run build`, and `tests/test_i18n.py` fails on a
+hard-coded string that skipped `t()`.
+
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [docs/INSTALLATION.md](docs/INSTALLATION.md) | install.sh, requirements, executor logins, running as a service, upgrading |
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | every tab and every CLI command, end to end |
+| [docs/HISTORY.md](docs/HISTORY.md) | the project journey and why each decision went the way it did |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | what is next, and what is deliberately not |
+| [docs/FEDERATION.md](docs/FEDERATION.md) | the shared org view across hosts |
+| [SPEC.md](SPEC.md) | design specification and data model (繁體中文) |
+| [CHANGELOG.md](CHANGELOG.md) | every released version |
+| [PROGRESS.md](PROGRESS.md) | current status snapshot |
+| [COMPATIBILITY.md](COMPATIBILITY.md) | supported platforms, Python versions, executors |
+| [SECURITY.md](SECURITY.md) | threat model, secret handling, reporting |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | how to work on this repo |
+
 ## Versioning
 
 `src/bastet_agent_os/__init__.py` holds the single `__version__`;
-`pyproject.toml` reads it, `web/package.json` matches it, and the WebUI prints
-it beside the title (from `GET /api/version`, so it is the version actually
+`pyproject.toml` reads it, `web/package.json` matches it, and the WebUI prints it
+beside the title (from `GET /api/version`, so it is the version actually
 running). Every user-visible change bumps it and adds a `CHANGELOG.md` entry —
-`tests/test_version.py` fails the build if the four drift apart.
+`tests/test_version.py` fails the build if they drift apart.
 
-## 繁體中文
-
-**Local-first 的 AI agent 團隊作業系統。** 把你既有的 agent（Claude Code、
-Codex CLI、Hermes、任何 OpenAI/Claude 相容端點）組織成有角色、有流程、有
-資源治理的執行團隊，讓多個專案可控地併發推進。詳見 [SPEC.md](SPEC.md)。
-
-## Quickstart (M1)
+## Development
 
 ```bash
-pip install -e '.[dev]'         # from a clone; PyPI release comes later
-bastet init                     # creates ~/.bastet (db, api token, config)
-bastet serve                    # control plane + gateway on 127.0.0.1:8890
+pip install -e '.[dev]'
+pytest -q                     # 328 tests
+ruff check .
+cd web && npm install && npm run build   # output lands in src/bastet_agent_os/ui_dist
 ```
 
-In another terminal:
-
-```bash
-# register a project (1:1 with an AMOS project), an agent, and dispatch
-bastet project add myproj /path/to/repo
-bastet agent add cc-worker --name "Claude Code Worker"
-bastet dispatch myproj "Fix the failing test in tests/test_foo.py" --agent cc-worker
-
-bastet runs                     # run status
-bastet run <run_id>             # detail: usage ledger, diff artifact
-bastet usage                    # cost by project/agent/precision
-bastet audit                    # append-only audit trail
-bastet doctor                   # health checks
-```
-
-The Kanban web UI lives at `http://127.0.0.1:8890/ui` — paste the token from
-`~/.bastet/api_token`, watch jobs move across stage columns live, and
-approve/reject `human-approve` gates from the job drawer. Multi-stage
-pipelines come from templates:
-
-```bash
-bastet template add standard-dev.yaml
-bastet role-assign myproj reviewer-agent reviewer
-bastet dispatch myproj "..." --agent cc-worker --template standard-dev
-```
-
-To meter traffic through the gateway instead of the subscription path,
-register an LLM resource + grant and pass `--resource`:
-
-```bash
-bastet resource add anthropic-api --endpoint https://api.anthropic.com \
-  --flavor anthropic --secret-ref keyring:bastet/anthropic
-bastet grant add <resource_id> project:myproj --budget-usd 5 --max-concurrency 2
-bastet dispatch myproj "..." --agent cc-worker --resource <resource_id>
-```
+The web build output is committed, so a pip install from git serves the UI
+without needing Node on the target host.
 
 ## Status
 
 | Milestone | Scope | Status |
 |---|---|---|
 | M0 | SPEC, data model, repo skeleton | ✅ done |
-| M1 | Resource pool + gateway + `claude-code` executor + CLI dispatch + minimal dashboard | ✅ done (final acceptance pending) |
+| M1 | Resource pool + gateway + `claude-code` executor + CLI dispatch + dashboard | ✅ done |
 | M2 | Workflow templates, review gates, Kanban UI, WS events | ✅ done |
-| M3 | Multi-project concurrency, queueing, container isolation, `bastet-lite` + full dynamic context, multi-user auth | ✅ done |
+| M3 | Multi-project concurrency, queueing, container isolation, `bastet-lite`, multi-user auth | ✅ done |
 | M4 | Telegram channel, media resources, in-run interactions, `claude-sdk`/`codex`/`hermes` executors | ✅ done |
-| M5 | Federation: shared org view over AMOS sync ([docs](docs/FEDERATION.md)) | ✅ done |
+| M5 | Federation: shared org view over AMOS sync | ✅ done |
+| M6 | Self-healing workflow loop, run memory for every executor, maintenance card | ✅ done |
+
+Validated on a real deployment (Ubuntu 26.04, Python 3.14, systemd user service)
+driving a live project. See [PROGRESS.md](PROGRESS.md) for what is verified and
+what is still open.
+
+## License
+
+Apache-2.0. Built on [Agent Memory OS](https://github.com/yamantaka520/Agent-Memory-OS).
