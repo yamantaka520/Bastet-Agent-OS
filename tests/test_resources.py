@@ -353,7 +353,7 @@ def test_saved_credential_is_fully_editable(client, tmp_path):
 
 def db_audit_has(client, action: str) -> bool:
     return any(r["action"] == action
-               for r in client.get("/api/audit?limit=200").json())
+               for r in client.get("/api/audit?limit=200").json()["rows"])
 
 
 def test_rotating_a_credential_updates_every_resource_using_it(client, tmp_path):

@@ -1383,6 +1383,26 @@ def create_app(home: Home) -> FastAPI:
 
     # ---- AMOS memory view -------------------------------------------------------
 
+    def _memory_row(item) -> dict:
+        """One shape for the WebUI out of whatever AMOS hands back.
+
+        `search` returns SearchResult(record, score, reason) and `list_recent`
+        returns MemoryRecord; older builds returned plain dicts. Reading them
+        with `.get` worked only for the dict case and raised on the rest, so
+        normalise here instead of at each call site."""
+        score = getattr(item, "score", None)
+        record = getattr(item, "record", item)
+        get = (record.get if isinstance(record, dict)
+               else lambda key, default=None: getattr(record, key, default))
+        return {"id": get("id"), "score": score,
+                "content": get("summary") or get("content"),
+                "scope": get("scope"), "type": get("type"),
+                "owner": get("owner"), "tags": get("tags") or [],
+                # the project/team id lives in the visibility grants, not in a
+                # column — that grant is also what gates who can recall it
+                "visibility": get("visibility") or [],
+                "created_at": get("created_at") or get("at")}
+
     @app.get("/api/memory/search", dependencies=[Depends(require_role("viewer"))])
     def memory_search(q: str, limit: int = 20):
         client = amos_client()
@@ -1393,9 +1413,7 @@ def create_app(home: Home) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"AMOS search failed: "
                                 f"{type(exc).__name__}") from exc
-        return [{"id": h.get("id"), "score": h.get("score"),
-                 "content": h.get("content"), "scope": h.get("scope"),
-                 "type": h.get("type")} for h in hits]
+        return [_memory_row(h) for h in hits]
 
     # ---- resource pool: classified kinds, scoped visibility, installers ------
 
@@ -1808,10 +1826,88 @@ def create_app(home: Home) -> FastAPI:
         return [dict(r) for r in rows]
 
     @app.get("/api/audit", dependencies=[Depends(require_role("viewer"))])
-    def audit_log(limit: int = 100):
-        return [dict(r) for r in db.query(
+    def audit_log(limit: int = 100, q: str = "", action: str = "", actor: str = "",
+                  target_type: str = "", since: str = "", until: str = ""):
+        """Newest first, filterable. An audit log you cannot search is a log you
+        never read: `action` matches a prefix (`job.` covers every job event),
+        `q` matches actor/action/target/detail."""
+        clauses, params = [], []
+        if action:
+            clauses.append("(action = ? OR action LIKE ?)")
+            params += [action, f"{action.rstrip('.')}.%"]
+        if actor:
+            clauses.append("actor LIKE ?")
+            params.append(f"%{actor}%")
+        if target_type:
+            clauses.append("target_type = ?")
+            params.append(target_type)
+        if since:
+            clauses.append("at >= ?")
+            params.append(since)
+        if until:
+            clauses.append("at <= ?")
+            params.append(f"{until}T23:59:59+00:00" if len(until) == 10 else until)
+        if q:
+            clauses.append("(actor LIKE ? OR action LIKE ? OR target_id LIKE ? "
+                           "OR detail_json LIKE ?)")
+            params += [f"%{q}%"] * 4
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = [dict(r) for r in db.query(
             "SELECT at, actor, action, target_type, target_id, detail_json "
-            "FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))]
+            f"FROM audit_log {where} ORDER BY id DESC LIMIT ?",
+            (*params, max(1, min(limit, 1000))))]
+        return {"rows": rows, "count": len(rows),
+                "actions": [r["action"] for r in db.query(
+                    "SELECT DISTINCT action FROM audit_log ORDER BY action")],
+                "categories": sorted({a["action"].split(".")[0] for a in db.query(
+                    "SELECT DISTINCT action FROM audit_log")})}
+
+    # ---- maintenance: check & update the moving parts (SPEC §5.13) -----------
+
+    @app.get("/api/maintenance/components",
+             dependencies=[Depends(require_role("admin"))])
+    async def maintenance_components():
+        """What is installed vs available. Runs pip/CLI probes, so off-thread."""
+        from . import maintenance
+        return await asyncio.to_thread(maintenance.check_all)
+
+    @app.post("/api/maintenance/components/{component_id}/update")
+    async def maintenance_update(component_id: str,
+                                 auth: Auth = Depends(require_role("admin"))):
+        from . import maintenance
+        try:
+            return await asyncio.to_thread(maintenance.update, db, component_id,
+                                           auth.actor)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/maintenance/update-all")
+    async def maintenance_update_all(auth: Auth = Depends(require_role("admin"))):
+        from . import maintenance
+        return await asyncio.to_thread(maintenance.update_all, db, auth.actor)
+
+    @app.get("/api/memory/browse", dependencies=[Depends(require_role("viewer"))])
+    def memory_browse(scope: str = "", limit: int = 50):
+        """Recent memories, so the tab is not search-only: you cannot search for
+        what you do not know exists."""
+        client = amos_client()
+        if client is None:
+            raise HTTPException(status_code=502, detail="AMOS unavailable")
+        try:
+            rows = client.list_recent(limit=max(1, min(limit, 200)))
+        except Exception as exc:
+            raise HTTPException(status_code=502,
+                                detail=f"AMOS list failed: {type(exc).__name__}") from exc
+        items = [row for row in (_memory_row(r) for r in (rows or []))
+                 if not scope or scope in (row["scope"] or "")]
+        stats = {}
+        try:
+            stats = client.stats() or {}
+        except Exception:            # a missing summary must not hide the list
+            stats = {}
+        from . import maintenance
+        return {"items": items, "stats": stats,
+                "console": maintenance.amos_web(cfg)}
 
     @app.post("/api/runs/{run_id}/respond")
     async def respond_run(run_id: str, r: RespondIn,

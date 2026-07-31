@@ -225,7 +225,7 @@ def test_test_endpoint_records_and_audits_the_verdict(tmp_path, stub):
     # the verdict sticks around, so the UI still shows it after a reload
     assert client.get("/api/resources").json()[0]["test"]["status"] == "ok"
     assert any(r["action"] == "resource.test.ok"
-               for r in client.get("/api/audit?limit=50").json())
+               for r in client.get("/api/audit?limit=50").json()["rows"])
     assert client.post("/api/resources/res_ghost/test").status_code == 400
 
 

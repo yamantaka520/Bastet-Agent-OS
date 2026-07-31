@@ -81,6 +81,29 @@ def test_audit_attributes_the_acting_user(client):
     _, operator = make_user(client, "oscar", "operator")
     client.post("/api/templates", headers=operator,
                 json={"name": "t1", "stages": [{"name": "s", "gate": "auto"}]})
-    audit = client.get("/api/audit", headers=client.admin).json()
+    audit = client.get("/api/audit", headers=client.admin).json()["rows"]
     template_rows = [r for r in audit if r["action"] == "template.upsert"]
     assert template_rows and template_rows[0]["actor"].startswith("user:usr_")
+
+
+def test_audit_search_narrows_by_category_time_and_keyword(client):
+    """An audit log you cannot search is one nobody reads."""
+    client.post("/api/teams", json={"id": "t-search", "name": "S"},
+                headers=client.admin)
+    body = client.get("/api/audit?action=team&limit=50", headers=client.admin).json()
+    assert body["rows"] and all(r["action"].startswith("team")
+                                for r in body["rows"])
+    assert "team" in body["categories"]          # facets drive the filter UI
+
+    hit = client.get("/api/audit?q=t-search", headers=client.admin).json()
+    assert any("t-search" in (r["target_id"] or "") + (r["detail_json"] or "")
+               for r in hit["rows"])
+    none = client.get("/api/audit?q=zzz-nothing-here", headers=client.admin).json()
+    assert none["rows"] == [] and none["count"] == 0
+
+    future = client.get("/api/audit?since=2999-01-01", headers=client.admin).json()
+    assert future["rows"] == []
+    past = client.get("/api/audit?until=1999-01-01", headers=client.admin).json()
+    assert past["rows"] == []
+    capped = client.get("/api/audit?limit=99999", headers=client.admin).json()
+    assert len(capped["rows"]) <= 1000            # a filter must not become a DoS

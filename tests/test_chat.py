@@ -346,3 +346,39 @@ async def test_failed_agent_turn_reports_cleanly(client, tmp_path, monkeypatch):
             await chat_mod.reply(db, home.root, session)
     finally:
         db.close()
+
+
+def test_chat_turns_land_in_amos_and_come_back(tmp_path, monkeypatch):
+    """The chat's whole claim is that planning survives into later runs, so this
+    goes through real AMOS rather than a stub.
+
+    Both directions were broken and silently so: `remember` passed
+    `project_id=` and `_memory_recall` passed it too, neither of which
+    `MemoryClient` accepts — the TypeError was caught and logged at info, so
+    every planning conversation looked remembered and nothing was.
+    """
+    pytest.importorskip("agent_memory_os.client")
+    monkeypatch.setenv("AGENT_MEMORY_HOME", str(tmp_path / "amos"))
+
+    db = Db(tmp_path / "chat.db")
+    ts = now()
+    db.write("INSERT INTO projects(id, team_id, repo_path, created_at, updated_at) "
+             "VALUES('catswalker','team1',?,?,?)", (str(tmp_path), ts, ts))
+    session = {"scope_type": "project", "scope_id": "catswalker",
+               "title": "貓咪散步預約系統"}
+
+    assert chat.remember(db, session, "user", "驗收條件：預約流程可完整走完") is True
+
+    recalled = chat._memory_recall(db, session, "驗收條件")
+    assert "預約流程" in recalled
+
+    # the id is a visibility grant, which is what gates recall for the agents
+    from agent_memory_os.client import MemoryClient
+    record = MemoryClient().list_recent(limit=1)[0]
+    assert record.scope == "project"
+    assert "project:catswalker" in record.visibility
+
+    # another project's session must not see it
+    other = {"scope_type": "project", "scope_id": "otherproj", "title": "x"}
+    assert chat._memory_recall(db, other, "驗收條件") == ""
+    db.close()

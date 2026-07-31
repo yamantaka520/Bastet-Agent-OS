@@ -59,6 +59,8 @@ export default function AdminPage(props: { refreshKey: number }) {
 
       <SecretsSection projects={projects} teams={teams} />
 
+      <MaintenanceSection />
+
       <Section title={t("adm.channels")}>
         <InlineForm
           fields={[{ name: "name", placeholder: t("adm.channelNamePh") },
@@ -274,6 +276,119 @@ function UsersSection({ users, reload, freshToken, setFreshToken }: {
           </span>,
         ])} />
       <p className="muted">{t("adm.roleHint")}</p>
+    </Section>
+  );
+}
+
+/** Maintenance: what is installed, what is newer, update one or all.
+ *
+ *  Bastet orchestrates other people's tools, so staying current is a question
+ *  about a dozen things installed in different ways. Nothing self-updates —
+ *  changing the agents under a running project is not something you could
+ *  reason about afterwards. */
+type Component = { id: string; label: string; kind: string; installed: string | null;
+                   available: string | null; state: string; source: string };
+type UpdateResult = { id: string; status: string; from: string | null;
+                      to: string | null; log: string; restart_required: boolean };
+
+const STATE_BADGE: Record<string, string> = {
+  current: "🟢", outdated: "🟡", missing: "🔴", unknown: "⚪",
+};
+
+function MaintenanceSection() {
+  const t = useT();
+  const [rows, setRows] = useState<Component[] | null>(null);
+  const [busy, setBusy] = useState("");
+  const [result, setResult] = useState<UpdateResult[] | null>(null);
+  const [error, setError] = useState("");
+
+  const check = async () => {
+    setBusy("check");
+    setError("");
+    try { setRows(await api<Component[]>("/api/maintenance/components")); }
+    catch (e) { setError(String((e as Error).message)); }
+    finally { setBusy(""); }
+  };
+  useEffect(() => { check(); }, []);
+
+  const updateOne = async (id: string) => {
+    setBusy(id);
+    setError("");
+    try {
+      const out = await post<UpdateResult>(
+        `/api/maintenance/components/${id}/update`, {});
+      setResult([out]);
+      await check();
+    } catch (e) { setError(String((e as Error).message)); }
+    finally { setBusy(""); }
+  };
+
+  const updateAll = async () => {
+    if (!window.confirm(t("mnt.allConfirm"))) return;
+    setBusy("all");
+    setError("");
+    try {
+      const out = await post<{ results: UpdateResult[] }>(
+        "/api/maintenance/update-all", {});
+      setResult(out.results);
+      await check();
+    } catch (e) { setError(String((e as Error).message)); }
+    finally { setBusy(""); }
+  };
+
+  const outdated = (rows ?? []).filter((r) => r.state === "outdated").length;
+  const restart = (result ?? []).some((r) => r.restart_required);
+
+  return (
+    <Section title={t("mnt.title")}
+             action={
+               <span className="row-ops">
+                 <button className="ghost" disabled={!!busy} onClick={check}>
+                   {busy === "check" ? t("mnt.checking") : t("mnt.checkAll")}</button>
+                 <button disabled={!!busy} onClick={updateAll}>
+                   {busy === "all" ? t("mnt.updating") : t("mnt.updateAll")}</button>
+               </span>}>
+      {error && <p className="error">{error}</p>}
+      {!rows && <p className="muted">{t("mnt.checking")}</p>}
+      {rows && (
+        <>
+          <p className="muted">{outdated
+            ? t("mnt.outdatedCount", { n: outdated })
+            : t("mnt.allCurrent")}</p>
+          <DataTable
+            head={[t("c.name"), t("mnt.installed"), t("mnt.available"),
+                   t("c.status"), ""]}
+            rows={rows.map((r) => [
+              r.label,
+              r.installed ?? "—",
+              r.available ?? "—",
+              <span key={`s-${r.id}`}>
+                {STATE_BADGE[r.state] ?? "⚪"} {t(`mnt.state.${r.state}`,
+                                                 undefined, r.state)}</span>,
+              <button key={`u-${r.id}`} className="ghost" disabled={!!busy}
+                      onClick={() => updateOne(r.id)}>
+                {busy === r.id ? t("mnt.updating")
+                               : r.state === "missing" ? t("mnt.install")
+                               : t("mnt.update")}</button>,
+            ])} />
+        </>
+      )}
+      {result && (
+        <div className="stage-editor">
+          {result.map((r) => (
+            <p key={r.id} className={r.status === "failed" ? "error" : "notice"}>
+              {r.id}: {t(`mnt.result.${r.status}`, undefined, r.status)}
+              {r.from || r.to ? ` (${r.from ?? "—"} → ${r.to ?? "—"})` : ""}
+            </p>
+          ))}
+          {restart && <p className="notice">{t("mnt.restartNeeded")}</p>}
+          <details>
+            <summary className="muted">{t("res.installLog")}</summary>
+            <pre className="spec">{result.map((r) => r.log).join("\n\n")}</pre>
+          </details>
+        </div>
+      )}
+      <p className="muted">{t("mnt.hint")}</p>
     </Section>
   );
 }

@@ -127,6 +127,20 @@ template's command (`.venv/bin/pytest -q`, `npx vitest run`).
 A command that cannot run at all is reported as a configuration problem rather
 than a failing test — re-running the agent cannot fix a missing script.
 
+## Keeping it current
+
+Bastet runs other people's tools, so the Admin tab lists each component — Bastet
+itself, Agent Memory OS, the Claude Agent SDK, pytest, and the `claude` /
+`codex` / `grok` / `agy` / `hermes` CLIs — with its installed and available
+version, updatable one at a time or all at once.
+
+Nothing updates itself. Changing the agents underneath a running project is not
+something you could reason about afterwards, so an update happens when you press
+the button and is audited. A component whose available version cannot be
+determined (an official install script with no version query) reports `unknown`
+instead of implying it is current, and an installer that ran cleanly without
+moving the version reports `unchanged` rather than claiming success.
+
 ## Versioning
 
 `src/bastet_agent_os/__init__.py` holds the single `__version__`;

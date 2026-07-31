@@ -44,6 +44,10 @@ TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".csv",
 
 SCOPES = ("global", "team", "project")
 
+# who owns a chat turn in AMOS: the control plane, not any one agent — the
+# memory outlives whichever agent happened to answer
+MEMORY_OWNER = "bastet"
+
 
 class ChatError(Exception):
     pass
@@ -278,28 +282,44 @@ def _memory_recall(db, session, query: str = "") -> str:
         from agent_memory_os.client import MemoryClient
     except Exception:
         return ""
+    scope_type, scope_id = session["scope_type"], session["scope_id"]
     try:
         client = MemoryClient()
-        scope_type, scope_id = session["scope_type"], session["scope_id"]
-        kwargs: dict[str, Any] = {"limit": 6}
-        if scope_type == "project":
-            kwargs["project_id"] = scope_id
-        elif scope_type == "team":
-            kwargs["team_id"] = scope_id
+        # AMOS `scope` is the bare level; the id lives in the visibility grant,
+        # so narrow by level upstream and by grant here
+        kwargs: dict[str, Any] = {"limit": 12}
+        if scope_type in ("project", "team"):
+            kwargs["scope"] = scope_type
         hits = client.search(query or session["title"] or "project planning", **kwargs)
     except Exception as exc:                      # AMOS is optional at runtime
         log.info("chat memory recall skipped: %s", type(exc).__name__)
         return ""
+    grant = f"{scope_type}:{scope_id}" if scope_type != "global" else ""
     lines = []
     for hit in hits or []:
-        content = (hit.get("content") if isinstance(hit, dict) else str(hit)) or ""
+        record = getattr(hit, "record", hit)
+        if isinstance(record, dict):
+            content, grants = record.get("content", ""), record.get("visibility") or []
+        else:
+            content = getattr(record, "content", "") or ""
+            grants = getattr(record, "visibility", None) or []
+        if grant and grant not in grants:
+            continue
         if content:
             lines.append(f"- {content[:300]}")
+        if len(lines) >= 6:
+            break
     return "\n".join(lines)
 
 
 def remember(db, session, role: str, content: str) -> bool:
-    """Write a turn into AMOS so later runs inherit the decision."""
+    """Write a turn into AMOS so later runs inherit the decision.
+
+    AMOS scope is the bare level (`project`/`team`/`global`) and the id travels
+    as a visibility grant (`project:<id>`) — that grant is what gates which
+    agents can recall it. Passing `project_id=` as a keyword raises TypeError,
+    which this function used to swallow: every chat turn looked remembered and
+    none of it was."""
     if not content.strip():
         return False
     try:
@@ -307,16 +327,19 @@ def remember(db, session, role: str, content: str) -> bool:
     except Exception:
         return False
     scope_type, scope_id = session["scope_type"], session["scope_id"]
-    kwargs: dict[str, Any] = {}
+    kwargs: dict[str, Any] = {"scope": "global"}
     if scope_type == "project":
-        kwargs = {"project_id": scope_id, "team_id": _team_of(db, scope_id)}
+        team = _team_of(db, scope_id)
+        grants = [f"project:{scope_id}"] + ([f"team:{team}"] if team else [])
+        kwargs = {"scope": "project", "visibility": grants}
     elif scope_type == "team":
-        kwargs = {"team_id": scope_id}
+        kwargs = {"scope": "team", "visibility": [f"team:{scope_id}"]}
     try:
-        MemoryClient().add(f"[chat/{role}] {content[:2000]}", type="note", **kwargs)
+        MemoryClient().add(f"[chat/{role}] {content[:2000]}", type="note",
+                           owner=MEMORY_OWNER, **kwargs)
         return True
     except Exception as exc:
-        log.info("chat memory write skipped: %s", type(exc).__name__)
+        log.warning("chat memory write failed (%s): %s", type(exc).__name__, exc)
         return False
 
 

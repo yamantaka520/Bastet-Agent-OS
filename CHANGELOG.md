@@ -8,6 +8,63 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.17.0] - 2026-07-31
+
+### Added — searching the audit trail
+The audit tab showed the latest rows and nothing else, which is unusable the
+moment there are thousands. `GET /api/audit` now takes `q` (free text over
+actor, action, target and detail), `action`, `actor`, `since`/`until` dates and
+`limit`, and returns the categories present so the filter offers real values
+rather than a guessed list.
+
+### Added — memory browsing, and the way out to AMOS
+Team memory could only be searched, so you had to already know what you were
+looking for. The memory tab now lists recent memories by scope with counts, and
+links to the full Agent Memory OS console when it is running — with the command
+to start it when it is not, instead of a dead link.
+
+### Added — maintenance: check and update every moving part
+Bastet orchestrates other people's tools, so "am I current?" is a question
+about a dozen things installed in different ways. The Admin tab now lists each
+component — Bastet itself, agent-memory-os, the Claude Agent SDK, pytest, and
+the claude/codex/grok/agy/hermes CLIs — with its installed and available
+version, and updates them individually or all at once.
+
+Nothing self-updates: swapping the agents under a running project is not
+something anyone could reason about afterwards. A component whose available
+version cannot be determined (an official installer with no version endpoint)
+reports `unknown` rather than implying it is current, and an update that ran
+cleanly but moved nothing reports `unchanged` rather than claiming success.
+Updating Bastet itself says so and asks for a service restart.
+
+### Fixed — chat memory was never actually written
+`chat.remember()` called AMOS with `project_id=`/`team_id=` keywords that
+`MemoryClient.add` does not accept, and the resulting `TypeError` was caught and
+logged at info level. Every planning conversation reported that it had been
+remembered and none of it had; recall was broken the same way. AMOS takes the
+bare scope (`project`) with the id as a visibility grant (`project:<id>`) —
+which is also what gates which agents may recall it — so that is what Bastet
+writes now, and a failed write is logged as a warning instead of a shrug.
+
+### Fixed — the memory tab read AMOS records as dictionaries
+`search` returns `SearchResult(record, score, reason)` and `list_recent` returns
+`MemoryRecord`; both were read with `.get`, which raises on a dataclass. The
+failure only appeared where AMOS was actually installed, so it passed tests and
+broke on real hosts. Both endpoints now normalise through one function, and show
+the visibility grants (the real project/team pointer) instead of a `project_id`
+field that never existed.
+
+### Changed — one control system instead of per-page sizes
+Buttons, inputs and selects drifted in height, padding and font size from page
+to page, so a row of them never lined up. They now share `--control-h`,
+`--control-pad`, `--control-radius` and `--control-font`; variants (`ghost`,
+`danger`) change emphasis only, chips are the one deliberate exception, and
+control rows align on a common baseline.
+
+### Changed — board cards say what the task is
+A card led with its job id, which identifies a row but tells you nothing. The
+task title is now the first line and the id is secondary.
+
 ## [0.16.0] - 2026-07-31
 
 ### Fixed — automatic continuation, the thing the engine exists for
