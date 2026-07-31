@@ -470,6 +470,19 @@ const en: Dict = {
   "proj.job.open": "not started",
   "proj.job.missing": "job no longer exists",
   "proj.planSyncHint": "A task with a job id is the same card you see on the board, status included; one without has not been dispatched yet.",
+  "proj.planSource": "Breakdown from: {by} · {when} · {messages} chat messages at the time",
+  "proj.planNoSource": "This breakdown has no recorded source (made before provenance was tracked)",
+  "proj.planStale": "⚠ This breakdown is an old snapshot: the conversation moved on after it was taken ({messages} messages now). Re-run it to reflect the actual plan.",
+  "proj.clearTasks": "Clear the undispatched breakdown",
+  "proj.clearConfirm": "Clear the undispatched breakdown? Tasks already dispatched are kept.",
+  "proj.origin.chat": "from chat",
+  "proj.origin.runner": "by the runner",
+  "proj.origin.dispatch": "dispatched by hand",
+  "proj.origin.pm": "PM breakdown",
+  "proj.dispatchedCount": "{n} dispatched",
+  "chat.decompose": "Turn this plan into tasks",
+  "chat.decomposeHint": "The breakdown reads this conversation's agreed plan and produces the project's task cards — still yours to confirm on the Project tab.",
+  "chat.decomposed": "✅ {n} tasks created — confirm them on the Project tab to run",
 };
 
 export default en;

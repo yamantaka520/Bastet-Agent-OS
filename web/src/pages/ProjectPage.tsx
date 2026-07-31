@@ -23,6 +23,10 @@ type Template = { id: string };
 type PoolResource = { id: string; name: string; kind: string };
 type Task = { title: string; spec: string; role?: string; job_id?: string;
                origin?: string; job_status?: string; job_stage?: string };
+type Plan = { tasks: Task[]; confirmed: boolean; by: string; at?: string;
+              stale?: boolean; dispatched?: number;
+              source?: { kind?: string; messages?: number; chat_at?: string };
+              chat?: { messages: number; last_at: string | null } };
 type Overview = {
   project: { id: string; team_id: string; repo_path: string | null;
              description: string; template_id: string | null };
@@ -315,16 +319,14 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
   projectId: string; project: Project; agents: Agent[]; canOperate: boolean;
   refreshKey: number; onChanged: () => void; t: T;
 }) {
-  const [plan, setPlan] = useState<{ tasks: Task[]; confirmed: boolean;
-                                     by: string } | null>(null);
+  const [plan, setPlan] = useState<Plan | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [pmAgent, setPmAgent] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(() => {
-    api<{ task_plan: { tasks: Task[]; confirmed: boolean; by: string } }>(
-      `/api/projects/${projectId}/lifecycle`)
+    api<{ task_plan: Plan }>(`/api/projects/${projectId}/lifecycle`)
       .then((state) => {
         setPlan(state.task_plan);
         setTasks(state.task_plan.tasks);
@@ -339,7 +341,7 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
       const out = await post<{ tasks: Task[] }>(
         `/api/projects/${projectId}/decompose`, { agent_id: pmAgent });
       setTasks(out.tasks);
-      setPlan({ tasks: out.tasks, confirmed: false, by: pmAgent });
+      load();          // pick up provenance + preserved dispatched rows
     } catch (e) { setError(String((e as Error).message)); }
     finally { setBusy(false); }
   };
@@ -379,6 +381,21 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
               && <span className="danger-text">{t("proj.tasksPending")}</span>)}
         </div>
       )}
+      {plan?.stale && (
+        <p className="error">{t("proj.planStale",
+          { messages: plan.chat?.messages ?? 0 })}</p>
+      )}
+      {!!tasks.length && plan && (
+        <p className="muted">
+          {plan.source?.messages != null
+            ? t("proj.planSource", { by: plan.by || "—",
+                                     when: (plan.at || "").replace("T", " ").slice(0, 16),
+                                     messages: plan.source.messages })
+            : t("proj.planNoSource")}
+          {plan.dispatched
+            ? ` · ${t("proj.dispatchedCount", { n: plan.dispatched })}` : ""}
+        </p>
+      )}
       {!tasks.length && <p className="muted">{t("proj.noTasks")}</p>}
       {tasks.map((task, i) => (
         <div key={i} className="task-row">
@@ -401,7 +418,8 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
                 {task.job_status ? t(`proj.job.${task.job_status}`,
                                      undefined, task.job_status) : ""}
                 {task.job_stage ? ` · ${task.job_stage}` : ""}
-                {task.origin ? ` · ${task.origin}` : ""}
+                {task.origin
+                  ? ` · ${t(`proj.origin.${task.origin}`, undefined, task.origin)}` : ""}
                 <code className="detail"> {task.job_id}</code>
               </span>
             )
@@ -417,6 +435,14 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
           <button className="ghost"
                   onClick={() => setTasks([...tasks, { title: "", spec: "" }])}>
             {t("proj.addTask")}</button>
+          {!!tasks.filter((x) => !x.job_id).length && (
+            <button className="ghost danger-text" onClick={async () => {
+              if (!window.confirm(t("proj.clearConfirm"))) return;
+              setError("");
+              try { await del(`/api/projects/${projectId}/tasks`); load(); onChanged(); }
+              catch (e) { setError(String((e as Error).message)); }
+            }}>{t("proj.clearTasks")}</button>
+          )}
           <button onClick={confirm}
                   disabled={!tasks.length || !tasks.every((x) => x.title.trim())}>
             {t("proj.confirmTasks")}</button>

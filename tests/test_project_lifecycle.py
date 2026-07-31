@@ -268,3 +268,62 @@ async def test_a_project_with_no_agents_does_not_sit_in_running_forever(runner):
     assert lifecycle.status_of(db, "proj1") == lifecycle.READY   # honestly parked
     assert db.query("SELECT * FROM audit_log WHERE action='project.runner.idle'")
     assert db.query("SELECT * FROM audit_log WHERE action='project.task.skipped'")
+
+
+# ---- the plan must be traceable to the conversation it came from --------------------
+
+async def test_a_breakdown_taken_before_the_chat_moved_on_is_marked_stale(orch, proj,
+                                                                         tmp_path):
+    """The live case: a decomposition described a booking system while the chat
+    had already turned the project into something else. Passing that off as "the
+    plan" is worse than showing nothing."""
+    from bastet_agent_os import chat as chat_mod
+
+    proj.write("INSERT INTO project_agent_roles(project_id, agent_id, role, "
+               "preference) VALUES('proj1','fakebot','pm',5)")
+    session = chat_mod.create_session(proj, scope_type="project", scope_id="proj1",
+                                      responder_kind="agent", responder_id="fakebot")
+    chat_mod.add_message(proj, session, role="user", content="做一個預約系統")
+
+    SCRIPT.append(RunResult(status="succeeded", summary=json.dumps(
+        {"tasks": [{"title": "預約 API", "spec": "s"}]})))
+    await runner_mod.decompose(proj, tmp_path, "proj1", actor="u")
+    plan = lifecycle.plan_with_jobs(proj, "proj1")
+    assert plan["stale"] is False
+    assert plan["source"]["kind"] == "chat" and plan["source"]["messages"] == 1
+
+    # the conversation continues: the project is now something else
+    chat_mod.add_message(proj, session, role="user",
+                         content="改成一個網頁小遊戲吧")
+    plan = lifecycle.plan_with_jobs(proj, "proj1")
+    assert plan["stale"] is True          # the UI must warn instead of pretending
+
+
+async def test_re_decomposing_keeps_dispatched_tasks(orch, proj, tmp_path):
+    """Replacing the proposal must not cut the plan's link to running jobs."""
+    proj.write("INSERT INTO project_agent_roles(project_id, agent_id, role, "
+               "preference) VALUES('proj1','fakebot','pm',5)")
+    lifecycle.save_task_plan(proj, "proj1", [
+        {"title": "已派工的事", "spec": "s", "job_id": "job_live"},
+        {"title": "還沒派的舊提案", "spec": "s"}], by="pm", confirmed=True)
+
+    SCRIPT.append(RunResult(status="succeeded", summary=json.dumps(
+        {"tasks": [{"title": "新提案 A", "spec": "s"},
+                   {"title": "新提案 B", "spec": "s"}]})))
+    await runner_mod.decompose(proj, tmp_path, "proj1", actor="u")
+
+    titles = [t["title"] for t in lifecycle.task_plan(proj, "proj1")["tasks"]]
+    assert titles == ["已派工的事", "新提案 A", "新提案 B"]
+    assert "還沒派的舊提案" not in titles          # the stale proposal is replaced
+
+
+def test_clearing_a_stale_plan_keeps_the_running_work(proj):
+    lifecycle.save_task_plan(proj, "proj1", [
+        {"title": "跑著的", "spec": "s", "job_id": "job_live"},
+        {"title": "提案一", "spec": "s"},
+        {"title": "提案二", "spec": "s"}], by="pm", confirmed=True)
+    assert lifecycle.clear_undispatched(proj, "proj1", actor="u") == 2
+    tasks = lifecycle.task_plan(proj, "proj1")["tasks"]
+    assert [t["title"] for t in tasks] == ["跑著的"]
+    assert lifecycle.clear_undispatched(proj, "proj1") == 0      # idempotent
+    assert proj.query("SELECT * FROM audit_log WHERE action='project.tasks.clear'")

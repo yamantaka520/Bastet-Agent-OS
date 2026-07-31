@@ -490,6 +490,19 @@ const zhHans: Dict = {
   "proj.job.open": "待开始",
   "proj.job.missing": "任务已不存在",
   "proj.planSyncHint": "有 job 编号的任务就是看板上的同一张卡片，状态会同步；没有编号的还没派发。",
+  "proj.planSource": "拆分来源：{by} · {when} · 当时对话 {messages} 条",
+  "proj.planNoSource": "这份拆分没有记录来源（在支持来源记录之前产生）",
+  "proj.planStale": "⚠ 这份拆分是旧快照：对话在拆分后又更新了（目前 {messages} 条）。重新拆分才会反映实际规划。",
+  "proj.clearTasks": "清除未派发的拆分",
+  "proj.clearConfirm": "确定清除未派发的拆分？已派发的任务会保留。",
+  "proj.origin.chat": "从对话派发",
+  "proj.origin.runner": "执行器派发",
+  "proj.origin.dispatch": "手动派发",
+  "proj.origin.pm": "PM 拆分",
+  "proj.dispatchedCount": "已派发 {n} 项",
+  "chat.decompose": "把这段规划变成任务拆分",
+  "chat.decomposeHint": "拆分会读这段对话的完整规划结果，产生项目的任务卡（尚待你在“项目”页人工确认）。",
+  "chat.decomposed": "✅ 已产生 {n} 项任务拆分 — 到“项目”页确认后即可执行",
 };
 
 export default zhHans;

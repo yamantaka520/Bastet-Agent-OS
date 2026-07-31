@@ -331,6 +331,29 @@ function Conversation({ sessionId, agents, responders, canOperate, refreshKey,
 
           {session.scope_type === "project" && (
             <div className="chat-dispatch">
+              <b>{t("chat.decompose")}</b>
+              <div className="inline-form">
+                <button onClick={async () => {
+                  setError("");
+                  setBusy(true);
+                  try {
+                    const out = await post<{ tasks: unknown[] }>(
+                      `/api/chat/sessions/${sessionId}/decompose`, {});
+                    setError("");
+                    load();
+                    onChanged();
+                    window.alert(t("chat.decomposed", { n: out.tasks.length }));
+                  } catch (e) { setError(String((e as Error).message)); }
+                  finally { setBusy(false); }
+                }} disabled={busy}>
+                  {busy ? t("proj.decomposing") : t("chat.decompose")}</button>
+              </div>
+              <p className="muted">{t("chat.decomposeHint")}</p>
+            </div>
+          )}
+
+          {session.scope_type === "project" && (
+            <div className="chat-dispatch">
               <b>{t("chat.dispatch")}</b>
               <div className="inline-form">
                 <label className="res-field">

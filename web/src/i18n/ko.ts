@@ -470,6 +470,19 @@ const ko: Dict = {
   "proj.job.open": "미시작",
   "proj.job.missing": "작업이 존재하지 않음",
   "proj.planSyncHint": "job id 가 있는 작업은 보드에 보이는 같은 카드이며 상태도 동기화됩니다. id 가 없으면 아직 배정되지 않은 것입니다.",
+  "proj.planSource": "분해 출처: {by} · {when} · 당시 대화 {messages} 건",
+  "proj.planNoSource": "이 분해에는 출처 기록이 없습니다（출처 기록 기능 이전에 생성）",
+  "proj.planStale": "⚠ 이 분해는 오래된 스냅숏입니다: 이후 대화가 진행되었습니다（현재 {messages} 건）. 실제 기획을 반영하려면 다시 실행하세요.",
+  "proj.clearTasks": "미배정 분해 지우기",
+  "proj.clearConfirm": "미배정 분해를 지울까요? 이미 배정된 작업은 유지됩니다.",
+  "proj.origin.chat": "대화에서 배정",
+  "proj.origin.runner": "러너 배정",
+  "proj.origin.dispatch": "수동 배정",
+  "proj.origin.pm": "PM 분해",
+  "proj.dispatchedCount": "{n} 건 배정됨",
+  "chat.decompose": "이 기획을 작업으로 분해",
+  "chat.decomposeHint": "이 대화에서 합의된 기획을 읽어 프로젝트의 작업 카드를 만듭니다（「프로젝트」 탭에서의 확인은 사용자가 합니다）.",
+  "chat.decomposed": "✅ 작업 {n} 건 생성 — 「프로젝트」 탭에서 확인하면 실행할 수 있습니다",
 };
 
 export default ko;

@@ -8,6 +8,31 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.11.0] - 2026-07-31
+
+### Added — the task breakdown is traceable to the conversation it came from
+The breakdown shown on a project could be a stale snapshot of a conversation
+that had since changed direction entirely, with nothing saying so. Now:
+
+- **Provenance.** A breakdown records which conversation it read and how many
+  messages existed at the time, shown on the project card as
+  "拆分來源：<agent> · <when> · 當時對話 N 則".
+- **Staleness.** If the conversation has gained messages since, the plan is
+  flagged: this is an old snapshot, re-run it to reflect the actual plan.
+  Comparison uses the recorded message count, not timestamps — `now()` has
+  second resolution, so a decomposition would otherwise flag itself.
+- **Re-running preserves dispatched work.** Only the undispatched proposal is
+  replaced; rows already linked to a job keep their link, because losing those
+  would cut the plan's connection to running jobs.
+- **`DELETE /api/projects/{id}/tasks`** clears a stale proposal while keeping
+  every task that already has a job, with a button on the card.
+- **Decompose from the chat** (`POST /api/chat/sessions/{id}/decompose`), because
+  that is where planning actually finishes: the button sits in the conversation,
+  posts a system message recording how many tasks were produced, and the tasks
+  land on the project awaiting human confirmation.
+- Each plan row shows where its work came from (from chat / by the runner /
+  dispatched by hand / PM breakdown) alongside the job's live status.
+
 ## [0.10.2] - 2026-07-31
 
 ### Fixed

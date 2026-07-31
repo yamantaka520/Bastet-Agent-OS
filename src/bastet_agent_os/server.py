@@ -1109,6 +1109,17 @@ def create_app(home: Home) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"tasks": tasks, "confirmed": False}
 
+    @app.delete("/api/projects/{project_id}/tasks")
+    def clear_project_tasks(project_id: str,
+                            auth: Auth = Depends(require_role("operator"))):
+        """Drop a stale breakdown. Tasks already dispatched are kept — they are
+        the link between the plan and the running jobs."""
+        if db.one("SELECT id FROM projects WHERE id=?", (project_id,)) is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        dropped = lifecycle_mod.clear_undispatched(db, project_id, actor=auth.actor)
+        return {"dropped": dropped,
+                "task_plan": lifecycle_mod.plan_with_jobs(db, project_id)}
+
     @app.put("/api/projects/{project_id}/tasks")
     def save_project_tasks(project_id: str, body: TaskPlanIn,
                            auth: Auth = Depends(require_role("operator"))):
@@ -1251,6 +1262,32 @@ def create_app(home: Home) -> FastAPI:
         bus.emit("chat.message", session["scope_id"], session_id=session_id)
         return {"reply": answer,
                 "messages": chat_mod.messages(db, session_id, limit=200)}
+
+    @app.post("/api/chat/sessions/{session_id}/decompose")
+    async def decompose_from_chat(session_id: str, body: DecomposeIn,
+                                 auth: Auth = Depends(require_role("operator"))):
+        """Turn the conversation into the project's task breakdown, from inside
+        the chat — this is where planning actually finishes, so this is where the
+        task cards should come from."""
+        try:
+            session = chat_mod.get_session(db, session_id)
+        except chat_mod.ChatError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if session["scope_type"] != "project":
+            raise HTTPException(status_code=400,
+                                detail="只有專案範圍的對話可以產生任務拆分")
+        try:
+            tasks = await runner_mod.decompose(db, home.root, session["scope_id"],
+                                              body.agent_id, actor=auth.actor)
+        except runner_mod.PlanError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        chat_mod.add_message(db, session_id, role="system", author=auth.actor,
+                             content=f"🧩 已從這段對話產生 {len(tasks)} 項任務拆分"
+                                     f"（尚待人工確認）",
+                             meta={"tasks": len(tasks)})
+        bus.emit("project.status", session["scope_id"], status="planned")
+        return {"tasks": tasks, "confirmed": False,
+                "project_id": session["scope_id"]}
 
     @app.post("/api/chat/sessions/{session_id}/dispatch")
     async def dispatch_from_chat(session_id: str, body: ChatDispatchIn,

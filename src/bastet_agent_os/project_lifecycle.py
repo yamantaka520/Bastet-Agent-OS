@@ -100,17 +100,48 @@ def task_plan(db, project_id: str) -> dict[str, Any]:
     config = json.loads(row["config_json"] or "{}")
     plan = config.get("task_plan") or {}
     return {"tasks": plan.get("tasks", []), "at": plan.get("at"),
-            "by": plan.get("by", ""), "confirmed": bool(plan.get("confirmed"))}
+            "by": plan.get("by", ""), "confirmed": bool(plan.get("confirmed")),
+            "source": plan.get("source") or {}}
 
 
 def save_task_plan(db, project_id: str, tasks: list[dict[str, Any]], by: str,
-                   confirmed: bool = False) -> None:
+                   confirmed: bool = False,
+                   source: dict[str, Any] | None = None) -> None:
+    """Store the plan. `source` records which conversation it came from, so a
+    proposal can be told apart from the discussion that has since moved on."""
     row = db.one("SELECT config_json FROM projects WHERE id=?", (project_id,))
     config = json.loads(row["config_json"] or "{}")
+    previous = config.get("task_plan") or {}
     config["task_plan"] = {"tasks": tasks, "at": now(), "by": by,
-                           "confirmed": confirmed}
+                           "confirmed": confirmed,
+                           "source": source if source is not None
+                                     else previous.get("source") or {}}
     db.write("UPDATE projects SET config_json=?, updated_at=? WHERE id=?",
              (json.dumps(config), now(), project_id))
+
+
+def chat_state(db, project_id: str) -> dict[str, Any]:
+    """When this project's planning conversation was last touched."""
+    row = db.one("SELECT COUNT(*) AS messages, MAX(m.at) AS last_at "
+                 "FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id "
+                 "WHERE s.scope_type='project' AND s.scope_id=? AND m.role != 'system'",
+                 (project_id,))
+    return {"messages": row["messages"] if row else 0,
+            "last_at": row["last_at"] if row else None}
+
+
+def clear_undispatched(db, project_id: str, actor: str = "") -> int:
+    """Throw away the proposal but keep every task that already has a job.
+    A stale breakdown should be removable without losing running work."""
+    plan = task_plan(db, project_id)
+    kept = [t for t in plan["tasks"] if t.get("job_id")]
+    dropped = len(plan["tasks"]) - len(kept)
+    if dropped:
+        save_task_plan(db, project_id, kept, by=plan["by"],
+                       confirmed=plan["confirmed"], source={})
+        db.audit(actor or "system", "project.tasks.clear", "project", project_id,
+                 {"dropped": dropped, "kept": len(kept)})
+    return dropped
 
 
 def job_progress(db, project_id: str) -> dict[str, int]:
@@ -233,6 +264,16 @@ def plan_with_jobs(db, project_id: str) -> dict[str, Any]:
     """The plan, each task carrying its job's live state — this is what makes
     the project tab and the Kanban board the same picture."""
     plan = task_plan(db, project_id)
+    # A breakdown taken before the conversation moved on is a stale snapshot; say
+    # so rather than letting it pass for "the plan". Compare the message count
+    # recorded when it was taken, not timestamps: `now()` has second resolution,
+    # so a decomposition that reads the chat and saves in the same second would
+    # otherwise flag itself stale immediately.
+    chat = chat_state(db, project_id)
+    source = plan.get("source") or {}
+    seen = source.get("messages")
+    proposal = [t for t in plan["tasks"] if not t.get("job_id")]
+    stale = bool(proposal and isinstance(seen, int) and chat["messages"] > seen)
     tasks = []
     for task in plan["tasks"]:
         item = dict(task)
@@ -245,7 +286,8 @@ def plan_with_jobs(db, project_id: str) -> dict[str, Any]:
                 item["job_status"] = job["status"]
                 item["job_stage"] = job["stage"]
         tasks.append(item)
-    return {**plan, "tasks": tasks}
+    return {**plan, "tasks": tasks, "stale": stale, "chat": chat,
+            "dispatched": sum(1 for t in tasks if t.get("job_id"))}
 
 
 def overview(db, project_id: str) -> dict[str, Any]:

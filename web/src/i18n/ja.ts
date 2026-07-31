@@ -470,6 +470,19 @@ const ja: Dict = {
   "proj.job.open": "未着手",
   "proj.job.missing": "ジョブが存在しません",
   "proj.planSyncHint": "job id があるタスクはボード上の同じカードで、状態も同期します。id がないものはまだディスパッチされていません。",
+  "proj.planSource": "分割の元：{by} · {when} · 当時の会話 {messages} 件",
+  "proj.planNoSource": "この分割には出典の記録がありません（出典を残す前に作られたもの）",
+  "proj.planStale": "⚠ この分割は古いスナップショットです：取得後に会話が進んでいます（現在 {messages} 件）。実際の計画を反映するには再実行してください。",
+  "proj.clearTasks": "未ディスパッチの分割を消す",
+  "proj.clearConfirm": "未ディスパッチの分割を消しますか？すでにディスパッチ済みのタスクは残ります。",
+  "proj.origin.chat": "チャットから",
+  "proj.origin.runner": "ランナーから",
+  "proj.origin.dispatch": "手動ディスパッチ",
+  "proj.origin.pm": "PM 分割",
+  "proj.dispatchedCount": "{n} 件ディスパッチ済み",
+  "chat.decompose": "この計画をタスクに分割",
+  "chat.decomposeHint": "この会話で合意した計画を読み、プロジェクトのタスクカードを作ります（「プロジェクト」タブでの承認はあなたの操作です）。",
+  "chat.decomposed": "✅ {n} 件のタスクを作成しました — 「プロジェクト」タブで承認すると実行できます",
 };
 
 export default ja;

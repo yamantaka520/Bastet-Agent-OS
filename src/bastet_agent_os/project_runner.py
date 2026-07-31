@@ -191,11 +191,21 @@ async def decompose(db, home_root, project_id: str, agent_id: str = "",
               "output": (result.summary or "")[:1500]})
     if not result.summary:
         raise PlanError(f"PM agent produced no output (status: {result.status})")
-    tasks = parse_tasks(result.summary)
-    lifecycle.save_task_plan(db, project_id, tasks, by=agent["id"])
+    fresh = parse_tasks(result.summary)
+    # a re-run replaces the *proposal*, not the work already dispatched: losing
+    # those rows would cut the plan's link to running jobs
+    dispatched = [t for t in lifecycle.task_plan(db, project_id)["tasks"]
+                  if t.get("job_id")]
+    chat = lifecycle.chat_state(db, project_id)
+    lifecycle.save_task_plan(db, project_id, [*dispatched, *fresh],
+                             by=agent["id"],
+                             source={"kind": "chat", "messages": chat["messages"],
+                                     "chat_at": chat["last_at"]})
     db.audit(actor or "system", "project.decompose", "project", project_id,
-             {"agent": agent["id"], "tasks": len(tasks)})
-    return tasks
+             {"agent": agent["id"], "tasks": len(fresh),
+              "kept_dispatched": len(dispatched),
+              "from_chat_messages": chat["messages"]})
+    return fresh
 
 
 # ---- execution -------------------------------------------------------------------

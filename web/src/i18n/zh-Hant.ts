@@ -489,6 +489,19 @@ const zhHant = {
   "proj.job.open": "待開始",
   "proj.job.missing": "任務已不存在",
   "proj.planSyncHint": "有 job 編號的任務就是看板上的同一張卡片，狀態會同步；沒有編號的還沒派工。",
+  "proj.planSource": "拆分來源：{by} · {when} · 當時對話 {messages} 則",
+  "proj.planNoSource": "這份拆分沒有記錄來源（在支援來源記錄之前產生）",
+  "proj.planStale": "⚠ 這份拆分是舊快照：對話在拆分後又更新了（目前 {messages} 則）。重新拆分才會反映實際規劃。",
+  "proj.clearTasks": "清除未派工的拆分",
+  "proj.clearConfirm": "確定清除未派工的拆分？已派工的任務會保留。",
+  "proj.origin.chat": "從對話派工",
+  "proj.origin.runner": "執行器派工",
+  "proj.origin.dispatch": "手動派工",
+  "proj.origin.pm": "PM 拆分",
+  "proj.dispatchedCount": "已派工 {n} 項",
+  "chat.decompose": "把這段規劃變成任務拆分",
+  "chat.decomposeHint": "拆分會讀這段對話的完整規劃結果，產生專案的任務卡（尚待你在「專案」頁人工確認）。",
+  "chat.decomposed": "✅ 已產生 {n} 項任務拆分 — 到「專案」頁確認後即可執行",
 } as const;
 
 export type Dict = { [K in keyof typeof zhHant]: string };
