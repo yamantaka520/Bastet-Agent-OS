@@ -187,13 +187,12 @@ class GrokExecutor:
                 handle.failed_reason = str(payload.get("message", ""))[:500]
             elif payload:
                 summary = str(payload.get("text") or "")
-                try:
-                    data = json.loads(summary)
-                    if isinstance(data, dict) and data.get("verdict"):
-                        verdict = {"verdict": str(data["verdict"]).lower(),
-                                   "reasons": data.get("reasons") or []}
-                except json.JSONDecodeError:
-                    verdict = None  # malformed => missing => gate rejects
+                # the schema-constrained answer, however the model packaged it:
+                # two objects back to back, prose around it, or ``` fences
+                data = last_json_object(summary)
+                if data and data.get("verdict"):
+                    verdict = {"verdict": str(data["verdict"]).lower(),
+                               "reasons": data.get("reasons") or []}
 
         if handle.timed_out:
             status = "timeout"

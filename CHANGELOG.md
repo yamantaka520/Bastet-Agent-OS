@@ -8,6 +8,16 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.12.1] - 2026-07-31
+
+### Fixed
+- The *inner* verdict parse was still strict. With 0.12.0's better error message
+  the retried review showed grok returning two verdict objects back to back, so
+  `json.loads` failed with "Extra data" and the gate still reported "no verdict"
+  even though the reviewer had answered. grok, codex and agy now read the verdict
+  with `last_json_object()` too — doubled objects, prose, or ``` fences all work,
+  and the last answer wins.
+
 ## [0.12.0] - 2026-07-31
 
 ### Fixed — the stuck review job, and the parsing assumption behind it

@@ -35,6 +35,7 @@ from .base import (
     RunEvent,
     RunResult,
     TaskSpec,
+    last_json_object,
     parse_event,
     register_builtin,
 )
@@ -222,12 +223,12 @@ class CodexExecutor:
         if handle.task.read_only and handle.last_message_path and \
                 handle.last_message_path.exists():
             try:  # schema-enforced JSON final message = the structured channel
-                data = json.loads(handle.last_message_path.read_text())
-                if isinstance(data, dict) and data.get("verdict"):
+                data = last_json_object(handle.last_message_path.read_text())
+                if data and data.get("verdict"):
                     verdict = {"verdict": str(data["verdict"]).lower(),
                                "reasons": data.get("reasons") or []}
-            except (json.JSONDecodeError, OSError):
-                verdict = None  # malformed => missing => gate rejects
+            except OSError:
+                verdict = None  # unreadable => missing => gate rejects
 
         return RunResult(
             status=status,

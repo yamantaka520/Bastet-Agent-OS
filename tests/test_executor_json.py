@@ -78,3 +78,27 @@ def test_no_executor_parses_json_without_a_type_check(name):
     source = Path(f"src/bastet_agent_os/executors/{name}.py").read_text()
     assert "json.loads(line)" not in source
     assert 'json.loads(raw.decode(errors="replace"))' not in source
+
+
+def test_a_verdict_packaged_any_way_is_still_read():
+    """Live finding: grok returned two verdict objects back to back, so a strict
+    json.loads on the inner text failed with "Extra data" and the gate reported
+    "no verdict" even though the reviewer had answered."""
+    doubled = ('{"verdict":"reject","reasons":["not done yet"]}'
+               '{"verdict":"reject","reasons":["still not done"]}')
+    data = last_json_object(doubled)
+    assert data is not None and data["verdict"] == "reject"
+    assert data["reasons"] == ["still not done"]        # the last word wins
+
+    fenced = '```json\n{"verdict":"approve","reasons":[]}\n```'
+    assert last_json_object(fenced)["verdict"] == "approve"
+    chatty = 'Looks fine to me.\n{"verdict":"approve"}\nHope that helps!'
+    assert last_json_object(chatty)["verdict"] == "approve"
+
+
+@pytest.mark.parametrize("name", ["grok", "codex", "agy"])
+def test_verdict_extraction_uses_the_tolerant_parser(name):
+    from pathlib import Path
+    source = Path(f"src/bastet_agent_os/executors/{name}.py").read_text()
+    verdict_block = source[source.index("verdict"):]
+    assert "last_json_object(" in verdict_block

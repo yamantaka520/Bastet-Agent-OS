@@ -170,10 +170,7 @@ class AgyExecutor:
         if handle.task.read_only and envelope:
             data = envelope.get("structured_output")
             if not isinstance(data, dict):
-                try:
-                    data = json.loads(envelope.get("response") or "")
-                except json.JSONDecodeError:
-                    data = None
+                data = last_json_object(str(envelope.get("response") or ""))
             if isinstance(data, dict) and data.get("verdict"):
                 verdict = {"verdict": str(data["verdict"]).lower(),
                            "reasons": data.get("reasons") or []}
