@@ -47,6 +47,10 @@ class RunAccess:
         for item in self.manifest:
             detail = "、".join(item["how"])
             lines.append(f"- **{item['name']}**（{item['kind']}）：{detail}")
+        if any("ssh" in " ".join(item["how"]) for item in self.manifest):
+            lines.append("SSH repo：金鑰已寫成檔案並設好 GIT_SSH_COMMAND，"
+                         "直接 `git clone $BASTET_RES_<名稱>_URL` 即可；"
+                         "不要把金鑰內容印出來或複製到別處。")
         if self.mcp_config_path:
             lines.append(f"- MCP 伺服器設定：`{self.mcp_config_path}`"
                          f"（已透過 {MCP_ENV} 提供）")
@@ -96,7 +100,11 @@ def build(db, home_root: Path | str, project_id: str, team_id: str,
         how: list[str] = []
         secret = _secret_value(db, row["secret_ref"] or "")
 
-        if kind == "mcp":
+        if kind == "git" and _is_ssh_url(row["endpoint"] or ""):
+            # SSH repos need a key on disk and a git that will use it; without
+            # both, an agent can test fine and still be unable to clone
+            how += _expose_git_ssh(access, home_root, run_id, row, secret, prefix)
+        elif kind == "mcp":
             server = _mcp_server(row, config, secret)
             if server is None:
                 continue
@@ -145,6 +153,40 @@ def build(db, home_root: Path | str, project_id: str, team_id: str,
             [{k: v for k, v in item.items() if k != "id"} for item in access.manifest],
             ensure_ascii=False)
     return access
+
+
+def _is_ssh_url(url: str) -> bool:
+    value = (url or "").strip()
+    return value.startswith(("git@", "ssh://")) or (
+        ":" in value.split("/")[0] and "@" in value.split(":")[0])
+
+
+def _expose_git_ssh(access: RunAccess, home_root: Path | str, run_id: str, row,
+                    secret: str | None, prefix: str) -> list[str]:
+    """Materialise the deploy key and hand the agent a git that uses it.
+
+    `GIT_SSH_COMMAND` is set for the whole run from the first SSH repo so a plain
+    `git clone` works; every resource also gets its own `_SSH_COMMAND` so an agent
+    juggling two repos can pick deliberately."""
+    url = row["endpoint"]
+    access.env[f"{prefix}_URL"] = url
+    how = [f"repo `${prefix}_URL` (ssh)"]
+    if not secret:
+        how.append("⚠ no key configured — clone will fail")
+        return how
+    directory = access_dir(home_root, run_id) / "ssh"
+    directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    key_path = directory / f"{slug(row['name']).lower()}.key"
+    key_path.write_text(secret if secret.endswith("\n") else secret + "\n")
+    os.chmod(key_path, 0o600)          # ssh refuses a world-readable key
+    command = (f"ssh -i {key_path} -o IdentitiesOnly=yes "
+               f"-o StrictHostKeyChecking=accept-new -o BatchMode=yes")
+    access.env[f"{prefix}_SSH_KEY"] = str(key_path)
+    access.env[f"{prefix}_SSH_COMMAND"] = command
+    access.env.setdefault("GIT_SSH_COMMAND", command)
+    how += [f"deploy key `${prefix}_SSH_KEY`", "git over SSH ready (GIT_SSH_COMMAND)"]
+    return how
 
 
 def _mcp_server(row, config: dict[str, Any], secret: str | None) -> dict[str, Any] | None:

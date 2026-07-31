@@ -512,6 +512,8 @@ const zhHans: Dict = {
   "tpl.editInPlace": "编辑（就地更新）",
   "tpl.saveAsCopy": "另存为新模板",
   "tpl.editingInPlace": "正在就地编辑“{name}”：保存后版本 +1，之后派发都会走新版本。已经在跑的任务保留当初的流程快照，不受影响。",
+  "res.gitHttpsHint": "HTTPS 方式：endpoint 填 repo 网址（例 https://gitlab.com/group/project.git），凭据要用 access token（GitLab 需 read_repository 权限）。要改用 SSH 就把 endpoint 换成 git@host:group/project.git。",
+  "res.gitSshHint": "SSH 方式：endpoint 是 git@host:group/project.git（或 ssh://），凭据请粘贴 SSH 私钥全文（不是公钥，结尾要有换行），并把对应公钥加到该 Git 服务的 SSH Keys / Deploy Keys。运行时 Bastet 会把密钥写成 0600 文件并设好 GIT_SSH_COMMAND，agent 直接 git clone 就能用，run 结束即删除。",
 };
 
 export default zhHans;

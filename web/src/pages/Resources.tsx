@@ -42,6 +42,13 @@ const SCOPE_KEY: Record<string, string> = { global: "sec.labelGlobal",
                                             project: "sec.labelProject" };
 const INSTALLABLE = "install_command";
 
+/** Mirrors resource_test._url_shape: the URL form decides which credential the
+ *  resource needs, so the form can say which one to paste. */
+function gitShape(url: string): "ssh" | "https" {
+  const value = (url || "").trim();
+  return value.startsWith("git@") || value.startsWith("ssh://") ? "ssh" : "https";
+}
+
 export default function ResourcesPage(props: { isAdmin: boolean; refreshKey: number }) {
   const t = useT();
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -383,6 +390,11 @@ function ResourceForm({ draft, setDraft, catalog, secrets, projects, teams, edit
         {fields.includes("mcp_secret_env") && transport === "stdio"
           && text("mcp_secret_env")}
       </div>
+
+      {draft.kind === "git" && (
+        <p className="muted">{t(gitShape(draft.endpoint) === "ssh"
+          ? "res.gitSshHint" : "res.gitHttpsHint")}</p>
+      )}
 
       <div className="inline-form">
         {fields.includes("mcp_command") && transport === "stdio"

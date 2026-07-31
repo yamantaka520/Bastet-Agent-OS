@@ -8,6 +8,27 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.14.0] - 2026-07-31
+
+### Added — SSH is a first-class git transport, not just a testable one
+0.13.0 could *test* an SSH repo but an agent still could not clone it: no key on
+disk, no git configured to use it.
+
+- A git resource whose endpoint is an SSH URL now materialises its deploy key for
+  the run (0600, under `<home>/run-access/<run_id>/ssh`, deleted when the run
+  ends) and exports `BASTET_RES_<NAME>_SSH_KEY`, `_SSH_COMMAND` and `_URL`.
+  `GIT_SSH_COMMAND` is set from the first SSH repo so a plain `git clone` works,
+  and the per-resource variable lets an agent juggling two repos pick
+  deliberately. The prompt note says how to clone — and not to copy the key.
+- A trailing newline is added if the pasted key lacks one, because ssh rejects a
+  key without it (the classic paste failure), and `IdentitiesOnly` keeps ssh from
+  silently succeeding with some other key the agent process will not have.
+- An SSH repo with no key configured is advertised as broken instead of looking
+  usable.
+- The resource form now explains the pairing per transport: HTTPS wants the repo
+  URL plus an access token, SSH wants `git@host:group/project.git` plus the full
+  private key with its public half registered as a deploy key.
+
 ## [0.13.0] - 2026-07-31
 
 ### Fixed — git resources are tested the way an agent uses them

@@ -492,6 +492,8 @@ const ja: Dict = {
   "tpl.editInPlace": "編集（そのまま更新）",
   "tpl.saveAsCopy": "新しいテンプレートとして保存",
   "tpl.editingInPlace": "「{name}」をそのまま編集しています：保存するとバージョンが +1 され、以降のディスパッチは新しい版に従います。すでに実行中のジョブは開始時のスナップショットのままです。",
+  "res.gitHttpsHint": "HTTPS の場合：endpoint は repo の URL（例 https://gitlab.com/group/project.git）、認証情報は access token です（GitLab は read_repository 権限が必要）。SSH にするなら endpoint を git@host:group/project.git にしてください。",
+  "res.gitSshHint": "SSH の場合：endpoint は git@host:group/project.git（または ssh://）で、認証情報には SSH 秘密鍵の全文を貼ります（公開鍵ではなく、末尾の改行も必要）。対応する公開鍵は各 Git サービスの SSH／デプロイキーに登録してください。実行時に Bastet が鍵を 0600 のファイルへ書き出し GIT_SSH_COMMAND を設定するので、agent はそのまま git clone できます。run 終了時に削除されます。",
 };
 
 export default ja;

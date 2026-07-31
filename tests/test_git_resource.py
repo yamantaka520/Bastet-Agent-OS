@@ -109,3 +109,56 @@ def test_a_bot_challenge_is_not_a_rejected_credential():
     real = httpx.Response(403, headers={"content-type": "application/json"},
                           text='{"message":"401 Unauthorized"}')
     assert resource_test._looks_like_challenge(real) is False
+
+
+# ---- SSH repos must be usable at run time, not just testable -----------------------
+
+def test_an_ssh_git_resource_reaches_the_agent_as_a_usable_key(db, tmp_path):
+    """Testing SSH is not enough: without a key file and a git that uses it, the
+    agent can only look at the repo it is supposed to clone."""
+    import os
+    import stat
+
+    from bastet_agent_os import resource_access
+    from bastet_agent_os.db import now as _now
+
+    key = tmp_path / "deploy_key"
+    key.write_text("-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n"
+                   "-----END OPENSSH PRIVATE KEY-----")      # no trailing newline
+    db.write("INSERT INTO projects(id, team_id, repo_path, created_at, updated_at) "
+             "VALUES('p','t','/x',?,?)", (_now(), _now()))
+    add_git(db, "GitLab CatsWalker", endpoint="git@gitlab.com:me/catswalker.git",
+            ref=f"file:{key}")
+    db.write("UPDATE resources SET name='GitLab CatsWalker' WHERE id='GitLab CatsWalker'")
+    db.write("INSERT INTO grants(id, resource_id, scope_type, scope_id, created_at) "
+             "VALUES('g','GitLab CatsWalker','project','p',?)", (_now(),))
+
+    access = resource_access.build(db, tmp_path, "p", "t", "run-ssh")
+    prefix = "BASTET_RES_GITLAB_CATSWALKER"
+    assert access.env[f"{prefix}_URL"] == "git@gitlab.com:me/catswalker.git"
+    key_file = access.env[f"{prefix}_SSH_KEY"]
+    assert os.path.exists(key_file)
+    assert stat.S_IMODE(os.stat(key_file).st_mode) == 0o600   # ssh refuses otherwise
+    assert open(key_file).read().endswith("\n")               # ssh demands it
+    # a plain `git clone` must work, and the agent can also pick deliberately
+    assert access.env["GIT_SSH_COMMAND"] == access.env[f"{prefix}_SSH_COMMAND"]
+    assert "IdentitiesOnly=yes" in access.env["GIT_SSH_COMMAND"]
+    assert "BatchMode=yes" in access.env["GIT_SSH_COMMAND"]
+    assert "clone" in access.notes and "不要把金鑰內容印出來" in access.notes
+    # the key lives outside the worktree and goes away with the run
+    resource_access.cleanup(tmp_path, "run-ssh")
+    assert not os.path.exists(key_file)
+
+
+def test_an_ssh_repo_without_a_key_is_advertised_as_broken(db, tmp_path):
+    from bastet_agent_os import resource_access
+    from bastet_agent_os.db import now as _now
+
+    db.write("INSERT INTO projects(id, team_id, repo_path, created_at, updated_at) "
+             "VALUES('p','t','/x',?,?)", (_now(), _now()))
+    add_git(db, "no-key-repo", endpoint="git@gitlab.com:me/x.git")
+    db.write("INSERT INTO grants(id, resource_id, scope_type, scope_id, created_at) "
+             "VALUES('g','no-key-repo','project','p',?)", (_now(),))
+    access = resource_access.build(db, tmp_path, "p", "t", "run-nokey")
+    item = next(m for m in access.manifest if m["name"] == "no-key-repo")
+    assert any("no key configured" in h for h in item["how"])
