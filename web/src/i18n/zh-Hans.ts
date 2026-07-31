@@ -515,6 +515,11 @@ const zhHans: Dict = {
   "res.gitHttpsHint": "HTTPS 方式：endpoint 填 repo 网址（例 https://gitlab.com/group/project.git），凭据要用 access token（GitLab 需 read_repository 权限）。要改用 SSH 就把 endpoint 换成 git@host:group/project.git。",
   "res.gitSshHint": "SSH 方式：endpoint 是 git@host:group/project.git（或 ssh://），凭据请粘贴 SSH 私钥全文（不是公钥，结尾要有换行），并把对应公钥加到该 Git 服务的 SSH Keys / Deploy Keys。运行时 Bastet 会把密钥写成 0600 文件并设好 GIT_SSH_COMMAND，agent 直接 git clone 就能用，run 结束即删除。",
   "sec.multilineHint": "SSH 私钥、service account JSON 这类多行内容可以直接整段粘贴（字段是多行的）。万一粘成一行，Bastet 会依 BEGIN/END 标记自动修复换行 —— 但粘原样最保险。",
+  "board.status.open": "待开始",
+  "board.status.in_progress": "执行中",
+  "board.status.blocked": "等待处理",
+  "board.status.done": "已完成",
+  "board.status.cancelled": "已取消",
 };
 
 export default zhHans;

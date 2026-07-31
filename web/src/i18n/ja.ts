@@ -495,6 +495,11 @@ const ja: Dict = {
   "res.gitHttpsHint": "HTTPS の場合：endpoint は repo の URL（例 https://gitlab.com/group/project.git）、認証情報は access token です（GitLab は read_repository 権限が必要）。SSH にするなら endpoint を git@host:group/project.git にしてください。",
   "res.gitSshHint": "SSH の場合：endpoint は git@host:group/project.git（または ssh://）で、認証情報には SSH 秘密鍵の全文を貼ります（公開鍵ではなく、末尾の改行も必要）。対応する公開鍵は各 Git サービスの SSH／デプロイキーに登録してください。実行時に Bastet が鍵を 0600 のファイルへ書き出し GIT_SSH_COMMAND を設定するので、agent はそのまま git clone できます。run 終了時に削除されます。",
   "sec.multilineHint": "SSH 秘密鍵や service account JSON のような複数行の値はそのまま貼り付けられます（この欄は改行を保持します）。1 行になってしまった場合は BEGIN/END を手がかりに Bastet が改行を復元しますが、そのまま貼るのが確実です。",
+  "board.status.open": "未着手",
+  "board.status.in_progress": "実行中",
+  "board.status.blocked": "対応待ち",
+  "board.status.done": "完了",
+  "board.status.cancelled": "キャンセル",
 };
 
 export default ja;

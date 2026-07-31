@@ -247,3 +247,6 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 /* multi-line secret values (PEM keys, service-account JSON) */
 .secret-value { width: 20rem; font-family: ui-monospace, monospace; font-size: .78rem;
                 resize: vertical; }
+
+.card-title { font-weight: 600; line-height: 1.35; }
+.card-id { opacity: .6; font-size: .7rem; }

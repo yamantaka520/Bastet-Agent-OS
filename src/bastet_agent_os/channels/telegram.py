@@ -69,6 +69,8 @@ class TelegramChannel:
             transport=transport,
         )
         self._stopping = asyncio.Event()
+        self.notify_alive = False        # reported by /api/channels
+        self.notify_errors = 0
 
     # -- config: the allowlist lives in channels.config_json -------------------
 
@@ -88,6 +90,7 @@ class TelegramChannel:
     async def run(self) -> None:
         notify_task = asyncio.create_task(self._notify_loop())
         try:
+            await self._announce_pending()
             await self._poll_loop()
         finally:
             notify_task.cancel()
@@ -95,6 +98,31 @@ class TelegramChannel:
 
     def stop(self) -> None:
         self._stopping.set()
+
+    async def _announce_pending(self) -> None:
+        """Tell people what is already blocked on them.
+
+        A notification lost to a restart (or to the dead notify loop this fixes)
+        left a job waiting forever on an approval nobody knew about. On start we
+        say what is outstanding, so the gap is recoverable."""
+        rows = self.db.query(
+            "SELECT j.id, j.title, j.stage, j.project_id FROM jobs j "
+            "WHERE j.status='blocked' AND j.archived=0 ORDER BY j.updated_at DESC "
+            "LIMIT 10")
+        waiting = [r for r in rows if self._awaits_human(r["id"])]
+        if not waiting:
+            return
+        for binding in self._config().get("bindings", {}).values():
+            await self._send(binding["chat_id"],
+                             f"🔔 有 {len(waiting)} 個任務在等你核准：")
+            for row in waiting:
+                await self._send_approval_card(binding["chat_id"], row["id"])
+
+    def _awaits_human(self, job_id: str) -> bool:
+        row = self.db.one(
+            "SELECT g.verdict FROM gate_results g JOIN runs r ON r.id = g.run_id "
+            "WHERE r.job_id=? ORDER BY g.at DESC LIMIT 1", (job_id,))
+        return bool(row and row["verdict"] == "pending")
 
     async def _poll_loop(self) -> None:
         offset = 0
@@ -116,12 +144,27 @@ class TelegramChannel:
                     log.exception("telegram update handling failed")
 
     async def _notify_loop(self) -> None:
+        """One failed send used to end every future notification.
+
+        `await self._notify(...)` unguarded meant a single HTTP error killed this
+        task while the poll loop kept running, so the channel still reported
+        `polling` and an approval request never reached anyone — the workflow then
+        waited for a human who was never told."""
         queue = self.bus.subscribe()
+        self.notify_alive = True
         try:
             while True:
                 event = await queue.get()
-                await self._notify(event)
+                try:
+                    await self._notify(event)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    self.notify_errors += 1
+                    log.exception("telegram notify failed for %s",
+                                  event.get("type"))
         finally:
+            self.notify_alive = False
             self.bus.unsubscribe(queue)
 
     # -- inbound ------------------------------------------------------------------
@@ -312,8 +355,11 @@ class TelegramChannel:
     async def _notify(self, event: dict) -> None:
         etype = event.get("type", "")
         if etype == "gate.pending":
-            text = (f"⏸ approval needed: {event.get('job_id')} "
-                    f"(stage {event.get('stage')})")
+            job = self.db.one("SELECT title, project_id FROM jobs WHERE id=?",
+                              (event.get("job_id"),))
+            text = (f"⏸ 需要你核准：{job['title'] if job else event.get('job_id')}\n"
+                    f"專案 {job['project_id'] if job else '?'} · "
+                    f"階段 {event.get('stage')}\n{event.get('job_id')}")
             keyboard = {"inline_keyboard": [[
                 {"text": "✅ Approve", "callback_data": f"apv:{event.get('job_id')}:yes"},
                 {"text": "❌ Reject", "callback_data": f"apv:{event.get('job_id')}:no"},

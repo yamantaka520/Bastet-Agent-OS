@@ -68,11 +68,17 @@ def test_running_project_moves_to_maintenance_when_all_tasks_settle(proj):
     assert lifecycle.overview(proj, "proj1")["progress"]["done"] == 1
 
 
-def test_restart_parks_a_running_project_instead_of_lying(proj):
+def test_a_restart_parks_a_project_it_cannot_continue(proj):
+    """No confirmed plan means there is nothing to resume — park it and say why
+    rather than leaving a 'running' light with no runner."""
     lifecycle.apply(proj, "proj1", "confirm_plan")
     lifecycle.apply(proj, "proj1", "start")
-    assert runner_mod.reconcile(proj) == ["proj1"]
+    outcome = runner_mod.reconcile(proj, None)
+    assert outcome == {"resumed": [], "parked": ["proj1"]}
     assert lifecycle.status_of(proj, "proj1") == lifecycle.PAUSED
+    reason = proj.one("SELECT detail_json FROM audit_log WHERE action='project.parked' "
+                      "ORDER BY at DESC LIMIT 1")["detail_json"]
+    assert "nothing the runner could continue" in reason
 
 
 # ---- decomposition ----------------------------------------------------------------
@@ -360,3 +366,74 @@ def test_linking_a_job_cannot_mask_staleness(proj):
                "'x','in_progress',?,?)", (_now(), _now()))
     lifecycle.link_job(proj, "proj1", "jn", "其他事", "s", origin="chat")
     assert lifecycle.plan_with_jobs(proj, "proj1")["stale"] is True
+
+
+# ---- automatic continuation must survive a restart ---------------------------------
+
+async def test_a_restart_resumes_a_project_that_still_has_work(runner):
+    """The live failure: a deploy killed the loop, the project still read 執行中,
+    and the next task was never dispatched — the user did it by hand."""
+    r, orch, db = runner
+    lifecycle.save_task_plan(db, "proj1", [{"title": "T1", "spec": "one"},
+                                           {"title": "T2", "spec": "two"}],
+                             by="pm", confirmed=True)
+    lifecycle.apply(db, "proj1", "confirm_plan")
+    lifecycle.apply(db, "proj1", "start")
+    SCRIPT.append(RunResult(status="succeeded"))
+    SCRIPT.append(RunResult(status="succeeded"))
+
+    # a fresh process: no loop in memory, project still marked running
+    fresh = runner_mod.ProjectRunner(db, orch)
+    outcome = runner_mod.reconcile(db, fresh)
+    assert outcome["resumed"] == ["proj1"] and outcome["parked"] == []
+    assert db.query("SELECT * FROM audit_log WHERE action='project.runner.resumed'")
+
+    for _ in range(400):
+        if lifecycle.status_of(db, "proj1") == lifecycle.MAINTENANCE:
+            break
+        await asyncio.sleep(0.02)
+    titles = [j["title"] for j in db.query(
+        "SELECT title FROM jobs WHERE project_id=? ORDER BY created_at", ("proj1",))]
+    assert titles == ["T1", "T2"]           # it carried on by itself
+
+
+async def test_ensure_running_is_idempotent_and_respects_pause(runner):
+    r, orch, db = runner
+    lifecycle.save_task_plan(db, "proj1", [{"title": "T1", "spec": "one"}],
+                             by="pm", confirmed=True)
+    lifecycle.apply(db, "proj1", "confirm_plan")
+    lifecycle.apply(db, "proj1", "start")
+    SCRIPT.append(RunResult(status="succeeded"))
+    assert r.ensure_running("proj1") is True
+    assert r.ensure_running("proj1") is False        # one loop is enough
+    await asyncio.sleep(0.3)
+
+    lifecycle.apply(db, "proj1", "pause", "u") if \
+        lifecycle.status_of(db, "proj1") == lifecycle.RUNNING else None
+    assert r.ensure_running("proj1") is False        # paused stays paused
+
+
+async def test_a_settled_job_revives_a_dead_runner(runner):
+    """Belt and braces: even if a loop dies unexpectedly, the next job to settle
+    puts the project back in motion."""
+    from bastet_agent_os.events import EventBus
+
+    r, orch, db = runner
+    bus = EventBus()
+    lifecycle.save_task_plan(db, "proj1", [{"title": "T1", "spec": "one"},
+                                           {"title": "T2", "spec": "two"}],
+                             by="pm", confirmed=True)
+    lifecycle.apply(db, "proj1", "confirm_plan")
+    lifecycle.apply(db, "proj1", "start")
+    SCRIPT.append(RunResult(status="succeeded"))
+    SCRIPT.append(RunResult(status="succeeded"))
+
+    watcher = asyncio.get_running_loop().create_task(r.watch(bus))
+    await asyncio.sleep(0.05)
+    bus.emit("job.done", project_id="proj1", job_id="whatever")
+    for _ in range(400):
+        if r.is_active("proj1") or lifecycle.status_of(db, "proj1") != lifecycle.RUNNING:
+            break
+        await asyncio.sleep(0.02)
+    assert db.query("SELECT * FROM audit_log WHERE action='project.runner.resumed'")
+    watcher.cancel()

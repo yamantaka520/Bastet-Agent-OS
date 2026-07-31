@@ -8,6 +8,38 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.16.0] - 2026-07-31
+
+### Fixed — automatic continuation, the thing the engine exists for
+A live project stopped after its first task and the next one had to be dispatched
+by hand. The audit log showed why, and there were two independent causes.
+
+**The runner only ever lived in memory.** A control-plane restart ended a
+project's run silently: `reconcile()` parked it as paused, `sync_from_jobs()` saw
+work in flight and flipped it straight back to 執行中, and nothing was driving it.
+- `ProjectRunner.ensure_running()` starts the loop when a project is running, its
+  plan is confirmed, and work remains — idempotent, so it is safe everywhere.
+- Startup resumes those projects instead of parking them; a project is parked only
+  when there is genuinely nothing to continue, and the audit says so.
+- `ProjectRunner.watch()` listens for settled jobs and revives a project whose
+  loop died for any reason, so progress recovers by itself.
+
+**An approval request reached nobody.** `_notify_loop` awaited each send
+unguarded, so one HTTP error killed every future notification while the poll loop
+kept running — the channel still reported `polling` and the job waited forever for
+a human who was never told.
+- Each notification is guarded; a failure is counted and logged, and the loop
+  keeps listening.
+- `/api/channels` reports `notify_down` and an error count instead of claiming
+  `polling` when only inbound works.
+- On start the channel re-announces every job currently blocked on a human, with
+  its Approve/Reject card, so a notification lost to a restart is recoverable.
+- Approval cards name the work (title, project, stage) rather than a bare job id.
+
+### Changed
+- Board cards lead with the task title and a localised status; the job id moves to
+  a dimmer third line, so the board reads as work rather than identifiers.
+
 ## [0.15.1] - 2026-07-31
 
 ### Fixed

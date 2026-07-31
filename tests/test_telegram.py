@@ -1,5 +1,6 @@
 """Telegram channel: pairing, allowlist, inline approval, notifications."""
 
+import asyncio
 import json
 
 import httpx
@@ -138,5 +139,68 @@ async def test_gate_pending_notification_has_buttons(channel):
     fake.sent.clear()
     await ch._notify({"type": "gate.pending", "job_id": "job_z", "stage": "plan"})
     sent = fake.sent[-1]
-    assert "approval needed" in sent["text"]
+    # the card names the work: a job id alone tells the approver nothing
+    assert "需要你核准" in sent["text"] and "job_z" in sent["text"]
     assert sent["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "apv:job_z:yes"
+
+
+async def test_one_failed_notification_does_not_kill_the_channel(channel):
+    """The live failure: an unguarded await in the notify loop meant a single send
+    error ended every future notification, while the channel still reported
+    `polling` — so an approval request reached nobody and the job waited forever."""
+    ch, fake, db = channel
+    delivered: list[str] = []
+    attempts = {"n": 0}
+
+    async def flaky(chat_id, text, reply_markup=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError("telegram 502")
+        delivered.append(text)
+
+    ch._send = flaky
+    ch._save_config({"bindings": {"111": {"user_id": "u1", "name": "root",
+                                          "chat_id": 555}}})
+    task = asyncio.get_running_loop().create_task(ch._notify_loop())
+    await asyncio.sleep(0.05)
+    assert ch.notify_alive is True
+
+    ch.bus.emit("job.done", project_id="proj1", job_id="job_a")   # this one fails
+    await asyncio.sleep(0.05)
+    ch.bus.emit("job.done", project_id="proj1", job_id="job_b")   # this must arrive
+    await asyncio.sleep(0.05)
+
+    assert ch.notify_errors == 1
+    assert ch.notify_alive is True                       # still listening
+    assert any("job_b" in text for text in delivered)
+    task.cancel()
+
+
+async def test_pending_approvals_are_re_announced_on_start(channel):
+    """A notification lost to a restart left work waiting on an approval nobody
+    knew about; saying what is outstanding makes that recoverable."""
+    from bastet_agent_os.db import now as _now
+
+    ch, fake, db = channel
+    ch._save_config({"bindings": {"111": {"user_id": "u1", "name": "root",
+                                          "chat_id": 555}}})
+    db.write("INSERT INTO jobs(id, project_id, stages_snapshot_json, title, stage, "
+             "status, created_at, updated_at) VALUES('jw','proj1','[]','等核准的事',"
+             "'上線核准','blocked',?,?)", (_now(), _now()))
+    db.write("INSERT INTO runs(id, job_id, stage, agent_id, executor_type, status) "
+             "VALUES('rw','jw','上線核准','ag1','fake','succeeded')")
+    db.write("INSERT INTO gate_results(id, run_id, gate_type, verdict, reviewer_kind, "
+             "reviewer_id, detail_md, at) VALUES('gw','rw','human-approve','pending',"
+             "'agent','x','waiting',?)", (_now(),))
+
+    await ch._announce_pending()
+    texts = " ".join(fake.texts())
+    assert "等你核准" in texts and "等核准的事" in texts
+
+
+async def test_nothing_is_announced_when_nothing_waits(channel):
+    ch, fake, db = channel
+    ch._save_config({"bindings": {"111": {"user_id": "u1", "name": "root",
+                                          "chat_id": 555}}})
+    await ch._announce_pending()
+    assert fake.texts() == []

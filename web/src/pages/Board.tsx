@@ -75,8 +75,13 @@ function Board({ jobs, onSelect }: { jobs: Job[]; onSelect: (id: string) => void
           {inColumn(col).map((job) => (
             <button key={job.id} className={`card ${job.status}`}
                     onClick={() => onSelect(job.id)}>
+              {/* the title is what identifies work to a human; the id is
+                  plumbing, so it goes underneath */}
               <div className="card-title">{STATUS_BADGE[job.status] ?? "⚪"} {job.title}</div>
-              <div className="card-meta">{job.id} · {job.template_id}</div>
+              <div className="card-meta">{t(`board.status.${job.status}`,
+                                            undefined, job.status)}
+                {job.template_id ? ` · ${job.template_id}` : ""}</div>
+              <div className="card-meta card-id">{job.id}</div>
             </button>
           ))}
         </section>

@@ -228,6 +228,66 @@ class ProjectRunner:
     def active_projects(self) -> list[str]:
         return [pid for pid, task in self._tasks.items() if not task.done()]
 
+    def ensure_running(self, project_id: str, actor: str = "server") -> bool:
+        """Start the loop if this project should be progressing and none is alive.
+
+        The loop only ever lived in memory, so a control-plane restart ended a
+        project's run silently: its status still said 執行中 while nothing
+        dispatched the next task. Idempotent, so it is safe to call on every job
+        transition and at startup — automatic continuation is the whole promise."""
+        if self.is_active(project_id):
+            return False
+        try:
+            if lifecycle.status_of(self.db, project_id) != lifecycle.RUNNING:
+                return False
+        except lifecycle.LifecycleError:
+            return False
+        plan = lifecycle.task_plan(self.db, project_id)
+        if not plan["confirmed"] or not plan["tasks"]:
+            return False
+        if not self._work_left(plan["tasks"]):
+            return False
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(self._loop(project_id, "", actor))
+        self._tasks[project_id] = task
+        task.add_done_callback(lambda t: self._finished(project_id, t))
+        self.db.audit(actor, "project.runner.resumed", "project", project_id,
+                      {"tasks": len(plan["tasks"])})
+        log.info("project %s: runner resumed", project_id)
+        return True
+
+    def _work_left(self, tasks: list[dict[str, Any]]) -> bool:
+        for task in tasks:
+            job_id = task.get("job_id")
+            if not job_id:
+                return True                      # never dispatched
+            row = self.db.one("SELECT status FROM jobs WHERE id=?", (job_id,))
+            if row is not None and row["status"] not in TERMINAL:
+                return True                      # still moving (or awaiting a human)
+        return False
+
+    async def watch(self, bus) -> None:
+        """Revive a project's runner whenever one of its jobs settles.
+
+        A loop can die for reasons we did not foresee; every job transition is a
+        chance to notice and carry on, instead of a project quietly stopping."""
+        queue = bus.subscribe()
+        try:
+            while True:
+                event = await queue.get()
+                if event.get("type") not in ("job.done", "job.blocked",
+                                             "job.cancelled", "gate.passed"):
+                    continue
+                project_id = event.get("project_id")
+                if not project_id:
+                    continue
+                try:
+                    self.ensure_running(project_id, actor="watcher")
+                except Exception as exc:          # never let the watcher die
+                    log.warning("runner watch on %s failed: %r", project_id, exc)
+        finally:
+            bus.unsubscribe(queue)
+
     def start(self, project_id: str, agent_id: str, actor: str = "") -> dict[str, Any]:
         plan = lifecycle.task_plan(self.db, project_id)
         if not plan["tasks"]:
@@ -352,15 +412,28 @@ class ProjectRunner:
             await asyncio.sleep(POLL_S)
 
 
-def reconcile(db, actor: str = "server") -> list[str]:
-    """A project cannot stay 'running' across a restart with no runner behind it.
-    Park those in paused so the operator sees the truth and can resume."""
-    parked = []
+def reconcile(db, runner: ProjectRunner | None = None,
+              actor: str = "server") -> dict[str, list[str]]:
+    """Decide what happens to projects that were running when we stopped.
+
+    Parking every one of them was wrong: a project with a confirmed plan and work
+    left should simply carry on, which is what the runner exists for. Only a
+    project that *cannot* be resumed is parked, and then the audit says why."""
+    resumed, parked = [], []
     for row in db.query("SELECT id FROM projects WHERE status=?",
                         (lifecycle.RUNNING,)):
+        project_id = row["id"]
+        if runner is not None and runner.ensure_running(project_id, actor=actor):
+            resumed.append(project_id)
+            continue
+        plan = lifecycle.task_plan(db, project_id)
+        if plan["confirmed"] and runner is not None and \
+                runner._work_left(plan["tasks"]):
+            continue                     # a loop is already alive for it
         db.write("UPDATE projects SET status=?, updated_at=? WHERE id=?",
-                 (lifecycle.PAUSED, now(), row["id"]))
-        db.audit(actor, "project.parked", "project", row["id"],
-                 {"reason": "control plane restarted while running"})
-        parked.append(row["id"])
-    return parked
+                 (lifecycle.PAUSED, now(), project_id))
+        db.audit(actor, "project.parked", "project", project_id,
+                 {"reason": "restarted with nothing the runner could continue",
+                  "confirmed": plan["confirmed"], "tasks": len(plan["tasks"])})
+        parked.append(project_id)
+    return {"resumed": resumed, "parked": parked}

@@ -356,6 +356,16 @@ def create_app(home: Home) -> FastAPI:
     async def lifespan(_app):
         from .channels.telegram import TelegramChannel
         tasks = []
+        # automatic continuation must survive a restart: resume the runners of
+        # projects that were mid-run, and keep watching job transitions so a loop
+        # that dies for any reason is revived by the next settled job
+        runner = app.state.project_runner
+        outcome = runner_mod.reconcile(db, runner)
+        for project_id in outcome["resumed"]:
+            log.info("project %s: runner resumed after restart", project_id)
+        for project_id in outcome["parked"]:
+            log.warning("project %s parked: nothing to continue", project_id)
+        tasks.append(asyncio.get_running_loop().create_task(runner.watch(bus)))
         for row in db.query("SELECT * FROM channels WHERE enabled=1 AND kind='telegram'"):
             try:
                 bot_token = secrets_store.resolve(row["secret_ref"])
@@ -1043,8 +1053,7 @@ def create_app(home: Home) -> FastAPI:
     from . import project_runner as runner_mod
 
     app.state.project_runner = runner_mod.ProjectRunner(db, orch, bus)
-    for parked in runner_mod.reconcile(db):
-        log.warning("project %s was running at shutdown — parked as paused", parked)
+    # reconcile/resume happens in the lifespan, where there is a running loop
     for healed in lifecycle_mod.reconcile_all(db):
         log.info("project %s reconciled at startup: %s", healed["project"], healed)
 
@@ -1939,7 +1948,6 @@ def create_app(home: Home) -> FastAPI:
     @app.get("/api/channels", dependencies=[Depends(require_role("admin"))])
     def list_channels():
         rows = [dict(r) for r in db.query("SELECT * FROM channels")]
-        running = {ch.channel_id for ch in app.state.channels}
         for row in rows:
             try:
                 secrets_store.resolve(row["secret_ref"])
@@ -1952,9 +1960,18 @@ def create_app(home: Home) -> FastAPI:
                                    config.get("bindings", {}).values()]
             row["responder"] = config.get("responder") or None
             row["project_id"] = config.get("project_id") or ""
-            row["status"] = ("polling" if row["id"] in running
-                             else "credential_error" if credential == "error"
-                             else "restart_needed" if row["enabled"] else "disabled")
+            live = next((ch for ch in app.state.channels
+                         if ch.channel_id == row["id"]), None)
+            # "polling" used to mean "the object exists"; a dead notify loop looked
+            # perfectly healthy while approvals silently went nowhere
+            row["notify_errors"] = getattr(live, "notify_errors", 0) if live else 0
+            row["status"] = (
+                "credential_error" if credential == "error"
+                else "disabled" if not row["enabled"]
+                else "notify_down" if live is not None and not getattr(
+                    live, "notify_alive", False)
+                else "polling" if live is not None
+                else "restart_needed")
         return rows
 
     @app.put("/api/channels/{channel_id}/chat")
