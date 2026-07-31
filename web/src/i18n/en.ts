@@ -488,6 +488,7 @@ const en: Dict = {
   "board.deleteConfirm": "Delete this card? Its runs go with it and it cannot be undone (a job with usage records cannot be deleted — archive it instead).",
   "board.removalHint": "Archive hides the card and keeps every run and usage row (reversible). Delete removes it for good and is only allowed for a job that spent nothing. Both are audited.",
   "board.archived": "archived",
+  "board.configError": "⚙ This is a workflow configuration problem, not a failing test — re-running the agent cannot help. Fix the stage's test command first.",
 };
 
 export default en;

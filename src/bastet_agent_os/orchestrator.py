@@ -291,6 +291,7 @@ class Orchestrator:
                               else (result and self._run_agent(run_id)) or "unknown")
             self.db.audit("orchestrator", f"gate.{outcome.verdict}", "job", job_id,
                           {"stage": stage.name, "gate": stage.gate,
+                           "config_error": outcome.config_error,
                            "detail": outcome.detail[:300]})
             self._emit(f"gate.{outcome.verdict}", job["project_id"], job_id=job_id,
                        stage=stage.name, gate=stage.gate, detail=outcome.detail[:200])
@@ -299,7 +300,9 @@ class Orchestrator:
                 self._block(job_id, f"stage {stage.name}: waiting for human approval")
                 return
             if outcome.verdict == "failed":
-                self._block(job_id, f"stage {stage.name} gate failed: {outcome.detail[:200]}")
+                reason = ("設定問題" if outcome.config_error else "gate failed")
+                self._block(job_id,
+                            f"stage {stage.name} {reason}: {outcome.detail[:200]}")
                 return
 
             if idx + 1 >= len(stages):

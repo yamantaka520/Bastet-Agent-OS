@@ -508,6 +508,7 @@ const zhHans: Dict = {
   "board.deleteConfirm": "确定删除这张任务卡？连同它的运行记录一起移除，无法恢复（有用量记录的任务不能删除，请用归档）。",
   "board.removalHint": "归档＝从看板隐藏，运行与用量记录全部保留（可还原）；删除＝真的移除，只允许没有任何用量记录的任务。两者都写审计。",
   "board.archived": "已归档",
+  "board.configError": "⚙ 这是工作流配置问题，不是测试不通过 — 重跑 agent 没有用，请先修正阶段的测试命令。",
 };
 
 export default zhHans;

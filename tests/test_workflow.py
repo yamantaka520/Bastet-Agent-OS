@@ -256,3 +256,44 @@ async def test_executor_account_does_not_wipe_injected_credentials(orch, seeded,
     orch.dispatch(req())
     await orch.wait_idle()
     assert captured["env"]["KEEP"] == "keep-me"
+
+
+# ---- a gate that cannot run is not a failing test -----------------------------------
+
+def test_tests_pass_separates_a_missing_command_from_a_failing_test(tmp_path):
+    """Live case: the web-dev preset runs `npm run test:e2e`, the project had no
+    package.json, and the pipeline reported it exactly like a failed test — so the
+    obvious next move was to re-run the agent, which could never fix it."""
+    stage = parse_stages([{"name": "t", "gate": "tests-pass",
+                           "gate_config": {"command": "exit 1"}}])[0]
+    real = evaluate_gate(stage, str(tmp_path), None)
+    assert real.verdict == "failed" and real.config_error is False
+
+    stage.gate_config["command"] = "definitely-not-a-real-command --flag"
+    missing = evaluate_gate(stage, str(tmp_path), None)
+    assert missing.verdict == "failed" and missing.config_error is True
+    assert "工作流設定問題" in missing.detail
+    assert "definitely-not-a-real-command" in missing.detail   # names the command
+
+
+def test_npm_missing_script_is_recognised_as_a_config_error(tmp_path):
+    """The exact output from the host: npm exits 1, so only the message tells us
+    the script does not exist."""
+    from bastet_agent_os.workflow import _command_unavailable
+
+    npm_output = ('npm ERR! Missing script: "test:e2e"\n'
+                  'npm ERR! To see a list of scripts, run:\n  npm run\n')
+    assert _command_unavailable(1, npm_output) is True
+    assert _command_unavailable(127, "sh: 1: pytest: not found") is True
+    assert _command_unavailable(126, "permission denied") is True
+    # a genuine test failure must not be mistaken for one
+    assert _command_unavailable(1, "2 failed, 8 passed in 3.1s") is False
+    assert _command_unavailable(1, "AssertionError: expected 3 got 4") is False
+
+
+def test_a_config_error_blocks_with_a_reason_that_points_at_the_template(tmp_path):
+    stage = parse_stages([{"name": "t", "gate": "tests-pass",
+                           "gate_config": {"command": "npm run test:e2e"}}])[0]
+    out = evaluate_gate(stage, str(tmp_path), None)
+    assert out.config_error is True
+    assert "模板" in out.detail          # where the fix lives

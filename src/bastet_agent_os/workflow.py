@@ -102,6 +102,11 @@ def load_template_file(path: str | Path) -> tuple[str, list[StageDef]]:
 class GateOutcome:
     verdict: str          # passed|failed|pending
     detail: str = ""
+    # the gate could not run at all (missing script, command not found, bad
+    # cwd). Retrying the agent cannot fix that, so the engine must not spend
+    # attempts on it — and the operator must be sent to the template, not the
+    # agent's output.
+    config_error: bool = False
 
 
 def clear_verdict(workdir: str) -> None:
@@ -121,6 +126,28 @@ def read_verdict(workdir: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+# A shell that cannot find the program, an npm/yarn/pnpm script that is not
+# defined, a python module that is not installed: the command never ran, so its
+# exit code says nothing about the code under review.
+_UNAVAILABLE_MARKERS = (
+    "missing script",
+    "command not found",
+    "no such file or directory",
+    "is not recognized as an internal or external command",
+    "can't open file",
+    "no module named",
+    "executable file not found",
+    "unknown command",
+)
+
+
+def _command_unavailable(returncode: int, output: str) -> bool:
+    if returncode in (126, 127):          # not executable / not found
+        return True
+    lowered = output.lower()
+    return any(marker in lowered for marker in _UNAVAILABLE_MARKERS)
+
+
 def evaluate_gate(stage: StageDef, workdir: str,
                   structured_verdict: dict | None,
                   reviewer_output: str = "") -> GateOutcome:
@@ -129,11 +156,23 @@ def evaluate_gate(stage: StageDef, workdir: str,
 
     if stage.gate == "tests-pass":
         command = stage.gate_config["command"]
-        proc = subprocess.run(command, shell=True, cwd=workdir,
-                              capture_output=True, text=True, timeout=1800)
+        try:
+            proc = subprocess.run(command, shell=True, cwd=workdir,
+                                  capture_output=True, text=True, timeout=1800)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return GateOutcome("failed",
+                               f"測試指令無法執行（{type(exc).__name__}: {exc}）"
+                               f"：{command}", config_error=True)
         tail = (proc.stdout + proc.stderr)[-1000:]
         if proc.returncode == 0:
             return GateOutcome("passed", tail)
+        if _command_unavailable(proc.returncode, tail):
+            return GateOutcome(
+                "failed",
+                f"測試指令在這個專案跑不起來 —— 這是工作流設定問題，不是測試不通過。"
+                f"請到「模板」頁把這個階段的測試指令改成專案真的有的指令，"
+                f"或在專案裡補上它。指令：{command}\n{tail}",
+                config_error=True)
         return GateOutcome("failed", f"exit {proc.returncode}: {tail}")
 
     if stage.gate == "agent-review":

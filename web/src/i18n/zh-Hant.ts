@@ -507,6 +507,7 @@ const zhHant = {
   "board.deleteConfirm": "確定刪除這張任務卡？連同它的執行紀錄一起移除，無法復原（有用量紀錄的任務不能刪除，請用封存）。",
   "board.removalHint": "封存＝從看板隱藏，執行與用量紀錄全部保留（可還原）；刪除＝真的移除，只允許沒有任何用量紀錄的任務。兩者都寫稽核。",
   "board.archived": "已封存",
+  "board.configError": "⚙ 這是工作流設定問題，不是測試不通過 — 重跑 agent 沒有用，請先修正階段的測試指令。",
 } as const;
 
 export type Dict = { [K in keyof typeof zhHant]: string };

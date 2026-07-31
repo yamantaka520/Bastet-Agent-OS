@@ -241,3 +241,5 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .job-removal { border-top: 1px dashed var(--line); padding-top: .5rem;
                margin-top: .6rem; flex-wrap: wrap; }
 .job-removal .muted { flex-basis: 100%; font-size: .78rem; }
+
+.gate-config-error { font-size: .8rem; color: #e0b050; margin-top: .2rem; }

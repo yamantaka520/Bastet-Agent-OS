@@ -8,6 +8,18 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.12.2] - 2026-07-31
+
+### Fixed
+- A `tests-pass` gate whose command cannot run is no longer reported as a failing
+  test. `npm ERR! Missing script: "test:e2e"` exits 1 just like a real failure, so
+  the pipeline said "tests failed" and the obvious next move was to re-run the
+  agent — which can never fix a workflow setting. The gate now recognises an
+  unrunnable command (exit 126/127, missing npm script, command not found, no
+  such module) and reports it as a configuration problem, naming the command and
+  pointing at the Templates tab; the board drawer repeats the distinction, and the
+  audit record carries a `config_error` flag.
+
 ## [0.12.1] - 2026-07-31
 
 ### Fixed
