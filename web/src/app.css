@@ -237,3 +237,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
                 color: var(--muted); margin: .9rem 0 .35rem; }
 .task-row { display: flex; align-items: center; gap: .4rem; margin-bottom: .3rem; }
 .token-value { user-select: all; margin: 0 .4rem; }
+
+.job-removal { border-top: 1px dashed var(--line); padding-top: .5rem;
+               margin-top: .6rem; flex-wrap: wrap; }
+.job-removal .muted { flex-basis: 100%; font-size: .78rem; }

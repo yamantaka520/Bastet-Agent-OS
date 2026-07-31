@@ -502,6 +502,11 @@ const zhHant = {
   "chat.decompose": "把這段規劃變成任務拆分",
   "chat.decomposeHint": "拆分會讀這段對話的完整規劃結果，產生專案的任務卡（尚待你在「專案」頁人工確認）。",
   "chat.decomposed": "✅ 已產生 {n} 項任務拆分 — 到「專案」頁確認後即可執行",
+  "board.archive": "封存卡片",
+  "board.deleteCard": "刪除卡片",
+  "board.deleteConfirm": "確定刪除這張任務卡？連同它的執行紀錄一起移除，無法復原（有用量紀錄的任務不能刪除，請用封存）。",
+  "board.removalHint": "封存＝從看板隱藏，執行與用量紀錄全部保留（可還原）；刪除＝真的移除，只允許沒有任何用量紀錄的任務。兩者都寫稽核。",
+  "board.archived": "已封存",
 } as const;
 
 export type Dict = { [K in keyof typeof zhHant]: string };

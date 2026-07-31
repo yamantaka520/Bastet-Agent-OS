@@ -25,7 +25,14 @@ import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
-from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
+from .base import (
+    SUMMARY_LIMIT,
+    RunEvent,
+    RunResult,
+    TaskSpec,
+    last_json_object,
+    register_builtin,
+)
 
 GRACE_SECONDS = 10
 
@@ -146,7 +153,7 @@ class AgyExecutor:
         if process and process.returncode is None:
             await process.wait()
 
-        envelope = _last_json_object(handle.raw_stdout) or {}
+        envelope = last_json_object(handle.raw_stdout) or {}
         usage = envelope.get("usage") or {}
         ok = (process is not None and process.returncode == 0
               and envelope.get("status") == "SUCCESS")
@@ -186,12 +193,3 @@ class AgyExecutor:
         )
 
 
-def _last_json_object(text: str) -> dict | None:
-    for line in reversed(text.strip().splitlines()):
-        try:
-            obj = json.loads(line)
-            if isinstance(obj, dict):
-                return obj
-        except json.JSONDecodeError:
-            continue
-    return None

@@ -202,6 +202,30 @@ def link_job(db, project_id: str, job_id: str, title: str, spec: str,
     return len(tasks)
 
 
+def unlink_job(db, project_id: str, job_id: str) -> str:
+    """Take a deleted job off the plan.
+
+    A row the dispatch itself created disappears with the job; a task the PM
+    proposed keeps its text and simply goes back to "not dispatched", because the
+    task still needs doing even though this attempt is gone."""
+    plan = task_plan(db, project_id)
+    kept: list[dict[str, Any]] = []
+    outcome = "absent"
+    for task in plan["tasks"]:
+        if task.get("job_id") != job_id:
+            kept.append(task)
+            continue
+        if task.get("origin") in ("chat", "dispatch", "runner"):
+            outcome = "row_removed"
+            continue                      # the row existed only for that job
+        outcome = "unlinked"
+        kept.append({k: v for k, v in task.items() if k not in ("job_id", "origin")})
+    if outcome != "absent":
+        save_task_plan(db, project_id, kept, by=plan["by"],
+                       confirmed=plan["confirmed"])
+    return outcome
+
+
 def sync_from_jobs(db, project_id: str, actor: str = "system") -> str | None:
     """Make the status match what is actually happening.
 

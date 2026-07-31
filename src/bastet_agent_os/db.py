@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   template_id TEXT,
   stages_snapshot_json TEXT NOT NULL,
   title TEXT NOT NULL,
+  archived INTEGER NOT NULL DEFAULT 0,   -- hidden from the board, history kept
   spec_md TEXT NOT NULL DEFAULT '',
   stage TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'open',   -- open|in_progress|blocked|done|cancelled
@@ -308,6 +309,9 @@ class Db:
             agent_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(agents)")}
             if "account_id" not in agent_cols:
                 self._conn.execute("ALTER TABLE agents ADD COLUMN account_id TEXT")
+            if "archived" not in existing:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN archived INTEGER "
+                                   "NOT NULL DEFAULT 0")
             project_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(projects)")}
             if "status" not in project_cols:
                 self._conn.execute("ALTER TABLE projects ADD COLUMN status TEXT "

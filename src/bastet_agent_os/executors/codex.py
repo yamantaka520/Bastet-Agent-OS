@@ -30,7 +30,14 @@ from pathlib import Path
 from typing import Any
 
 from ..pricing import Usage
-from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
+from .base import (
+    SUMMARY_LIMIT,
+    RunEvent,
+    RunResult,
+    TaskSpec,
+    parse_event,
+    register_builtin,
+)
 
 GRACE_SECONDS = 10
 
@@ -147,9 +154,8 @@ class CodexExecutor:
                 continue
             if not raw:
                 return
-            try:
-                event = json.loads(raw.decode(errors="replace"))
-            except json.JSONDecodeError:
+            event = parse_event(raw)
+            if event is None:
                 continue
             etype = event.get("type", "")
             if etype == "item.completed":

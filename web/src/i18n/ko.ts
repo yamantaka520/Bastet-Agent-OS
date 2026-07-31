@@ -483,6 +483,11 @@ const ko: Dict = {
   "chat.decompose": "이 기획을 작업으로 분해",
   "chat.decomposeHint": "이 대화에서 합의된 기획을 읽어 프로젝트의 작업 카드를 만듭니다（「프로젝트」 탭에서의 확인은 사용자가 합니다）.",
   "chat.decomposed": "✅ 작업 {n} 건 생성 — 「프로젝트」 탭에서 확인하면 실행할 수 있습니다",
+  "board.archive": "카드 보관",
+  "board.deleteCard": "카드 삭제",
+  "board.deleteConfirm": "이 카드를 삭제할까요? 실행 기록도 함께 사라지며 되돌릴 수 없습니다（사용량 기록이 있는 작업은 삭제할 수 없으니 보관하세요）.",
+  "board.removalHint": "보관은 보드에서 숨기기만 하고 실행·사용량 기록은 모두 남깁니다（복구 가능）. 삭제는 완전히 제거하며, 비용 기록이 없는 작업만 허용됩니다. 둘 다 감사에 기록됩니다.",
+  "board.archived": "보관됨",
 };
 
 export default ko;

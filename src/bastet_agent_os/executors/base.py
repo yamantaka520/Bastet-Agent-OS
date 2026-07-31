@@ -7,6 +7,7 @@ plane can persist it (runs.executor_handle_json) and re-attach after restart.
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
@@ -36,6 +37,50 @@ class TaskSpec:
 class RunEvent:
     type: str                            # progress|tool_call_summary|usage|artifact|interaction_request
     data: dict[str, Any] = field(default_factory=dict)
+
+
+def parse_event(raw: bytes | str) -> dict[str, Any] | None:
+    """One streamed line → an event dict, or None.
+
+    `json.loads` happily returns a str, list or number, and pretty-printed output
+    puts bare values on their own lines (`    "some reason"` inside an array).
+    Calling `.get` on those raised AttributeError mid-stream and killed the run —
+    so the type check belongs here, once, not in every executor."""
+    try:
+        value = json.loads(raw.decode(errors="replace") if isinstance(raw, bytes)
+                           else raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def last_json_object(text: str) -> dict[str, Any] | None:
+    """The last JSON object in a CLI's output, however it was formatted.
+
+    Line-delimited (`{...}\n{...}`), pretty-printed across many lines, or
+    wrapped in prose/``` fences — a parser that only understood one object per
+    line silently found nothing in pretty-printed output, which read downstream
+    as "the reviewer produced no verdict"."""
+    if not text or not text.strip():
+        return None
+    try:                                   # the common case: the whole thing
+        whole = json.loads(text)
+        if isinstance(whole, dict):
+            return whole
+    except json.JSONDecodeError:
+        pass
+    decoder = json.JSONDecoder()
+    found: dict[str, Any] | None = None
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            found = value                  # keep scanning: we want the last one
+    return found
 
 
 # The summary is not a label: chat replies and PM task plans ARE this string,

@@ -191,6 +191,64 @@ class Orchestrator:
         self._sync_project(job["project_id"])
         return {"job_id": job_id, "runs_cancelled": killed}
 
+    def archive_job(self, job_id: str, archived: bool, actor: str = "user") -> dict:
+        """Hide a finished card without destroying anything. This is the default
+        way to clear the board: every run, gate and usage row stays queryable."""
+        job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job is None:
+            raise ValueError("job not found")
+        if archived and job["status"] not in ("done", "cancelled"):
+            raise ValueError(f"只能封存已結束的任務（目前 {job['status']}）— "
+                             f"進行中的請先停止")
+        self.db.write("UPDATE jobs SET archived=?, updated_at=? WHERE id=?",
+                      (1 if archived else 0, now(), job_id))
+        self.db.audit(actor, "job.archive" if archived else "job.unarchive",
+                      "job", job_id, {"title": job["title"]})
+        self._emit("job.archived", job["project_id"], job_id=job_id,
+                   archived=archived)
+        return {"job_id": job_id, "archived": archived}
+
+    def delete_job(self, job_id: str, actor: str = "user") -> dict:
+        """Remove a card and its runs for good.
+
+        Refused when the job spent anything: usage rows hang off its runs, and
+        deleting them would quietly reduce reported spend in a system whose whole
+        point is honest accounting. Archive those instead. The audit log keeps a
+        record of the deletion either way."""
+        job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job is None:
+            raise ValueError("job not found")
+        if job["status"] not in ("done", "cancelled"):
+            raise ValueError(f"只能刪除已結束的任務（目前 {job['status']}）— "
+                             f"進行中的請先停止")
+        spend = self.db.one(
+            "SELECT COUNT(*) AS rows, COALESCE(SUM(cost_usd), 0) AS cost "
+            "FROM usage_ledger WHERE run_id IN (SELECT id FROM runs WHERE job_id=?)",
+            (job_id,))
+        if spend["rows"]:
+            raise ValueError(
+                f"這個任務有 {spend['rows']} 筆用量紀錄（${spend['cost']:.4f}），"
+                f"刪除會讓帳目對不上 — 請改用封存")
+        runs = [r["id"] for r in
+                self.db.query("SELECT id FROM runs WHERE job_id=?", (job_id,))]
+        for table in ("run_interactions", "gate_results", "run_tokens"):
+            for run_id in runs:
+                self.db.write(f"DELETE FROM {table} WHERE run_id=?", (run_id,))
+        self.db.write("DELETE FROM runs WHERE job_id=?", (job_id,))
+        self.db.write("DELETE FROM job_deps WHERE job_id=? OR depends_on_job_id=?",
+                      (job_id, job_id))
+        self.cleanup_worktree(job_id)
+        self.db.write("DELETE FROM jobs WHERE id=?", (job_id,))
+        from . import project_lifecycle as lifecycle
+        unlinked = lifecycle.unlink_job(self.db, job["project_id"], job_id)
+        self.db.audit(actor, "job.delete", "job", job_id,
+                      {"title": job["title"], "status": job["status"],
+                       "stage": job["stage"], "runs": len(runs),
+                       "plan": unlinked})
+        self._emit("job.deleted", job["project_id"], job_id=job_id)
+        self._sync_project(job["project_id"])
+        return {"deleted": job_id, "runs": len(runs), "plan": unlinked}
+
     def _spawn(self, coro) -> None:
         task = asyncio.get_running_loop().create_task(coro)
         self._tasks.add(task)
@@ -260,7 +318,8 @@ class Orchestrator:
     def _judge(self, stage: StageDef, workdir: str, result: RunResult) -> GateOutcome:
         if stage.gate == "human-approve":
             return GateOutcome("pending", "waiting for human approval")
-        return evaluate_gate(stage, workdir, result.structured_verdict)
+        return evaluate_gate(stage, workdir, result.structured_verdict,
+                             reviewer_output=result.summary)
 
     # -- in-run interactions (SPEC §5.1.1 interaction_request) ---------------------
 

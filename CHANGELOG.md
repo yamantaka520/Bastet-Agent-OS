@@ -8,6 +8,41 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.12.0] - 2026-07-31
+
+### Fixed — the stuck review job, and the parsing assumption behind it
+A live job blocked at an agent-review gate after two "no structured verdict"
+rejections and a crash. One root cause: we assumed every CLI emits one JSON
+object per line. grok's `--output-format json` pretty-prints across many lines.
+
+- The verdict was never found, because the parser scanned line by line and no
+  single line was a complete object — downstream that read as "the reviewer
+  produced no verdict", which correctly rejects, so the stage failed twice.
+- A pretty-printed array element (`    "some reason"`) *is* valid JSON — a bare
+  string — so `json.loads(line).get(...)` raised
+  `AttributeError: 'str' object has no attribute 'get'` and killed the third
+  attempt mid-stream.
+- Both are now handled once, in `executors/base.py`: `parse_event()` returns a
+  dict or None (never a str/list/number), and `last_json_object()` reads the whole
+  output, pretty-printed JSON, line-delimited objects, or JSON wrapped in prose
+  or ``` fences. grok, agy, codex and claude-code all use them; a test fails if
+  an executor goes back to parsing raw lines.
+- **A rejected review now quotes what the reviewer actually said.** "No
+  structured verdict" with no evidence sent us looking for a logic bug; the cause
+  can just as easily be a CLI that is not signed in.
+
+### Added — getting a finished card off the board
+- `POST /api/jobs/{id}/archive` hides a done/cancelled card and keeps every run,
+  gate and usage row (reversible); the board hides archived cards unless asked.
+- `DELETE /api/jobs/{id}` removes a finished card and its runs for good, and is
+  **refused when the job spent anything** — usage rows hang off its runs, and
+  letting reported spend evaporate on a click has no place in a system built on
+  honest accounting. Archive is offered instead. Either way it is audited.
+- Deleting unlinks the card from the project plan: a row the dispatch created
+  disappears with it, a PM-planned task keeps its text and goes back to
+  "not dispatched", because the task still needs doing.
+- Both buttons live in the board drawer, with the trade-off spelled out.
+
 ## [0.11.1] - 2026-07-31
 
 ### Fixed

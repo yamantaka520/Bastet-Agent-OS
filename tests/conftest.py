@@ -64,3 +64,4 @@ def orch(seeded, tmp_path):
                  "updated_at) VALUES('fakebot','fakebot','Fake','fake',datetime('now'),"
                  "datetime('now'))")
     return Orchestrator(seeded, home, PriceBook(), "http://127.0.0.1:0")
+

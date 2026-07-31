@@ -483,6 +483,11 @@ const en: Dict = {
   "chat.decompose": "Turn this plan into tasks",
   "chat.decomposeHint": "The breakdown reads this conversation's agreed plan and produces the project's task cards — still yours to confirm on the Project tab.",
   "chat.decomposed": "✅ {n} tasks created — confirm them on the Project tab to run",
+  "board.archive": "Archive card",
+  "board.deleteCard": "Delete card",
+  "board.deleteConfirm": "Delete this card? Its runs go with it and it cannot be undone (a job with usage records cannot be deleted — archive it instead).",
+  "board.removalHint": "Archive hides the card and keeps every run and usage row (reversible). Delete removes it for good and is only allowed for a job that spent nothing. Both are audited.",
+  "board.archived": "archived",
 };
 
 export default en;

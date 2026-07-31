@@ -122,7 +122,8 @@ def read_verdict(workdir: str) -> dict | None:
 
 
 def evaluate_gate(stage: StageDef, workdir: str,
-                  structured_verdict: dict | None) -> GateOutcome:
+                  structured_verdict: dict | None,
+                  reviewer_output: str = "") -> GateOutcome:
     if stage.gate == "auto":
         return GateOutcome("passed")
 
@@ -138,7 +139,13 @@ def evaluate_gate(stage: StageDef, workdir: str,
     if stage.gate == "agent-review":
         # structured channel only — missing/malformed verdict rejects (§5.4.2)
         if not structured_verdict:
-            return GateOutcome("failed", "no structured verdict produced — rejected by policy")
+            # quote what the reviewer said: "no verdict" with no evidence sends
+            # the operator looking for a logic bug when the cause is a login, a
+            # crashed CLI, or output in a shape we failed to read
+            said = " ".join((reviewer_output or "").split())[:400]
+            return GateOutcome("failed", "no structured verdict produced — rejected "
+                               "by policy." + (f" 審查者輸出：{said}" if said
+                                               else " 審查者沒有任何輸出。"))
         verdict = str(structured_verdict.get("verdict", "")).lower()
         reasons = "; ".join(str(r) for r in structured_verdict.get("reasons", []) or [])
         if verdict == "approve":

@@ -503,6 +503,11 @@ const zhHans: Dict = {
   "chat.decompose": "把这段规划变成任务拆分",
   "chat.decomposeHint": "拆分会读这段对话的完整规划结果，产生项目的任务卡（尚待你在“项目”页人工确认）。",
   "chat.decomposed": "✅ 已产生 {n} 项任务拆分 — 到“项目”页确认后即可执行",
+  "board.archive": "归档卡片",
+  "board.deleteCard": "删除卡片",
+  "board.deleteConfirm": "确定删除这张任务卡？连同它的运行记录一起移除，无法恢复（有用量记录的任务不能删除，请用归档）。",
+  "board.removalHint": "归档＝从看板隐藏，运行与用量记录全部保留（可还原）；删除＝真的移除，只允许没有任何用量记录的任务。两者都写审计。",
+  "board.archived": "已归档",
 };
 
 export default zhHans;

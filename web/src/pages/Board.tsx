@@ -3,6 +3,7 @@ import {
   api, post, Interaction, Job, JobDetail, UsageRow,
 } from "../api";
 import { useT } from "../i18n";
+import { del } from "../api";
 
 const STATUS_BADGE: Record<string, string> = {
   in_progress: "🔵", blocked: "🟠", done: "✅", cancelled: "⚪", open: "⚪",
@@ -277,6 +278,25 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
             </div>
           </div>
         )))}
+
+      {canOperate && (job.status === "cancelled" || job.status === "done") && (
+        <div className="row job-removal">
+          <button className="ghost" onClick={async () => {
+            await post(`/api/jobs/${jobId}/archive`, { archived: true });
+            onChanged();
+            onClose();
+          }}>{t("board.archive")}</button>
+          <button className="ghost danger-text" onClick={async () => {
+            if (!window.confirm(t("board.deleteConfirm"))) return;
+            try {
+              await del(`/api/jobs/${jobId}`);
+              onChanged();
+              onClose();
+            } catch (e) { window.alert(String((e as Error).message)); }
+          }}>{t("board.deleteCard")}</button>
+          <span className="muted">{t("board.removalHint")}</span>
+        </div>
+      )}
 
       <h3>{t("board.runs")}</h3>
       <table>

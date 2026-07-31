@@ -258,6 +258,10 @@ class SecretIn(BaseModel):
     note: str = ""
 
 
+class ArchiveIn(BaseModel):
+    archived: bool = True
+
+
 class ChatSessionIn(BaseModel):
     scope_type: str = "project"        # global|team|project
     scope_id: str = ""
@@ -1693,11 +1697,18 @@ def create_app(home: Home) -> FastAPI:
                          else "AMOS 無法連線 — 成員身分待下次啟動自動補上")}
 
     @app.get("/api/jobs", dependencies=[Depends(require_role("viewer"))])
-    def list_jobs(project_id: str | None = None, limit: int = 50):
-        where, params = ("WHERE project_id=?", (project_id,)) if project_id else ("", ())
+    def list_jobs(project_id: str | None = None, limit: int = 50,
+                  include_archived: bool = False):
+        clauses, params = [], []
+        if project_id:
+            clauses.append("project_id=?")
+            params.append(project_id)
+        if not include_archived:
+            clauses.append("archived=0")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         return [dict(r) for r in db.query(
             "SELECT id, project_id, template_id, title, stage, status, priority, "
-            "stages_snapshot_json, created_at, updated_at "
+            "archived, stages_snapshot_json, created_at, updated_at "
             f"FROM jobs {where} ORDER BY updated_at DESC LIMIT ?",
             (*params, limit))]
 
@@ -1726,6 +1737,24 @@ def create_app(home: Home) -> FastAPI:
             return orch.retry(job_id, agent_id=body.agent_id, user=auth.name,
                               spec=body.spec,
                               refresh_workflow=body.refresh_workflow)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/jobs/{job_id}/archive")
+    def archive_job(job_id: str, body: ArchiveIn,
+                    auth: Auth = Depends(require_role("operator"))):
+        """Clear a finished card off the board, keeping its history."""
+        try:
+            return orch.archive_job(job_id, body.archived, actor=auth.actor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.delete("/api/jobs/{job_id}")
+    async def delete_job(job_id: str, auth: Auth = Depends(require_role("operator"))):
+        """Remove a finished card for good. Refused when it spent anything —
+        archive keeps the accounting honest instead."""
+        try:
+            return orch.delete_job(job_id, actor=auth.actor)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

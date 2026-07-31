@@ -27,7 +27,15 @@ import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
-from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
+from .base import (
+    SUMMARY_LIMIT,
+    RunEvent,
+    RunResult,
+    TaskSpec,
+    last_json_object,
+    parse_event,
+    register_builtin,
+)
 
 GRACE_SECONDS = 10
 MAX_TURNS = 40
@@ -119,10 +127,10 @@ class GrokExecutor:
                     return
                 line = raw.decode(errors="replace")
                 handle.raw_stdout += line
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue  # plain/one-shot output is parsed in result()
+                event = parse_event(line)
+                if event is None:
+                    continue  # prose, a fragment of pretty-printed JSON, or a
+                              # bare value: one-shot output is parsed in result()
                 etype = event.get("type")
                 if etype == "text" and event.get("text"):
                     handle.summary += event["text"]
@@ -174,7 +182,7 @@ class GrokExecutor:
 
         if handle.task.read_only:
             # one-shot json mode: {"text": "<schema-constrained JSON>", ...}
-            payload = _last_json_object(handle.raw_stdout)
+            payload = last_json_object(handle.raw_stdout)
             if payload and payload.get("type") == "error":
                 handle.failed_reason = str(payload.get("message", ""))[:500]
             elif payload:
@@ -206,12 +214,3 @@ class GrokExecutor:
         )
 
 
-def _last_json_object(text: str) -> dict | None:
-    for line in reversed(text.strip().splitlines()):
-        try:
-            obj = json.loads(line)
-            if isinstance(obj, dict):
-                return obj
-        except json.JSONDecodeError:
-            continue
-    return None

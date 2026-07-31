@@ -11,7 +11,6 @@ Two accounting paths:
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import signal
 import subprocess
@@ -20,7 +19,14 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
+from .base import (
+    SUMMARY_LIMIT,
+    RunEvent,
+    RunResult,
+    TaskSpec,
+    parse_event,
+    register_builtin,
+)
 
 GRACE_SECONDS = 10  # SIGTERM -> grace -> SIGKILL
 
@@ -118,9 +124,8 @@ class ClaudeCodeExecutor:
                     continue  # no output this window; re-check the deadline
                 if not raw:
                     return  # EOF
-                try:
-                    event = json.loads(raw.decode(errors="replace"))
-                except json.JSONDecodeError:
+                event = parse_event(raw)
+                if event is None:
                     continue
                 etype = event.get("type")
                 if etype == "assistant":
