@@ -362,3 +362,21 @@ def test_the_venv_bin_is_on_path_for_gate_commands():
     own = str(pathlib.Path(sys.executable).parent)
     assert own in entries
     assert entries.index(own) == len(entries) - 1
+
+
+def test_doctor_sees_the_same_path_a_gate_will_see():
+    """Live finding: doctor reported pytest missing while it sat in Bastet's own
+    venv, because the CLI never augmented PATH. A report that disagrees with the
+    gate is worse than none."""
+    import subprocess
+    import sys
+
+    proc = subprocess.run([sys.executable, "-c",
+                           "from bastet_agent_os import cli; "
+                           "cli._prepare(); "
+                           "import os, sys, pathlib; "
+                           "print(str(pathlib.Path(sys.executable).parent) in "
+                           "os.environ['PATH'].split(os.pathsep))"],
+                          capture_output=True, text=True,
+                          env={**__import__("os").environ, "PYTHONPATH": "src"})
+    assert proc.stdout.strip() == "True", proc.stderr

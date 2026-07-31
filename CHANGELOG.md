@@ -8,6 +8,14 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.15.1] - 2026-07-31
+
+### Fixed
+- `bastet doctor` reported `pytest` as missing while it sat in Bastet's own venv:
+  the CLI never called `augment_path()`, so its view of PATH differed from the
+  service's. Every CLI command now prepares the same PATH a gate subprocess gets —
+  a health report that disagrees with the thing it reports on is worse than none.
+
 ## [0.15.0] - 2026-07-31
 
 ### Added — the tools the shipped workflows actually need

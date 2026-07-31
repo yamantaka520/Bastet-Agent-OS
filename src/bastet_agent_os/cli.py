@@ -14,6 +14,17 @@ resource_app = typer.Typer(help="Manage resources (LLM endpoints, secrets, …).
 project_app = typer.Typer(help="Manage projects (1:1 with AMOS projects).")
 agent_app = typer.Typer(help="Manage agents (executor bindings).")
 grant_app = typer.Typer(help="Manage grants (who may use which resource).")
+@app.callback()
+def _prepare() -> None:
+    """Every command sees the same PATH the service gives its subprocesses.
+
+    Without this `bastet doctor` reported a gate tool as missing while the very
+    same runner sat in Bastet's own venv — the report has to match reality."""
+    from .config import augment_path
+
+    augment_path()
+
+
 app.add_typer(resource_app, name="resource")
 app.add_typer(project_app, name="project")
 app.add_typer(agent_app, name="agent")
