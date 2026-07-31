@@ -38,6 +38,14 @@ PIP_COMPONENTS = [
      "package": "agent-memory-os", "extras": "[full]", "in_process": True},
     {"id": "claude-agent-sdk", "label": "Claude Agent SDK", "kind": "pip",
      "package": "claude-agent-sdk", "in_process": True},
+    # AMOS's semantic recall backend. It arrives with agent-memory-os[full], but
+    # it is a separate package that can silently be absent — and when it is,
+    # recall quietly degrades to lexical matching with no error anywhere. Listing
+    # it is the only way to see which mode you are actually running in.
+    {"id": "turbovec", "label": "turbovec（AMOS 語意向量索引）", "kind": "pip",
+     "package": "turbovec", "in_process": True},
+    {"id": "numpy", "label": "numpy（語意索引相依）", "kind": "pip",
+     "package": "numpy", "in_process": True},
     {"id": "pytest", "label": "pytest（工作流測試關卡）", "kind": "pip",
      "package": "pytest"},
 ]
@@ -171,6 +179,23 @@ def update_all(db, actor: str) -> dict[str, Any]:
             "updated": [r["id"] for r in results if r["status"] == "updated"],
             "failed": [r["id"] for r in results if r["status"] == "failed"],
             "restart_required": any(r["restart_required"] for r in results)}
+
+
+def semantic_status() -> dict[str, Any]:
+    """Is AMOS recalling by meaning, or just by keyword?
+
+    turbovec + numpy turn on vector recall. When they are missing AMOS does not
+    complain — it falls back to lexical matching, so recall keeps "working" and
+    quietly stops finding anything that does not share words with the query.
+    That distinction is invisible unless something says it out loud."""
+    try:
+        from agent_memory_os.providers.turbovec import semantic_backend_available
+        available = bool(semantic_backend_available())
+    except Exception:
+        available = False
+    return {"semantic": available,
+            "mode": "vector" if available else "lexical",
+            "install": "pip install 'agent-memory-os[semantic]'"}
 
 
 def amos_web(cfg: dict[str, Any] | None = None) -> dict[str, Any]:

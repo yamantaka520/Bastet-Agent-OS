@@ -315,6 +315,13 @@ class Db:
             if "config_error" not in gate_cols:
                 self._conn.execute("ALTER TABLE gate_results ADD COLUMN config_error "
                                    "INTEGER NOT NULL DEFAULT 0")
+            # the rework loop's state: how many times this card has been sent
+            # back, and the failure the receiving agent must fix
+            if "rework_count" not in existing:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN rework_count "
+                                   "INTEGER NOT NULL DEFAULT 0")
+            if "rework_note" not in existing:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN rework_note TEXT")
             if "archived" not in existing:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN archived INTEGER "
                                    "NOT NULL DEFAULT 0")

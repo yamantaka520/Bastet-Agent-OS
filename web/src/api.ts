@@ -6,6 +6,7 @@ export type Job = {
   stage: string;
   status: string;
   stages_snapshot_json: string;
+  rework_count?: number;         // how many times a gate sent this card back
   updated_at: string;
 };
 

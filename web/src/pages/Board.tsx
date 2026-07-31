@@ -80,7 +80,9 @@ function Board({ jobs, onSelect }: { jobs: Job[]; onSelect: (id: string) => void
               <div className="card-title">{STATUS_BADGE[job.status] ?? "⚪"} {job.title}</div>
               <div className="card-meta">{t(`board.status.${job.status}`,
                                             undefined, job.status)}
-                {job.template_id ? ` · ${job.template_id}` : ""}</div>
+                {job.template_id ? ` · ${job.template_id}` : ""}
+                {job.rework_count ? ` · 🔧 ${t("board.reworked",
+                                               { n: job.rework_count })}` : ""}</div>
               <div className="card-meta card-id">{job.id}</div>
             </button>
           ))}
@@ -232,6 +234,9 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
       <button className="ghost close" onClick={onClose}>✕</button>
       <h2>{job.title}</h2>
       <p className="card-meta">{job.id} · {t("board.jobStage")} <b>{job.stage}</b> · {job.status}</p>
+      {!!job.rework_count && (
+        <p className="notice">🔧 {t("board.reworkNote", { n: job.rework_count })}</p>
+      )}
       <pre className="spec">{job.spec_md}</pre>
 
       {canOperate && (job.status === "blocked" || job.status === "cancelled") && (

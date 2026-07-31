@@ -8,6 +8,72 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.18.0] - 2026-07-31
+
+### Added — a failed gate is handled by the agents, not by you
+This is what the engine was supposed to do all along. When a `tests-pass` or
+`agent-review` gate says no, the card no longer stops: it goes **back** to a
+stage that can fix it, carrying the gate's actual output, and the pipeline keeps
+running. A reviewer that rejected something cannot fix it, so the work travels
+past read-only stages to the last one that writes.
+
+The brief handed to the fixing agent names the shortcuts it must not take —
+don't edit the test command, don't delete the test, don't make the assertion
+trivially true, don't add skip/xfail, don't touch the workflow config. The
+cheapest way to make a gate pass is to weaken the gate, and an agent told only
+"make it green" will do exactly that.
+
+Bastet still stops for a human in the three cases where it genuinely cannot
+proceed: a stage declared `on_fail: block` (a release step should not be looped
+by an agent), a pipeline with no writable stage to return to, and a loop that
+has spent its cycles — three by default — without converging. Every hand-back is
+audited (`job.rework`) and the count shows on the board card.
+
+An unrunnable test command (`npm ERR! Missing script: "test:e2e"`) now goes back
+too, with a brief that says to add the missing script or dependency for real and
+to report a genuinely wrong command instead of faking a green exit.
+
+### Added — 運維處理 and 持續維護 workflow presets
+Incident handling (locate → stop the bleeding → root cause → fix with a
+regression test → review → deploy → postmortem) and periodic maintenance
+(health check → dependency and security updates → regression → tech debt →
+review → acceptance), with `ops-engineer` and `maintainer` role prompts. Both
+use the rework loop; the steps that touch production keep asking a human.
+
+### Fixed — notifications that said nothing
+A blocked job sent `🟠 job.blocked: job_abc stage tests-pass`. It now carries the
+task title, the project, the gate, how many reworks were already spent, and the
+failing output itself — plus a 🔁 retry button, so a stuck card can be restarted
+from the notification. Rework messages are separate and read as progress: what
+failed, who is fixing it, cycle N of M, "nothing for you to do". Failing-command
+output kept for these is 8000 chars rather than 1000, because 1000 cut off the
+assertion.
+
+### Fixed — AMOS was only wired to one executor
+Only `bastet-lite` wrote memories, so a project driven by Claude Code, Codex,
+Grok or agy contributed nothing and every context pack read from an empty store.
+Writing now happens in the orchestrator, the same for every executor: what each
+stage did (attributed to that agent's AMOS id), what a gate rejected (as a
+`warning` — the most useful memory a run produces), and how the job ended.
+Context packs are read *as the running agent*, which turns on AMOS's ACL — an
+unscoped `context_pack(query)` was recalling every project's memories into every
+project's runs. A memory write can never break a run, and that is now enforced
+at the boundary rather than per call site.
+
+### Added — turbovec is visible in maintenance
+AMOS's semantic recall needs turbovec + numpy. They arrive with
+`agent-memory-os[full]`, but when absent AMOS falls back to keyword matching
+without a word of complaint. Both are listed in the maintenance card now, and
+the memory tab states which mode is actually live.
+
+### Fixed — UI regressions from the shared control system
+Board cards and preset tiles are `<button>` elements, so they inherited
+`color: #fff` (white on white) and `white-space: nowrap` (long titles running off
+the card instead of wrapping). Both now opt out explicitly. The credentials
+textarea rests at the shared control height and grows on focus, so a row of
+credential fields lines up. Closed projects are no longer listed in the
+project ↔ workflow mapping card.
+
 ## [0.17.0] - 2026-07-31
 
 ### Added — searching the audit trail

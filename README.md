@@ -107,6 +107,31 @@ Bastet hands them over as env vars (`BASTET_RES_<NAME>_URL` / `_KEY` /
 written into the task brief. The MCP file contains resolved credentials, so it
 lives outside the worktree at 0600 and is deleted when the run ends.
 
+## When a gate says no
+
+A failing test is an ordinary event in a development loop, so it does not stop
+the board. The card goes **back** to a stage that can fix it — past read-only
+reviewers to the last stage that writes — carrying the gate's real output, and
+the pipeline continues without anyone being asked to intervene.
+
+The brief that travels with it names the shortcuts explicitly: do not edit the
+test command, delete the test, make the assertion trivially true, add skip/xfail,
+or touch the workflow config. The cheapest way to pass a gate is to weaken it,
+and an agent told only "make it green" will.
+
+Three things still stop and ask you:
+
+| Situation | Why a human |
+|---|---|
+| `on_fail: block` on the stage | a deploy or release step should not be retried in a loop by an agent |
+| nothing earlier can write | a pipeline of read-only stages has nobody able to act |
+| cycles exhausted (`max_cycles`, default 3) | an agent that has failed three times is not converging |
+
+Each hand-back is audited as `job.rework` and counted on the card. The
+notification for one reads as progress (what failed, who is fixing it, cycle N of
+M); the notification for a genuine stop carries the failing output and a retry
+button.
+
 ## Workflow gate tools
 
 A `tests-pass` gate runs its command **on the Bastet host**, with the service's
@@ -140,6 +165,17 @@ the button and is audited. A component whose available version cannot be
 determined (an official install script with no version query) reports `unknown`
 instead of implying it is current, and an installer that ran cleanly without
 moving the version reports `unchanged` rather than claiming success.
+
+## Team memory
+
+Every run writes to Agent Memory OS, whichever executor drove it: what each
+stage did (attributed to that agent's AMOS id), what a gate rejected, and how the
+job ended. Context packs are read *as the running agent*, so AMOS's ACL applies
+and one project's memories stay out of another project's runs.
+
+Semantic recall needs `turbovec` (it ships with `agent-memory-os[full]`). Without
+it AMOS silently falls back to keyword matching, so the memory tab states which
+mode is live and the maintenance card lists the package.
 
 ## Versioning
 

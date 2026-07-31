@@ -204,3 +204,69 @@ async def test_nothing_is_announced_when_nothing_waits(channel):
                                           "chat_id": 555}}})
     await ch._announce_pending()
     assert fake.texts() == []
+
+
+async def test_rework_notification_says_what_failed_and_who_is_fixing_it(channel):
+    """The complaint: a notification that a thing broke, with no way to tell
+    what. A rework message has to carry the failing output and make clear that
+    nobody needs to intervene."""
+    ch, fake, db = channel
+    ch._save_config({"bindings": {"1": {"user_id": "u1", "name": "m", "chat_id": 42}}})
+    db.write("INSERT INTO jobs(id, project_id, stages_snapshot_json, title, spec_md, "
+             "stage, status, created_at, updated_at) VALUES('jobrw','proj1','[]',"
+             "'貓咪散步預約','spec','實作','in_progress',datetime('now'),datetime('now'))")
+
+    await ch._notify({
+        "type": "job.rework", "job_id": "jobrw", "title": "貓咪散步預約",
+        "failed_stage": "整合測試", "gate": "tests-pass", "back_to": "實作",
+        "role": "backend-engineer", "cycle": 1, "max_cycles": 3,
+        "config_error": False,
+        "detail": "FAILED tests/test_booking.py::test_confirm - AssertionError: "
+                  "expected 200 got 500",
+    })
+
+    text = fake.texts()[-1]
+    assert "貓咪散步預約" in text                 # which card
+    assert "proj1" in text                        # which project
+    assert "整合測試" in text and "tests-pass" in text
+    assert "實作" in text and "backend-engineer" in text   # who is fixing it
+    assert "1/3" in text                          # how much rope is left
+    assert "test_confirm" in text                 # the actual failure
+    assert "不需要你做什麼" in text                # it is progress, not an alarm
+
+
+async def test_blocked_notification_carries_the_output_and_a_retry_button(channel):
+    ch, fake, db = channel
+    ch._save_config({"bindings": {"1": {"user_id": "u1", "name": "m", "chat_id": 42}}})
+    db.write("INSERT INTO jobs(id, project_id, stages_snapshot_json, title, spec_md, "
+             "stage, status, created_at, updated_at) VALUES('job2','proj1','[]',"
+             "'E2E 上線','spec','E2E 測試','blocked',datetime('now'),datetime('now'))")
+
+    await ch._notify({
+        "type": "job.blocked", "job_id": "job2", "title": "E2E 上線",
+        "stage": "E2E 測試", "gate": "tests-pass", "cycles": 3,
+        "config_error": True, "reason": "設定問題",
+        "detail": 'npm ERR! Missing script: "test:e2e"',
+    })
+
+    sent = [m for m in fake.sent if m["method"] == "sendMessage"][-1]
+    assert "E2E 上線" in sent["text"]
+    assert "設定問題" in sent["text"]
+    assert "已自動返工 3 次" in sent["text"]      # what was already tried
+    assert 'Missing script: "test:e2e"' in sent["text"]
+    buttons = sent["reply_markup"]["inline_keyboard"][0]
+    assert buttons[0]["callback_data"] == "rty:job2"   # a way forward, in place
+
+
+async def test_long_output_is_trimmed_to_what_telegram_accepts(channel):
+    """A 400 from Telegram loses the whole notification, which is worse than a
+    trimmed one."""
+    ch, fake, db = channel
+    ch._save_config({"bindings": {"1": {"user_id": "u1", "name": "m", "chat_id": 42}}})
+    await ch._notify({"type": "job.blocked", "job_id": "nope", "title": "big",
+                      "stage": "s", "detail": "x" * 50_000, "reason": "boom"})
+
+    text = fake.texts()[-1]
+    assert len(text) <= 3800
+    assert "（前面省略）" in text                  # the tail is what was kept
+    assert text.rstrip().endswith("x")

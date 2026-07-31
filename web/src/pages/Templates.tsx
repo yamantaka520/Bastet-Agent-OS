@@ -15,7 +15,8 @@ type Gate = { id: string; label: string; icon: string; hint: string };
 type Catalog = { presets: Preset[]; roles: Role[]; gates: Gate[] };
 type Template = { id: string; version: number; stages_json: string;
                   assigned_projects: string[] };
-type Project = { id: string; team_id: string; default_template_id: string | null };
+type Project = { id: string; team_id: string; default_template_id: string | null;
+                 status?: string };
 
 const BLANK_STAGE: Stage = { name: "", role: null, gate: "auto" };
 
@@ -90,8 +91,13 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
     } catch (e) { setError(String((e as Error).message)); }
   };
 
-  const unassigned = projects.filter((p) => !p.default_template_id);
-  const assigned = projects.filter((p) => p.default_template_id);
+  // A closed project has nothing left to assign a workflow to, so listing it
+  // here only makes the real work harder to see. It stays on the Projects tab,
+  // where closed projects belong (and can be reopened).
+  const live = projects.filter((p) => p.status !== "closed");
+  const unassigned = live.filter((p) => !p.default_template_id);
+  const assigned = live.filter((p) => p.default_template_id);
+  const closedCount = projects.length - live.length;
 
   return (
     <div className="page">
@@ -207,6 +213,9 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
             )}
           </div>
         ))}
+        {closedCount > 0 && (
+          <p className="muted">{t("tpl.closedHidden", { n: closedCount })}</p>
+        )}
         <p className="muted">{t("tpl.mappingHint")}</p>
         <p className="muted">{t("tpl.presetLangNote")}</p>
       </Section>

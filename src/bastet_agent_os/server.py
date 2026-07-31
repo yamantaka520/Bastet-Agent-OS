@@ -1735,7 +1735,7 @@ def create_app(home: Home) -> FastAPI:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         return [dict(r) for r in db.query(
             "SELECT id, project_id, template_id, title, stage, status, priority, "
-            "archived, stages_snapshot_json, created_at, updated_at "
+            "archived, rework_count, stages_snapshot_json, created_at, updated_at "
             f"FROM jobs {where} ORDER BY updated_at DESC LIMIT ?",
             (*params, limit))]
 
@@ -1907,7 +1907,8 @@ def create_app(home: Home) -> FastAPI:
             stats = {}
         from . import maintenance
         return {"items": items, "stats": stats,
-                "console": maintenance.amos_web(cfg)}
+                "console": maintenance.amos_web(cfg),
+                "recall": maintenance.semantic_status()}
 
     @app.post("/api/runs/{run_id}/respond")
     async def respond_run(run_id: str, r: RespondIn,

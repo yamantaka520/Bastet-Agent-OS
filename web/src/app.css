@@ -130,7 +130,19 @@ nav::-webkit-scrollbar { display: none; }
 textarea { background: var(--bg); color: var(--text); border: 1px solid var(--line);
            border-radius: 6px; padding: .5rem; font: .85rem/1.4 ui-monospace, monospace; }
 
-.card { display: block; width: 100%; text-align: left; }
+/* A board card is a <button> so it is keyboard-reachable, but it is a block of
+   text, not a control: it must opt out of the control system explicitly. Without
+   this it inherits white-on-accent text (invisible on the card's own light
+   background) and nowrap (so a long task title runs off the card instead of
+   wrapping). */
+.card {
+  display: block; width: 100%; text-align: left;
+  color: var(--text); background: var(--bg);
+  white-space: normal; overflow-wrap: anywhere; line-height: 1.4;
+  min-height: 0; padding: .55rem .65rem; font-size: .85rem;
+  border: 1px solid var(--line); border-radius: 8px;
+}
+.card:hover { border-color: var(--accent); background: var(--bg); }
 .spec.diff { max-height: 20rem; font-size: .75rem; }
 
 .drawer { position: fixed; top: 0; right: 0; width: min(30rem, 90vw); height: 100vh;
@@ -163,9 +175,17 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
 .keypad button.ghost { border: 1px solid var(--line); border-radius: 6px;
                        color: var(--text); padding: .3rem .6rem; }
 .wf-cards { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: .8rem; }
+/* Same story as .card: a preset tile is a button so it can be clicked and
+   tabbed to, but its content is prose. Without the opt-out it inherits the
+   control system's nowrap + centring, and the description runs out past the
+   tile's edge — which is what "跑版" looks like. */
 .wf-card { display: grid; gap: .2rem; text-align: left; background: var(--bg);
            border: 1px solid var(--line); border-radius: 10px; padding: .7rem .8rem;
-           width: 15rem; color: var(--text); }
+           width: 15rem; color: var(--text);
+           align-items: start; justify-items: start; align-content: start;
+           white-space: normal; overflow-wrap: anywhere; line-height: 1.4;
+           min-height: 6.5rem; }
+.wf-card > * { max-width: 100%; }
 .wf-card:hover { border-color: var(--accent); }
 .wf-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .wf-detail { border-top: 1px dashed var(--line); padding-top: .8rem; display: grid;
@@ -291,10 +311,20 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
 
 .gate-config-error { font-size: .8rem; color: #e0b050; margin-top: .2rem; }
 
-/* multi-line secret values (PEM keys, service-account JSON) */
+/* Multi-line secret values (PEM keys, service-account JSON). A textarea next to
+   single-line inputs is the one place the shared control height cannot simply
+   apply: rows=2 made it visibly taller than everything beside it. It keeps the
+   control height as its *resting* height and grows only when the user drags it,
+   so a row of credential fields lines up. */
 .secret-value { width: 20rem; font-family: ui-monospace, monospace; font-size: .78rem;
-                resize: vertical; }
+                resize: vertical; min-height: var(--control-h);
+                height: var(--control-h); padding: .3rem .5rem; line-height: 1.35; }
+.secret-value:focus { height: 5rem; }
 
-.card-title { font-weight: 600; line-height: 1.35; }
+/* a long title wraps onto as many lines as it needs — truncating the one field
+   that says what the task IS defeats the point of putting it on the card */
+.card-title { font-weight: 600; line-height: 1.35; white-space: normal;
+              overflow-wrap: anywhere; }
 .card-id { opacity: .6; font-size: .7rem; }
+.card-meta { white-space: normal; overflow-wrap: anywhere; }
 

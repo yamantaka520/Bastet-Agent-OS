@@ -1,0 +1,221 @@
+"""The rework loop: a failed gate is handled by the agents, not by a human.
+
+The old behaviour stopped the card and sent a one-line notification, which put
+a person in the position of doing what the writing agent is better placed to do.
+These tests pin the new contract, including the parts that must still stop:
+a stage declared `on_fail: block`, a pipeline with no writable stage to return
+to, and a loop that has spent its cycles without converging.
+"""
+
+import json
+from pathlib import Path
+
+import pytest
+from fake_executor import SCRIPT, add_template, req
+
+from bastet_agent_os.executors.base import RunResult
+
+pytestmark = pytest.mark.asyncio
+
+
+def audit(db, action: str) -> list[dict]:
+    return [json.loads(r["detail_json"]) for r in db.query(
+        "SELECT detail_json FROM audit_log WHERE action=? ORDER BY id", (action,))]
+
+
+def stages_of(db, job_id: str) -> list[str]:
+    # rowid, not id: run ids are random tokens, so ordering by them is arbitrary
+    return [r["stage"] for r in db.query(
+        "SELECT stage FROM runs WHERE job_id=? ORDER BY rowid", (job_id,))]
+
+
+def fixes(path_name: str, summary: str = "fixed it"):
+    """A scripted agent that actually changes the workdir, so the gate that
+    failed can genuinely pass on the next pass."""
+    def run(task):
+        (Path(task.workdir) / path_name).write_text("done\n")
+        return RunResult(status="succeeded", summary=summary)
+    return run
+
+
+async def test_failing_test_gate_goes_back_and_the_job_finishes(orch, seeded):
+    """The headline behaviour: tests fail, the writing stage fixes them, the
+    pipeline carries on. Nobody is asked to approve anything."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "tests-pass",
+         "gate_config": {"command": "test -f fixed.txt"}},
+        {"name": "ship", "gate": "auto"},
+    ])
+    SCRIPT.append(RunResult(status="succeeded", summary="wrote code, forgot the fix"))
+    SCRIPT.append(fixes("fixed.txt"))
+    SCRIPT.append(RunResult(status="succeeded", summary="shipped"))
+
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+    assert job["status"] == "done"
+    assert stages_of(seeded, job_id) == ["implement", "implement", "ship"]
+    events = audit(seeded, "job.rework")
+    assert len(events) == 1
+    assert events[0]["failed_stage"] == "implement"
+    assert events[0]["back_to"] == "implement"
+    assert events[0]["cycle"] == 1
+    assert job["rework_note"] is None       # cleared once the gate passed
+
+
+async def test_the_fixing_agent_is_told_what_failed(orch, seeded):
+    """A retry that does not carry the failure is just the same run again."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "tests-pass",
+         "gate_config": {"command": "test -f fixed.txt || (echo 'AssertionError: "
+                                    "expected 3 got 4' && exit 1)"}},
+    ])
+    seen: list[str] = []
+
+    def capture(task):
+        seen.append(task.prompt)
+        (Path(task.workdir) / "fixed.txt").write_text("y\n")
+        return RunResult(status="succeeded", summary="fixed")
+
+    SCRIPT.append(RunResult(status="succeeded", summary="first pass"))
+    SCRIPT.append(capture)
+
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+    brief = seen[0]
+    assert "AssertionError: expected 3 got 4" in brief    # the real output
+    assert "第 1/3 次返工" in brief                        # and where it is in the loop
+    # the shortcuts that would pass the gate without fixing anything
+    assert "不要為了過關而改測試指令" in brief
+    assert "恆真" in brief
+
+
+async def test_a_read_only_reviewer_hands_back_to_the_writer(orch, seeded):
+    """A reviewer cannot fix what it rejected, so the work goes past it to the
+    last stage that can write."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "auto"},
+        {"name": "review", "gate": "agent-review", "read_only": True},
+    ])
+    SCRIPT.append(RunResult(status="succeeded", summary="v1"))
+    SCRIPT.append(RunResult(status="succeeded", summary="no",
+                            structured_verdict={"verdict": "reject",
+                                                "reasons": ["race in the retry path"]}))
+    SCRIPT.append(RunResult(status="succeeded", summary="v2 fixes the race"))
+    SCRIPT.append(RunResult(status="succeeded", summary="ok",
+                            structured_verdict={"verdict": "approve"}))
+
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+    assert stages_of(seeded, job_id) == ["implement", "review", "implement", "review"]
+    assert audit(seeded, "job.rework")[0]["back_to"] == "implement"
+
+
+async def test_the_loop_is_capped_and_then_asks_a_human(orch, seeded):
+    """An agent that has failed three times is not converging. The cap is what
+    keeps 'self-healing' from meaning 'burns tokens forever'."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "tests-pass", "max_cycles": 2,
+         "gate_config": {"command": "exit 1"}},
+    ])
+    for _ in range(6):
+        SCRIPT.append(RunResult(status="succeeded", summary="tried"))
+
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+    assert job["status"] == "blocked"
+    assert job["rework_count"] == 2
+    assert len(stages_of(seeded, job_id)) == 3      # first run + 2 reworks, no more
+    blocked = audit(seeded, "job.blocked")[-1]
+    assert blocked["cycles"] == 2
+    assert "返工 2 次" in blocked["reason"]
+
+
+async def test_on_fail_block_stops_immediately(orch, seeded):
+    """Some gates exist precisely to stop: a release step should not be retried
+    in a loop by an agent."""
+    add_template(seeded, "dev", [
+        {"name": "release", "gate": "tests-pass", "on_fail": "block",
+         "gate_config": {"command": "exit 1"}},
+    ])
+    SCRIPT.append(RunResult(status="succeeded", summary="tried"))
+
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+    assert (job["status"], job["rework_count"]) == ("blocked", 0)
+    assert len(stages_of(seeded, job_id)) == 1
+    assert "on_fail: block" in audit(seeded, "job.blocked")[-1]["reason"]
+
+
+async def test_nothing_to_hand_back_to_blocks_with_that_reason(orch, seeded):
+    """A pipeline of only read-only stages has nobody who can fix anything —
+    the one case where stopping is the honest answer."""
+    add_template(seeded, "dev", [
+        {"name": "audit", "gate": "agent-review", "read_only": True},
+    ])
+    SCRIPT.append(RunResult(status="succeeded", summary="rejected",
+                            structured_verdict={"verdict": "reject"}))
+
+    orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    reason = audit(seeded, "job.blocked")[-1]["reason"]
+    assert "沒有任何前面的可寫階段" in reason
+
+
+async def test_an_unrunnable_test_command_is_also_handed_back(orch, seeded):
+    """`npm ERR! Missing script: "test:e2e"` used to stop the card dead. It is a
+    real gap in the project, and the agent that writes the project can close
+    it — with the brief spelling out that faking a green exit is not a fix."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "tests-pass",
+         "gate_config": {"command": "npm run test:e2e"}},
+    ])
+    seen: list[str] = []
+
+    def capture(task):
+        seen.append(task.prompt)
+        return RunResult(status="succeeded", summary="looked at it")
+
+    SCRIPT.append(RunResult(status="succeeded", summary="first pass"))
+    for _ in range(4):
+        SCRIPT.append(capture)
+
+    orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    assert seen, "the card was never handed back"
+    assert "跑不起來" in seen[0]
+    assert "不是寫一個空殼讓它 exit 0" in seen[0]
+    # and it is recorded as a config problem, not as failing tests
+    assert audit(seeded, "job.rework")[0]["config_error"] is True
+
+
+async def test_blocked_notification_carries_enough_to_act_on(orch, seeded):
+    """The complaint that started this: `🟠 job.blocked: job_abc stage tests`
+    tells you something broke and nothing about what."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "tests-pass", "max_cycles": 1,
+         "on_fail": "block",
+         "gate_config": {"command": "echo 'FAILED tests/test_cat.py::test_walk "
+                                    "- AssertionError' && exit 1"}},
+    ])
+    SCRIPT.append(RunResult(status="succeeded", summary="tried"))
+    job_id = orch.dispatch(req(template_id="dev", title="貓咪散步預約"))
+    await orch.wait_idle()
+
+    blocked = audit(seeded, "job.blocked")[-1]
+    assert blocked["gate"] == "tests-pass"
+    assert "test_walk" in blocked["detail"]         # the actual failing test
+    assert "AssertionError" in blocked["reason"]
+    job = seeded.one("SELECT title FROM jobs WHERE id=?", (job_id,))
+    assert job["title"] == "貓咪散步預約"

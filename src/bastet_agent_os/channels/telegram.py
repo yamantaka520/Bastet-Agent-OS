@@ -339,6 +339,12 @@ class TelegramChannel:
                 if chat_id:
                     verdict = "approved ✅" if approved else "rejected ❌"
                     await self._send(chat_id, f"{job_id} {verdict} → {outcome['status']}")
+            elif data.startswith("rty:"):
+                _, job_id = data.split(":", 1)
+                outcome = self.orch.retry(job_id, user=binding["name"])
+                if chat_id:
+                    await self._send(chat_id,
+                                     f"🔁 {job_id} 重跑「{outcome['stage']}」中…")
             elif data.startswith("itx:"):
                 _, run_id, request_id, decision = data.split(":", 3)
                 reply = {"behavior": "allow" if decision == "yes" else "deny"}
@@ -354,6 +360,7 @@ class TelegramChannel:
 
     async def _notify(self, event: dict) -> None:
         etype = event.get("type", "")
+        keyboard = None
         if etype == "gate.pending":
             job = self.db.one("SELECT title, project_id FROM jobs WHERE id=?",
                               (event.get("job_id"),))
@@ -373,19 +380,84 @@ class TelegramChannel:
                 {"text": "❌ Deny",
                  "callback_data": f"itx:{event.get('run_id')}:{event.get('request_id')}:no"},
             ]]}
-        elif etype in ("job.done", "job.blocked", "budget.exceeded", "budget.warning"):
-            icon = {"job.done": "✅", "job.blocked": "🟠",
-                    "budget.exceeded": "🛑", "budget.warning": "⚠️"}[etype]
+        elif etype == "job.rework":
+            text = self._rework_text(event)
+        elif etype == "job.blocked":
+            text = self._blocked_text(event)
+            keyboard = {"inline_keyboard": [[
+                {"text": "🔁 重試這一關",
+                 "callback_data": f"rty:{event.get('job_id')}"},
+            ]]}
+        elif etype in ("job.done", "budget.exceeded", "budget.warning"):
+            icon = {"job.done": "✅", "budget.exceeded": "🛑",
+                    "budget.warning": "⚠️"}[etype]
             detail = event.get("reason") or event.get("stage") or ""
             text = f"{icon} {etype}: {event.get('job_id') or event.get('grant_id')} {detail}"
-            keyboard = None
         else:
             return
         for binding in self._config().get("bindings", {}).values():
             await self._send(binding["chat_id"], text, reply_markup=keyboard)
 
+    def _job_line(self, event: dict) -> str:
+        """Which card, in which project — a job id alone means nothing to a
+        person reading their phone."""
+        job = self.db.one("SELECT title, project_id FROM jobs WHERE id=?",
+                          (event.get("job_id"),))
+        title = event.get("title") or (job["title"] if job else "") or "?"
+        project = job["project_id"] if job else event.get("project_id") or "?"
+        return f"{title}\n專案 {project} · {event.get('job_id')}"
+
+    def _rework_text(self, event: dict) -> str:
+        """Progress, not an alarm: the engine caught a failure and is handling
+        it. Says what failed, who is fixing it, and how much rope is left."""
+        who = f"「{event.get('back_to')}」"
+        if event.get("role"):
+            who += f"（{event.get('role')}）"
+        head = ("🔧 關卡沒過，已自動退回修正"
+                if not event.get("config_error")
+                else "🔧 關卡指令跑不起來，已自動退回處理")
+        return (f"{head}\n{self._job_line(event)}\n"
+                f"沒過的關卡：{event.get('failed_stage')}"
+                f"（{event.get('gate')}）\n"
+                f"交回給：{who} · 第 {event.get('cycle')}/"
+                f"{event.get('max_cycles')} 次返工\n"
+                f"{self._detail_block(event.get('detail'))}\n"
+                f"不需要你做什麼 —— 修完會自己往前跑。")
+
+    def _blocked_text(self, event: dict) -> str:
+        """The one notification that does need a human. It has to carry the
+        evidence: what stage, what gate, how many attempts, and the actual
+        output — reading the log on the host should not be the only way."""
+        kind = "設定問題" if event.get("config_error") else "卡住了"
+        spent = event.get("cycles") or 0
+        tried = f"（已自動返工 {spent} 次仍未通過）" if spent else ""
+        return (f"🟠 任務{kind}，需要你看一下{tried}\n"
+                f"{self._job_line(event)}\n"
+                f"停在：{event.get('stage')}"
+                + (f"（{event.get('gate')}）" if event.get("gate") else "") + "\n"
+                f"{self._detail_block(event.get('detail') or event.get('reason'))}")
+
+    @staticmethod
+    def _detail_block(detail: str | None) -> str:
+        """The failure output, trimmed to what Telegram will actually deliver.
+
+        Plain text, no markdown fences: these messages carry arbitrary compiler
+        and test output, and one stray backtick or underscore in it would make
+        Telegram reject the whole message — losing the notification entirely,
+        which is the failure mode this card is trying to fix. The tail is kept
+        rather than the head because the assertion is at the end."""
+        text = (detail or "").strip()
+        if not text:
+            return "（沒有輸出）"
+        room = 2400
+        if len(text) > room:
+            text = "…（前面省略）\n" + text[-room:]
+        return "── 關卡輸出 ──\n" + text
+
     async def _send(self, chat_id: int, text: str, reply_markup: dict | None = None) -> None:
-        payload: dict = {"chat_id": chat_id, "text": text}
+        # Telegram rejects anything over 4096 chars with a 400, and a rejected
+        # notification is a notification nobody gets
+        payload: dict = {"chat_id": chat_id, "text": text[:MAX_TELEGRAM_TEXT]}
         if reply_markup:
             payload["reply_markup"] = reply_markup
         try:

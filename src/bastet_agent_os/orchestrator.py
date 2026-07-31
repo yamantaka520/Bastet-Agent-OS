@@ -2,8 +2,16 @@
 
 A job walks its stage pipeline: each stage picks an agent (by role, falling
 back to the job's default agent), executes a run in the job's worktree, then
-the stage's gate decides — pass advances, fail blocks the job with feedback,
-pending waits for human approval (resumed via approve()).
+the stage's gate decides — pass advances, pending waits for human approval
+(resumed via approve()), and fail goes BACK to a stage that can fix it.
+
+That last part is the engine's reason to exist. A failing test or a rejected
+review is an ordinary event in a development loop: the agents that write the
+code are the ones equipped to answer it, so the card returns to the writing
+stage with the failure output attached and the pipeline continues on its own.
+Bastet stops for a human only when it genuinely cannot proceed — the stage is
+declared `on_fail: block`, there is no earlier stage that can write, or the
+loop has spent its cycles without converging.
 """
 
 from __future__ import annotations
@@ -15,7 +23,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import run_tokens
+from . import run_memory, run_tokens
 from .config import Home
 from .context_engine import build_context
 from .db import Db, new_id, now
@@ -30,6 +38,8 @@ from .workflow import (
     clear_verdict,
     evaluate_gate,
     parse_stages,
+    rework_brief,
+    rework_target_for,
 )
 
 log = logging.getLogger("bastet.orchestrator")
@@ -300,23 +310,84 @@ class Orchestrator:
                 self._block(job_id, f"stage {stage.name}: waiting for human approval")
                 return
             if outcome.verdict == "failed":
-                reason = ("設定問題" if outcome.config_error else "gate failed")
-                self._block(job_id,
-                            f"stage {stage.name} {reason}: {outcome.detail[:200]}")
+                if self._rework(job, stages, idx, outcome):
+                    continue          # sent back to be fixed; keep driving
                 return
 
             if idx + 1 >= len(stages):
                 self.db.write("UPDATE jobs SET status='done', updated_at=? WHERE id=?",
                               (now(), job_id))
                 self.db.audit("orchestrator", "job.done", "job", job_id, {})
+                run_memory.job_finished(self.db, job, "done")
                 self._emit("job.done", job["project_id"], job_id=job_id)
                 self._sync_project(job["project_id"])
                 self.cleanup_worktree(job_id)
                 return
-            self.db.write("UPDATE jobs SET stage=?, updated_at=? WHERE id=?",
-                          (stages[idx + 1].name, now(), job_id))
+            # the note has served its purpose: the gate it described just passed
+            self.db.write("UPDATE jobs SET stage=?, rework_note=NULL, updated_at=? "
+                          "WHERE id=?", (stages[idx + 1].name, now(), job_id))
             self._emit("job.stage_changed", job["project_id"], job_id=job_id,
                        stage=stages[idx + 1].name)
+
+    def _rework(self, job, stages: list[StageDef], idx: int,
+                outcome: GateOutcome) -> bool:
+        """A failed gate goes back to whoever can fix it. Returns True if the
+        job is moving again, False if it is now blocked.
+
+        This is the whole point of the engine: a failing test is a normal event
+        in a development loop, not an outage. The old behaviour — stop the card
+        and post a one-line notification — put a human in a position to do
+        something the writing agent is better placed to do. What still stops:
+        `on_fail: block`, a pipeline with no earlier stage that can write, and
+        running out of cycles (an agent that has failed three times is not
+        converging, and by then a person genuinely needs to look)."""
+        stage = stages[idx]
+        job_id = job["id"]
+        target_idx = rework_target_for(stages, idx)
+        cycle = int(job["rework_count"] or 0) + 1
+        blocked_reason = ""
+        if stage.on_fail == "block":
+            blocked_reason = "這一關設定為失敗即停（on_fail: block）"
+        elif target_idx is None:
+            blocked_reason = ("這條工作流裡沒有任何前面的可寫階段能修這個問題"
+                              "（前面都是唯讀階段）")
+        elif cycle > stage.max_cycles:
+            blocked_reason = (f"已經返工 {stage.max_cycles} 次仍未通過，"
+                              f"停下來等人看")
+        if blocked_reason:
+            kind = "設定問題" if outcome.config_error else "關卡未通過"
+            self._block(job_id,
+                        f"{stage.name} {kind}（{blocked_reason}）：{outcome.detail[:1200]}",
+                        stage=stage.name, gate=stage.gate,
+                        config_error=outcome.config_error,
+                        detail=outcome.detail, cycles=cycle - 1)
+            return False
+
+        target = stages[target_idx]
+        note = rework_brief(failed_stage=stage.name, gate=stage.gate, cycle=cycle,
+                            max_cycles=stage.max_cycles, detail=outcome.detail,
+                            config_error=outcome.config_error)
+        self.db.write(
+            "UPDATE jobs SET stage=?, status='in_progress', rework_count=?, "
+            "rework_note=?, updated_at=? WHERE id=?",
+            (target.name, cycle, note, now(), job_id))
+        self.db.audit("orchestrator", "job.rework", "job", job_id,
+                      {"failed_stage": stage.name, "gate": stage.gate,
+                       "back_to": target.name, "cycle": cycle,
+                       "max_cycles": stage.max_cycles,
+                       "config_error": outcome.config_error,
+                       "detail": outcome.detail[:1200]})
+        self._emit("job.rework", job["project_id"], job_id=job_id,
+                   title=job["title"], failed_stage=stage.name, gate=stage.gate,
+                   back_to=target.name, role=target.role or "", cycle=cycle,
+                   max_cycles=stage.max_cycles,
+                   config_error=outcome.config_error,
+                   detail=outcome.detail[:2000])
+        run_memory.gate_failed(self.db, job, stage.name, stage.gate,
+                               outcome.detail, target.name, cycle)
+        log.info("job %s: gate %s failed, sent back to %s (cycle %d/%d)",
+                 job_id, stage.name, target.name, cycle, stage.max_cycles)
+        return True
 
     def _judge(self, stage: StageDef, workdir: str, result: RunResult) -> GateOutcome:
         if stage.gate == "human-approve":
@@ -507,6 +578,7 @@ class Orchestrator:
         )
 
         async def _go() -> RunResult:
+            run_memory.ensure_org(self.db, job["project_id"], agent["id"])
             workdir = self._ensure_workdir(job, req.use_worktree)
             clear_verdict(workdir)
             token = run_tokens.issue(self.db, run_id, ttl_seconds=req.timeout_s + 300)
@@ -514,8 +586,9 @@ class Orchestrator:
                           (workdir, now(), run_id))
             self._emit("run.started", job["project_id"], job_id=job["id"], run_id=run_id,
                        stage=stage.name, agent_id=agent["id"])
-            context_text, report = build_context(self.db, job, stage.name,
-                                                 skip=frozenset({"spec"}))
+            context_text, report = build_context(
+                self.db, job, stage.name, skip=frozenset({"spec"}),
+                recall=run_memory.recall_kwargs(self.db, job, agent["id"]))
             self.db.audit("orchestrator", "context.assembled", "run", run_id,
                           report.to_dict())
             # model: agent config > resource routing default > official default
@@ -579,6 +652,11 @@ class Orchestrator:
                 self._live.pop(run_id, None)
             result = await executor.result(handle)
             self._finalize_run(job["id"], run_id, workdir, result)
+            # every executor contributes to team memory, not just bastet-lite:
+            # this is the write side the memory bucket was missing
+            if result.status not in EXEC_FAILURES:
+                run_memory.stage_done(self.db, job, stage.name, agent["id"],
+                                      result.summary)
             return result
 
         try:
@@ -632,6 +710,12 @@ class Orchestrator:
             # the role definition frames HOW this stage's agent should behave
             parts.append(f"## 你的角色（{stage.role}）\n{role_prompt}")
         parts += [f"# Task: {job['title']}", job["spec_md"]]
+        # a card that was sent back carries WHY, verbatim — the agent cannot fix
+        # what it cannot see, and this is the difference between a loop that
+        # converges and one that repeats the same run
+        note = job["rework_note"] if "rework_note" in job.keys() else None
+        if note:
+            parts.append(note)
         if resource_notes:
             parts.append(resource_notes)
         if stage.gate == "agent-review":
@@ -841,11 +925,29 @@ class Orchestrator:
         row = self.db.one("SELECT agent_id FROM runs WHERE id=?", (run_id,))
         return row["agent_id"] if row else "unknown"
 
-    def _block(self, job_id: str, reason: str) -> None:
+    def _block(self, job_id: str, reason: str, **facts) -> None:
+        """Stop the card — and say enough that a person can act on it.
+
+        A blocked notification used to read `🟠 job.blocked: job_abc stage
+        tests-pass`, which tells you a thing broke and nothing about what. The
+        event now carries the title, the gate, how many rework cycles were spent,
+        and the failing output, because the notification is usually the only
+        place anyone reads it."""
         self.db.write("UPDATE jobs SET status='blocked', updated_at=? WHERE id=?",
                       (now(), job_id))
-        self.db.audit("orchestrator", "job.blocked", "job", job_id, {"reason": reason[:300]})
-        row = self.db.one("SELECT project_id, stage FROM jobs WHERE id=?", (job_id,))
+        self.db.audit("orchestrator", "job.blocked", "job", job_id,
+                      {"reason": reason[:1500], **facts})
+        job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job is not None:
+            run_memory.job_finished(self.db, job, "blocked", reason)
+        row = self.db.one("SELECT project_id, stage, title FROM jobs WHERE id=?",
+                          (job_id,))
         self._emit("job.blocked", row["project_id"] if row else None, job_id=job_id,
-                   stage=row["stage"] if row else None, reason=reason[:200])
+                   title=row["title"] if row else "",
+                   stage=facts.get("stage") or (row["stage"] if row else None),
+                   reason=reason[:1500],
+                   gate=facts.get("gate", ""),
+                   config_error=bool(facts.get("config_error")),
+                   cycles=facts.get("cycles", 0),
+                   detail=str(facts.get("detail", ""))[:2000])
         self._sync_project(row["project_id"] if row else None)

@@ -65,10 +65,12 @@ async def test_multi_stage_advances_through_review(orch, seeded):
     assert [g["verdict"] for g in gates] == ["passed", "passed"]
 
 
-async def test_review_without_verdict_blocks_job(orch, seeded):
+async def test_review_without_verdict_does_not_pass_the_gate(orch, seeded):
+    """Prose never approves. What happens next is the rework loop's business
+    (tests/test_rework.py); what matters here is that the gate said no."""
     add_template(seeded, "dev", [
-        {"name": "work", "gate": "auto"},
-        {"name": "review", "gate": "agent-review"},
+        {"name": "work", "gate": "auto", "on_fail": "block"},
+        {"name": "review", "gate": "agent-review", "on_fail": "block"},
     ])
     SCRIPT.append(RunResult(status="succeeded"))
     SCRIPT.append(RunResult(status="succeeded", summary="APPROVED!!"))  # prose only — no verdict
@@ -76,6 +78,9 @@ async def test_review_without_verdict_blocks_job(orch, seeded):
     await orch.wait_idle()
     job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
     assert job["status"] == "blocked"  # free text never passes an agent-review gate
+    verdicts = seeded.query("SELECT verdict FROM gate_results g JOIN runs r ON r.id=g.run_id "
+                            "WHERE r.job_id=? ORDER BY g.at", (job_id,))
+    assert verdicts[-1]["verdict"] == "failed"
 
 
 async def test_execution_failure_retries_then_blocks(orch, seeded):

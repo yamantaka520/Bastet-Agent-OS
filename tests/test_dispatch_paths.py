@@ -333,7 +333,10 @@ async def test_retry_picks_up_an_edited_template_not_just_a_swapped_one(orch, se
     """Live case: the E2E stage's test command was fixed in place (same template,
     new version) and the retry kept running the old command, because the refresh
     only triggered when the project switched to a *different* template."""
+    # on_fail: block keeps this test about the template refresh; the rework loop
+    # has its own tests (tests/test_rework.py)
     add_template(seeded, "web", [{"name": "e2e", "gate": "tests-pass",
+                                  "on_fail": "block",
                                   "gate_config": {"command": "npm run test:e2e"}}])
     seeded.write("UPDATE projects SET default_template_id='web' WHERE id='proj1'")
     SCRIPT.append(RunResult(status="succeeded"))
@@ -347,6 +350,7 @@ async def test_retry_picks_up_an_edited_template_not_just_a_swapped_one(orch, se
     seeded.write("INSERT OR REPLACE INTO workflow_templates(id, name, version, "
                  "stages_json) VALUES('web','web',2,?)",
                  (json.dumps([{"name": "e2e", "gate": "tests-pass",
+                               "on_fail": "block",
                                "gate_config": {"command": "exit 0"}}]),))
     SCRIPT.append(RunResult(status="succeeded"))
     out = orch.retry(job_id)

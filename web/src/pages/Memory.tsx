@@ -9,8 +9,10 @@ type Hit = { id: string; score: number; content: string; scope: string;
 type BrowseItem = { id: string; content: string; type: string; scope: string;
                     owner?: string; tags?: string[]; visibility?: string[];
                     created_at?: string };
+type Recall = { semantic: boolean; mode: string; install: string };
 type Browse = { items: BrowseItem[]; stats: Record<string, unknown>;
-                console: { url: string; command: string; installed: boolean } };
+                console: { url: string; command: string; installed: boolean };
+                recall?: Recall };
 
 export default function MemoryPage() {
   const t = useT();
@@ -98,6 +100,14 @@ function MemoryBrowse() {
         )}
       </div>
       {error && <p className="error">{error}</p>}
+      {/* which recall mode is actually running: without turbovec AMOS silently
+          falls back to keyword matching, and nothing else says so */}
+      {body?.recall && (
+        <p className="muted">
+          {body.recall.semantic ? t("mem.recallVector") : t("mem.recallLexical")}
+          {!body.recall.semantic && ` — ${body.recall.install}`}
+        </p>
+      )}
       {body && !body.items.length && <p className="muted">{t("mem.empty")}</p>}
       {body?.items.map((item) => (
         <article key={item.id} className="memory-hit">

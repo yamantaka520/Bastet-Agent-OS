@@ -93,7 +93,7 @@ export default function SecretsSection({ projects, teams, onChanged }: {
                onChange={(e) => setForm({ ...form, name: e.target.value })} />
         {/* a textarea, not an input: a PEM private key pasted into a one-line
             field loses every newline and ssh then rejects it outright */}
-        <textarea placeholder={t("sec.valuePh")} rows={2} spellCheck={false}
+        <textarea placeholder={t("sec.valuePh")} rows={1} spellCheck={false}
                   className="secret-value" value={form.value}
                   onChange={(e) => setForm({ ...form, value: e.target.value })} />
         <input placeholder={t("sec.envPh")} value={form.env_name}
@@ -126,7 +126,7 @@ export default function SecretsSection({ projects, teams, onChanged }: {
           <div className="inline-form">
             <input value={editing.name} placeholder={t("sec.namePh")}
                    onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
-            <textarea placeholder={t("sec.keepValuePh")} rows={2} spellCheck={false}
+            <textarea placeholder={t("sec.keepValuePh")} rows={1} spellCheck={false}
                       className="secret-value" value={editing.value}
                       onChange={(e) =>
                         setEditing({ ...editing, value: e.target.value })} />

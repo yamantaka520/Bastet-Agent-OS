@@ -55,11 +55,14 @@ class ContextReport:
 
 def build_context(db: Db, job, stage_name: str, budget_tokens: int = 6000,
                   amos_query: str | None = None,
-                  skip: frozenset[str] = frozenset()) -> tuple[str, ContextReport]:
+                  skip: frozenset[str] = frozenset(),
+                  recall: dict | None = None) -> tuple[str, ContextReport]:
     """Assemble the run's task-layer context. Returns (text, report).
 
     `skip` omits buckets the caller already carries elsewhere (e.g. "spec"
     when the executor prompt contains the job spec verbatim).
+    `recall` is the AMOS requester identity (agent/team) — passing it turns the
+    memory bucket from "everything in the store" into "what this agent may see".
     """
     report = ContextReport(budget_tokens=budget_tokens)
     parts: list[str] = []
@@ -71,7 +74,7 @@ def build_context(db: Db, job, stage_name: str, budget_tokens: int = 6000,
             continue
         allowance = min(remaining, int(budget_tokens * fraction) + _rollover(
             bucket, budget_tokens, remaining))
-        text = _gather(db, job, stage_name, bucket, amos_query)
+        text = _gather(db, job, stage_name, bucket, amos_query, recall)
         if not text:
             report.add(bucket, False, 0, "empty")
             continue
@@ -95,7 +98,8 @@ def _rollover(bucket: str, budget: int, remaining: int) -> int:
     return max(0, remaining - expected_remaining)
 
 
-def _gather(db: Db, job, stage_name: str, bucket: str, amos_query: str | None) -> str:
+def _gather(db: Db, job, stage_name: str, bucket: str, amos_query: str | None,
+            recall: dict | None = None) -> str:
     if bucket == "spec":
         return f"# Task: {job['title']}\n{job['spec_md']}"
 
@@ -136,7 +140,10 @@ def _gather(db: Db, job, stage_name: str, bucket: str, amos_query: str | None) -
         try:
             from agent_memory_os.client import MemoryClient
 
-            pack = MemoryClient().context_pack(query, max_tokens=1200)
+            # recall AS the running agent: without a requester AMOS applies no
+            # ACL, so every project's memories land in every project's pack
+            pack = MemoryClient().context_pack(query, max_tokens=1200,
+                                               **(recall or {}))
             text = pack if isinstance(pack, str) else str(pack or "")
             return f"## Team memory (AMOS)\n{text}" if text.strip() else ""
         except Exception as exc:  # AMOS optional — degrade to no memory bucket
