@@ -297,3 +297,19 @@ def test_a_config_error_blocks_with_a_reason_that_points_at_the_template(tmp_pat
     out = evaluate_gate(stage, str(tmp_path), None)
     assert out.config_error is True
     assert "模板" in out.detail          # where the fix lives
+
+
+async def test_a_config_error_is_persisted_on_the_gate_row(orch, seeded):
+    """The UI must read a flag, not pattern-match translated prose."""
+    add_template(seeded, "npm", [{"name": "e2e", "gate": "tests-pass",
+                                  "gate_config": {"command": "npm run test:e2e"}}])
+    SCRIPT.append(RunResult(status="succeeded"))
+    job_id = orch.dispatch(req(template_id="npm"))
+    await orch.wait_idle()
+
+    gate = seeded.one("SELECT g.* FROM gate_results g JOIN runs r ON r.id=g.run_id "
+                      "WHERE r.job_id=? ORDER BY g.at DESC LIMIT 1", (job_id,))
+    assert gate["verdict"] == "failed" and gate["config_error"] == 1
+    audited = seeded.one("SELECT detail_json FROM audit_log WHERE action='gate.failed' "
+                         "ORDER BY at DESC LIMIT 1")
+    assert '"config_error": true' in audited["detail_json"]

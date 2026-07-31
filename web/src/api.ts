@@ -28,6 +28,7 @@ export type Gate = {
   reviewer_kind: string;
   reviewer_id: string;
   detail_md: string;
+  config_error?: number;   // the gate could not run — a setting, not a test
   at: string;
 };
 

@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS gate_results (
   gate_type TEXT NOT NULL,
   verdict TEXT NOT NULL,
   reviewer_kind TEXT NOT NULL,     -- agent|user
+  config_error INTEGER NOT NULL DEFAULT 0,  -- the gate could not run at all
   reviewer_id TEXT NOT NULL,
   detail_md TEXT NOT NULL DEFAULT '',
   at TEXT NOT NULL
@@ -309,6 +310,11 @@ class Db:
             agent_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(agents)")}
             if "account_id" not in agent_cols:
                 self._conn.execute("ALTER TABLE agents ADD COLUMN account_id TEXT")
+            gate_cols = {r[1] for r in
+                         self._conn.execute("PRAGMA table_info(gate_results)")}
+            if "config_error" not in gate_cols:
+                self._conn.execute("ALTER TABLE gate_results ADD COLUMN config_error "
+                                   "INTEGER NOT NULL DEFAULT 0")
             if "archived" not in existing:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN archived INTEGER "
                                    "NOT NULL DEFAULT 0")

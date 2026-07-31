@@ -8,6 +8,14 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.12.3] - 2026-07-31
+
+### Fixed
+- The config-error distinction is now a persisted flag on `gate_results` (and in
+  the audit detail) instead of the UI pattern-matching translated prose — which
+  the i18n guard rightly rejected, since the match would have broken in every
+  other language.
+
 ## [0.12.2] - 2026-07-31
 
 ### Fixed

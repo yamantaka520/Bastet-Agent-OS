@@ -319,10 +319,9 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
             <b>{g.gate_type}</b> → {g.verdict}
             <span className="card-meta"> {t("board.by")} {g.reviewer_kind}:{g.reviewer_id}</span>
             {g.detail_md && <div className="gate-detail">{g.detail_md}</div>}
-            {g.verdict === "failed" && /設定問題|configuration problem|跑不起來/
-              .test(g.detail_md || "") && (
+            {g.config_error ? (
               <div className="gate-config-error">{t("board.configError")}</div>
-            )}
+            ) : null}
           </li>
         ))}
       </ul>

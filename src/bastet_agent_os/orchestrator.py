@@ -824,9 +824,10 @@ class Orchestrator:
                      reviewer_kind: str, reviewer_id: str) -> None:
         self.db.write(
             "INSERT INTO gate_results(id, run_id, gate_type, verdict, reviewer_kind, "
-            "reviewer_id, detail_md, at) VALUES(?,?,?,?,?,?,?,?)",
+            "reviewer_id, detail_md, config_error, at) VALUES(?,?,?,?,?,?,?,?,?)",
             (new_id("gte"), run_id, stage.gate, outcome.verdict, reviewer_kind,
-             reviewer_id, outcome.detail[:2000], now()),
+             reviewer_id, outcome.detail[:2000],
+             1 if outcome.config_error else 0, now()),
         )
 
     def _run_agent(self, run_id: str) -> str:
