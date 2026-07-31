@@ -72,8 +72,11 @@ note "安裝 Bastet Agent OS + Agent Memory OS（$VENV）"
 mkdir -p "$BASTET_HOME" "$BIN_DIR"
 [ -d "$VENV" ] || "$PY" -m venv "$VENV"
 "$VENV/bin/pip" install -q --upgrade pip
+# pytest goes in because the shipped workflow presets run `pytest -q` at their
+# test gates; without it a project reaches that stage and fails on a missing
+# runner after burning a whole agent run.
 if "$VENV/bin/pip" install -q --upgrade "$REPO" 'agent-memory-os[full]' \
-     claude-agent-sdk keyring; then
+     claude-agent-sdk keyring pytest; then
   ln -sf "$VENV/bin/bastet" "$BIN_DIR/bastet"
   ln -sf "$VENV/bin/agent-memory" "$BIN_DIR/agent-memory" 2>/dev/null || true
   case ":$PATH:" in

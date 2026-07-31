@@ -1,5 +1,8 @@
 """Workflow engine: stage pipelines, gate protocol, retries, human approval."""
 
+import json
+import pathlib
+
 import pytest
 from fake_executor import SCRIPT, add_template, req
 
@@ -313,3 +316,49 @@ async def test_a_config_error_is_persisted_on_the_gate_row(orch, seeded):
     audited = seeded.one("SELECT detail_json FROM audit_log WHERE action='gate.failed' "
                          "ORDER BY at DESC LIMIT 1")
     assert '"config_error": true' in audited["detail_json"]
+
+
+def test_gate_tools_names_what_each_preset_needs():
+    """The shipped presets run pytest/npm/make; nothing used to check they exist,
+    so a project could burn an agent run and then fail on a missing runner."""
+    from bastet_agent_os.config import gate_tools
+
+    tools = {t["program"]: t for t in gate_tools()}
+    assert {"pytest", "npm", "make"} <= set(tools)
+    assert any("前後端" in source for source in tools["pytest"]["used_by"])
+    # a compound command contributes every program it runs
+    assert any("&&" not in source for source in tools["npm"]["used_by"])
+    for tool in tools.values():
+        assert tool["path"] is None or tool["path"].startswith("/")
+
+
+def test_gate_tools_includes_user_templates(db):
+    from bastet_agent_os.config import gate_tools
+
+    db.write("INSERT INTO workflow_templates(id, name, version, stages_json) "
+             "VALUES('mine','mine',1,?)",
+             (json.dumps([{"name": "t", "gate": "tests-pass",
+                           "gate_config": {"command": "poetry run pytest -q"}}]),))
+    tools = {t["program"]: t for t in gate_tools(db)}
+    assert "poetry" in tools and any("mine" in s for s in tools["poetry"]["used_by"])
+    # an absolute path needs no PATH lookup, so it is not reported as a dependency
+    db.write("INSERT INTO workflow_templates(id, name, version, stages_json) "
+             "VALUES('abs','abs',1,?)",
+             (json.dumps([{"name": "t", "gate": "tests-pass",
+                           "gate_config": {"command": "/usr/bin/env pytest"}}]),))
+    assert "/usr/bin/env" not in {t["program"] for t in gate_tools(db)}
+
+
+def test_the_venv_bin_is_on_path_for_gate_commands():
+    """systemd hands the service a minimal PATH; a runner installed next to
+    bastet must still be findable, but last so a project's own wins."""
+    import os
+    import sys
+
+    from bastet_agent_os.config import augment_path
+
+    augment_path()
+    entries = os.environ["PATH"].split(os.pathsep)
+    own = str(pathlib.Path(sys.executable).parent)
+    assert own in entries
+    assert entries.index(own) == len(entries) - 1

@@ -61,11 +61,53 @@ def check_repo_path(value: str | None) -> str:
 
 
 def augment_path() -> None:
-    """Make sure the well-known tool dirs are on PATH for this process."""
+    """Make sure the well-known tool dirs are on PATH for this process.
+
+    Bastet's own venv bin goes last: gate commands like `pytest -q` need *a*
+    runner, and the venv ships one, but a project that provides its own must win.
+    """
+    import sys
+
     current = os.environ.get("PATH", "").split(os.pathsep)
     missing = [d for d in TOOL_DIRS if d not in current and Path(d).is_dir()]
-    if missing:
-        os.environ["PATH"] = os.pathsep.join(missing + current)
+    own_bin = str(Path(sys.executable).parent)
+    tail = [own_bin] if own_bin not in current and Path(own_bin).is_dir() else []
+    if missing or tail:
+        os.environ["PATH"] = os.pathsep.join(missing + current + tail)
+
+
+def gate_tools(db=None) -> list[dict]:
+    """Which programs the configured workflows need, and whether they exist.
+
+    The shipped presets run `pytest -q`, `npm test`, `make test`; nothing checked
+    that any of them were installed, so a project could reach its test stage and
+    fail on a missing runner after spending a whole agent run."""
+    import shutil
+
+    from .workflow_presets import PRESETS
+
+    wanted: dict[str, set[str]] = {}
+    def note(command: str, source: str) -> None:
+        for part in command.replace("&&", ";").replace("||", ";").split(";"):
+            program = part.strip().split()[0] if part.strip() else ""
+            if program and not program.startswith(("/", ".", "$")):
+                wanted.setdefault(program, set()).add(source)
+
+    for preset in PRESETS:
+        for stage in preset["stages"]:
+            command = (stage.get("gate_config") or {}).get("command")
+            if command:
+                note(command, f"內建範本 {preset['name']}")
+    if db is not None:
+        import json as _json
+        for row in db.query("SELECT id, stages_json FROM workflow_templates"):
+            for stage in _json.loads(row["stages_json"]):
+                command = (stage.get("gate_config") or {}).get("command")
+                if command:
+                    note(command, f"範本 {row['id']}")
+    return [{"program": program, "path": shutil.which(program),
+             "used_by": sorted(sources)}
+            for program, sources in sorted(wanted.items())]
 
 
 class Home:

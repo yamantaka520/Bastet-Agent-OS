@@ -394,6 +394,16 @@ def doctor():
     else:
         bad("api_token missing — run `bastet init`")
 
+    from .config import gate_tools
+
+    for tool in gate_tools():
+        if tool["path"]:
+            ok(f"gate tool `{tool['program']}` → {tool['path']}")
+        else:
+            bad(f"gate tool `{tool['program']}` not found — "
+                f"{', '.join(tool['used_by'][:3])} 的測試關卡會失敗"
+                f"（裝起來，或把該階段的指令改成專案真的有的）")
+
     try:
         db = Db(home.db_path)
         ok("database opens (WAL, foreign_keys=ON)")

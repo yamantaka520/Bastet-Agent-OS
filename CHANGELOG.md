@@ -8,6 +8,28 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.15.0] - 2026-07-31
+
+### Added — the tools the shipped workflows actually need
+The built-in presets run `pytest -q`, `npm test --silent`, `make test` and
+`npm run test:e2e` at their test gates, and the installer provided none of them —
+so a project could reach its test stage and fail on a missing runner after
+spending a full agent run (exactly what happened on the validation host).
+
+- `install.sh` now installs **pytest** into Bastet's venv, since the presets
+  depend on it.
+- `bastet doctor` reports every program the configured workflows need — built-in
+  presets *and* the user's own templates — naming the template that needs each:
+  `✗ gate tool `pytest` not found — 內建範本 前後端程式開發 的測試關卡會失敗`.
+  Compound commands (`pytest -q && npm test`) contribute both programs; absolute
+  paths are not reported, since they need no PATH lookup.
+- Bastet's venv bin is added to PATH for gate subprocesses (systemd hands the
+  service a minimal PATH, so a runner installed next to `bastet` was invisible) —
+  **last**, so a project that provides its own runner still wins.
+- README documents that gate commands run on the host with the service PATH, and
+  that a project with its own environment should use an explicit path in the
+  template.
+
 ## [0.14.2] - 2026-07-31
 
 ### Fixed

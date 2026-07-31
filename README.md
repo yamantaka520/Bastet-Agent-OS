@@ -107,6 +107,26 @@ Bastet hands them over as env vars (`BASTET_RES_<NAME>_URL` / `_KEY` /
 written into the task brief. The MCP file contains resolved credentials, so it
 lives outside the worktree at 0600 and is deleted when the run ends.
 
+## Workflow gate tools
+
+A `tests-pass` gate runs its command **on the Bastet host**, with the service's
+PATH — not inside a project's virtualenv. The shipped presets use `pytest -q`,
+`npm test`, and `make test`, so `install.sh` installs pytest alongside Bastet and
+`bastet doctor` reports every program the configured templates need, naming the
+template that needs it:
+
+```
+  ✓ gate tool `npm` → /usr/bin/npm
+  ✗ gate tool `pytest` not found — 內建範本 前後端程式開發 的測試關卡會失敗
+```
+
+Bastet's own venv is placed **last** on PATH, so a project that provides its own
+runner wins. For a project with its own environment, put the explicit path in the
+template's command (`.venv/bin/pytest -q`, `npx vitest run`).
+
+A command that cannot run at all is reported as a configuration problem rather
+than a failing test — re-running the agent cannot fix a missing script.
+
 ## Versioning
 
 `src/bastet_agent_os/__init__.py` holds the single `__version__`;
