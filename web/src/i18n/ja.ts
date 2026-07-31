@@ -507,6 +507,8 @@ const ja: Dict = {
   "aud.target": "対象",
   "aud.detail": "内容",
   "aud.at": "時刻",
+  "aud.since": "開始日",
+  "aud.until": "終了日",
   "aud.limit": "件数",
   "aud.clear": "条件をクリア",
   "aud.count": "{n} 件（新しい順）",

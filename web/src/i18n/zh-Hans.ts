@@ -527,6 +527,8 @@ const zhHans: Dict = {
   "aud.target": "目标",
   "aud.detail": "内容",
   "aud.at": "时间",
+  "aud.since": "起始时间",
+  "aud.until": "结束时间",
   "aud.limit": "条数",
   "aud.clear": "清除条件",
   "aud.count": "符合 {n} 条（最新的排最前）",

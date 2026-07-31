@@ -55,9 +55,14 @@ input[type="date"] { min-width: 9.5rem; }
 .error { color: var(--danger); }
 
 .app { display: flex; flex-direction: column; height: 100vh; }
+/* narrow windows: the header wraps as whole groups (title, nav, identity) and
+   the tab strip scrolls sideways — it must never become a column of words */
 header { display: flex; align-items: center; gap: 1rem; padding: .6rem 1rem;
-         border-bottom: 1px solid var(--line); background: var(--panel); }
-header h1 { font-size: 1.05rem; margin: 0; }
+         border-bottom: 1px solid var(--line); background: var(--panel);
+         flex-wrap: wrap; }
+/* the product name is one unit: at a narrow width the nav wraps, the title
+   does not break into a column of words */
+header h1 { font-size: 1.05rem; margin: 0; white-space: nowrap; }
 /* version badge: small enough to read as metadata, never as part of the name */
 .ver { font-size: .68rem; font-weight: 400; color: var(--muted);
        margin-left: .35rem; vertical-align: .15em; letter-spacing: .02em; }
@@ -83,7 +88,9 @@ footer { border-top: 1px solid var(--line); padding: .3rem 1rem; background: var
          max-height: 7rem; overflow-y: auto; }
 .feed-line { color: var(--muted); font: .75rem/1.6 ui-monospace, monospace; }
 
-nav { display: flex; gap: .2rem; }
+nav { display: flex; gap: .2rem; flex-wrap: nowrap; overflow-x: auto;
+      scrollbar-width: none; }
+nav::-webkit-scrollbar { display: none; }
 .tab { background: transparent; color: var(--muted); border-color: transparent;
        min-height: 1.9rem; }
 .tab:hover { color: var(--text); border-color: transparent; }

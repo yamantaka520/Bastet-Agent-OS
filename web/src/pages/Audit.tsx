@@ -54,12 +54,12 @@ export default function AuditPage(props: { refreshKey: number }) {
                    onKeyDown={onEnterSubmit(load)} />
           </label>
           <label className="res-field">
-            <span>{t("proj.since")}</span>
+            <span>{t("aud.since")}</span>
             <input type="date" value={query.since}
                    onChange={(e) => setQuery({ ...query, since: e.target.value })} />
           </label>
           <label className="res-field">
-            <span>{t("proj.until")}</span>
+            <span>{t("aud.until")}</span>
             <input type="date" value={query.until}
                    onChange={(e) => setQuery({ ...query, until: e.target.value })} />
           </label>

@@ -59,7 +59,10 @@ Buttons, inputs and selects drifted in height, padding and font size from page
 to page, so a row of them never lined up. They now share `--control-h`,
 `--control-pad`, `--control-radius` and `--control-font`; variants (`ghost`,
 `danger`) change emphasis only, chips are the one deliberate exception, and
-control rows align on a common baseline.
+control rows align on a common baseline. The audit date range got its own
+labels instead of borrowing the project page's 更新於之後/建立於之前, and at a
+narrow window the header wraps as whole groups (title, tab strip, identity)
+with the tabs scrolling sideways rather than stacking into a column of words.
 
 ### Changed — board cards say what the task is
 A card led with its job id, which identifies a row but tells you nothing. The

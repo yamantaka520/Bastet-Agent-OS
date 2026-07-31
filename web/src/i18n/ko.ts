@@ -507,6 +507,8 @@ const ko: Dict = {
   "aud.target": "대상",
   "aud.detail": "내용",
   "aud.at": "시각",
+  "aud.since": "시작일",
+  "aud.until": "종료일",
   "aud.limit": "건수",
   "aud.clear": "조건 지우기",
   "aud.count": "{n} 건（최신순）",

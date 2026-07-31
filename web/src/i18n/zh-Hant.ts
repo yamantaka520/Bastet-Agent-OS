@@ -526,6 +526,8 @@ const zhHant = {
   "aud.target": "目標",
   "aud.detail": "內容",
   "aud.at": "時間",
+  "aud.since": "起始時間",
+  "aud.until": "結束時間",
   "aud.limit": "筆數",
   "aud.clear": "清除條件",
   "aud.count": "符合 {n} 筆（最新的排最前）",

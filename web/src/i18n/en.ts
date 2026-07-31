@@ -507,6 +507,8 @@ const en: Dict = {
   "aud.target": "Target",
   "aud.detail": "Detail",
   "aud.at": "When",
+  "aud.since": "From",
+  "aud.until": "To",
   "aud.limit": "Rows",
   "aud.clear": "Clear filters",
   "aud.count": "{n} matching (newest first)",
