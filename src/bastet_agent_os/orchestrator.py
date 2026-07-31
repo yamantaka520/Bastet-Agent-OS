@@ -259,6 +259,38 @@ class Orchestrator:
         self._sync_project(job["project_id"])
         return {"deleted": job_id, "runs": len(runs), "plan": unlinked}
 
+    def purge_project_jobs(self, project_id: str, actor: str = "user") -> dict:
+        """Delete every job of a project, including ones that spent money.
+
+        `delete_job` refuses a job with usage rows, because removing them
+        quietly lowers reported spend. Deleting the whole project is the one
+        place that refusal has to give way — otherwise a trial project can never
+        be removed. So the spend is not silently dropped: the total is returned
+        and written into the audit row, which is what "honest accounting" has to
+        mean when the records really are going away."""
+        jobs = [dict(r) for r in self.db.query(
+            "SELECT id, title, status FROM jobs WHERE project_id=?", (project_id,))]
+        spend = self.db.one(
+            "SELECT COUNT(*) AS rows, COALESCE(SUM(cost_usd), 0) AS cost "
+            "FROM usage_ledger WHERE run_id IN (SELECT id FROM runs WHERE job_id IN "
+            "(SELECT id FROM jobs WHERE project_id=?))", (project_id,))
+        runs = 0
+        for job in jobs:
+            run_ids = [r["id"] for r in self.db.query(
+                "SELECT id FROM runs WHERE job_id=?", (job["id"],))]
+            runs += len(run_ids)
+            for run_id in run_ids:
+                for table in ("run_interactions", "gate_results", "run_tokens",
+                              "usage_ledger"):
+                    self.db.write(f"DELETE FROM {table} WHERE run_id=?", (run_id,))
+            self.cleanup_worktree(job["id"])
+            self.db.write("DELETE FROM runs WHERE job_id=?", (job["id"],))
+            self.db.write("DELETE FROM job_deps WHERE job_id=? OR depends_on_job_id=?",
+                          (job["id"], job["id"]))
+            self.db.write("DELETE FROM jobs WHERE id=?", (job["id"],))
+        return {"jobs": len(jobs), "runs": runs,
+                "usage_rows": spend["rows"], "usage_usd": round(spend["cost"], 4)}
+
     def _spawn(self, coro) -> None:
         task = asyncio.get_running_loop().create_task(coro)
         self._tasks.add(task)

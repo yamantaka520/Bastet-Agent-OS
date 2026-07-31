@@ -1009,6 +1009,73 @@ def create_app(home: Home) -> FastAPI:
                 "WHERE project_id=? ORDER BY updated_at DESC LIMIT 10", (project_id,))],
         }
 
+    @app.delete("/api/projects/{project_id}")
+    async def delete_project(project_id: str, force: bool = False,
+                             auth: Auth = Depends(require_role("admin"))):
+        """Remove a project and everything scoped to it.
+
+        Trial projects accumulate — a workflow test, a lifecycle probe — and
+        until now there was no way to remove one, so the only option was editing
+        the database by hand. What goes: the project's jobs (with their runs,
+        gates, usage rows and worktrees), its role assignments, its
+        project-scoped grants, and its chat sessions. What stays: the audit trail
+        (append-only — that this project existed is part of the record) and its
+        AMOS memories, which belong to the team and are removed from the memory
+        tab.
+
+        Refused unless `force=true` when there is work in flight (deleting rows
+        under a running job leaves the runner driving a ghost) or when runs spent
+        money (removing usage rows lowers reported spend). Both refusals say
+        exactly what is in the way, and forcing records the written-off total."""
+        project = db.one("SELECT * FROM projects WHERE id=?", (project_id,))
+        if project is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        live = [r["id"] for r in db.query(
+            "SELECT id FROM jobs WHERE project_id=? AND status IN "
+            "('open','in_progress')", (project_id,))]
+        spend = db.one(
+            "SELECT COUNT(*) AS rows, COALESCE(SUM(cost_usd), 0) AS cost "
+            "FROM usage_ledger WHERE run_id IN (SELECT id FROM runs WHERE job_id IN "
+            "(SELECT id FROM jobs WHERE project_id=?))", (project_id,))
+        if not force:
+            if live:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"這個專案還有 {len(live)} 個進行中的任務"
+                           f"（{', '.join(live[:3])}）。先停掉它們，或用 force 一併取消。")
+            if spend["rows"]:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"這個專案有 {spend['rows']} 筆用量紀錄"
+                           f"（${spend['cost']:.4f}）。刪除會把這筆帳從報表移除 —— "
+                           f"確定要刪就用 force，金額會記進稽核紀錄。")
+        for job_id in live:                       # cancel in flight before removing
+            try:
+                await orch.cancel_job(job_id, actor=auth.actor)
+            except Exception as exc:
+                log.warning("could not cancel %s before delete: %r", job_id, exc)
+        removed = orch.purge_project_jobs(project_id, actor=auth.actor)
+        sessions = [r["id"] for r in db.query(
+            "SELECT id FROM chat_sessions WHERE scope_type='project' AND scope_id=?",
+            (project_id,))]
+        for session_id in sessions:
+            db.write("DELETE FROM chat_messages WHERE session_id=?", (session_id,))
+        db.write("DELETE FROM chat_sessions WHERE scope_type='project' AND scope_id=?",
+                 (project_id,))
+        removed["sessions"] = len(sessions)
+        removed["roles"] = db.write(
+            "DELETE FROM project_agent_roles WHERE project_id=?",
+            (project_id,)).rowcount
+        removed["grants"] = db.write(
+            "DELETE FROM grants WHERE scope_type='project' AND scope_id=?",
+            (project_id,)).rowcount
+        db.write("DELETE FROM projects WHERE id=?", (project_id,))
+        db.audit(auth.actor, "project.delete", "project", project_id,
+                 {"status": project["status"], "repo_path": project["repo_path"],
+                  "cancelled": live, "forced": force, **removed})
+        bus.emit("project.deleted", project_id=project_id)
+        return {"deleted": project_id, "cancelled": live, **removed}
+
     @app.post("/api/projects/{project_id}/resources")
     def attach_resource(project_id: str, a: AttachResourceIn,
                         auth: Auth = Depends(require_role("operator"))):

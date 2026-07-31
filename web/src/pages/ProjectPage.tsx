@@ -49,7 +49,8 @@ const JOB_BADGE: Record<string, string> = {
   missing: "❓",
 };
 
-export default function ProjectPage(props: { canOperate: boolean; refreshKey: number }) {
+export default function ProjectPage(props: { canOperate: boolean; isAdmin: boolean;
+                                            refreshKey: number }) {
   const t = useT();
   const [query, setQuery] = useState({ q: "", since: "", until: "", status: "" });
   const [projects, setProjects] = useState<Project[]>([]);
@@ -117,6 +118,7 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
               <ProjectCard key={p.id} project={p} t={t} open={!!open[p.id]}
                            canOperate={props.canOperate} refreshKey={props.refreshKey}
                            onToggle={() => setOpen({ ...open, [p.id]: !open[p.id] })}
+                           isAdmin={props.isAdmin}
                            onMove={(tx) => move(p.id, tx)} onChanged={load} />
             ))}
           </Section>
@@ -126,13 +128,39 @@ export default function ProjectPage(props: { canOperate: boolean; refreshKey: nu
   );
 }
 
-function ProjectCard({ project, open, canOperate, refreshKey, onToggle, onMove,
-                       onChanged, t }: {
-  project: Project; open: boolean; canOperate: boolean; refreshKey: number;
-  onToggle: () => void; onMove: (transition: string) => void;
+function ProjectCard({ project, open, canOperate, isAdmin, refreshKey, onToggle,
+                       onMove, onChanged, t }: {
+  project: Project; open: boolean; canOperate: boolean; isAdmin: boolean;
+  refreshKey: number; onToggle: () => void; onMove: (transition: string) => void;
   onChanged: () => void; t: T;
 }) {
   const p = project;
+  const [error, setError] = useState("");
+
+  /** Trial projects pile up and there was nowhere to remove one. Two prompts,
+   *  because this takes the jobs and runs with it: the first confirms, and the
+   *  server's own refusal (spend, or work in flight) becomes the second. */
+  const remove = async () => {
+    if (!window.confirm(t("proj.deleteConfirm", { id: p.id }))) return;
+    setError("");
+    try {
+      await del(`/api/projects/${p.id}`);
+      onChanged();
+    } catch (e) {
+      const message = String((e as Error).message);
+      if (!window.confirm(`${message}\n\n${t("proj.deleteForce")}`)) {
+        setError(message);
+        return;
+      }
+      try {
+        const out = await del<{ usage_usd: number; jobs: number }>(
+          `/api/projects/${p.id}?force=true`);
+        window.alert(t("proj.deleted", { jobs: out.jobs, usd: out.usage_usd }));
+        onChanged();
+      } catch (e2) { setError(String((e2 as Error).message)); }
+    }
+  };
+
   return (
     <div className={`proj-card ${p.status}`}>
       <div className="proj-head">
@@ -153,9 +181,14 @@ function ProjectCard({ project, open, canOperate, refreshKey, onToggle, onMove,
                       className={tx === "start" || tx === "resume" ? "" : "ghost"}
                       onClick={() => onMove(tx)}>{t(`proj.tx.${tx}`)}</button>
             ))}
+            {isAdmin && (
+              <button className="ghost danger-text" onClick={remove}
+                      title={t("proj.deleteHint")}>{t("c.delete")}</button>
+            )}
           </span>
         )}
       </div>
+      {error && <p className="error">{error}</p>}
       {p.description && <p className="proj-desc muted">{p.description}</p>}
       {open && (
         <ProjectDetail projectId={p.id} project={p} canOperate={canOperate}

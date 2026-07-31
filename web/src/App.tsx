@@ -136,7 +136,8 @@ function Workbench({ me }: { me: Me }) {
         ? <BoardPage projectId={projectId} refreshKey={refreshKey} canOperate={canOperate} />
         : <div className="page"><p className="muted">{t("app.noProjects")}</p></div>)}
       {tab === "chat" && <ChatPage canOperate={canOperate} refreshKey={refreshKey} />}
-      {tab === "project" && <ProjectPage canOperate={canOperate} refreshKey={refreshKey} />}
+      {tab === "project" && <ProjectPage canOperate={canOperate} isAdmin={isAdmin}
+                                         refreshKey={refreshKey} />}
       {tab === "resources" && <ResourcesPage isAdmin={isAdmin} refreshKey={refreshKey} />}
       {tab === "org" && <OrgPage canOperate={canOperate} refreshKey={refreshKey} />}
       {tab === "templates" && <TemplatesPage canOperate={canOperate} refreshKey={refreshKey} />}

@@ -13,6 +13,7 @@ from fake_executor import SCRIPT, add_template
 
 from bastet_agent_os import project_lifecycle as lifecycle
 from bastet_agent_os import project_runner as runner_mod
+from bastet_agent_os.db import Db, now
 from bastet_agent_os.executors.base import RunResult
 
 
@@ -437,3 +438,103 @@ async def test_a_settled_job_revives_a_dead_runner(runner):
         await asyncio.sleep(0.02)
     assert db.query("SELECT * FROM audit_log WHERE action='project.runner.resumed'")
     watcher.cancel()
+
+
+# ---- deleting a project ------------------------------------------------------
+
+def _client(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from bastet_agent_os.config import Home
+    from bastet_agent_os.server import create_app
+    home = Home(tmp_path / "home")
+    client = TestClient(create_app(home), base_url="http://127.0.0.1")
+    client.headers["Authorization"] = f"Bearer {home.api_token()}"
+    return client, home
+
+
+def test_a_trial_project_can_be_removed(tmp_path):
+    """Test projects pile up — a workflow trial, a lifecycle probe — and there
+    was no way to get rid of one, so the only option was editing the DB."""
+    client, home = _client(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    client.post("/api/teams", json={"id": "t1", "name": "T"})
+    client.post("/api/projects", json={"id": "probe", "repo_path": str(repo),
+                                       "team_id": "t1"})
+    client.post("/api/agents", json={"id": "a1", "name": "A",
+                                     "executor_type": "claude-code"})
+    client.post("/api/projects/probe/roles", json={"agent_id": "a1", "role": "engineer"})
+
+    out = client.delete("/api/projects/probe")
+    assert out.status_code == 200, out.text
+    assert out.json()["deleted"] == "probe"
+
+    assert client.get("/api/projects").json() == []
+    db = Db(home.db_path)
+    assert db.query("SELECT * FROM project_agent_roles WHERE project_id='probe'") == []
+    # the audit trail keeps the fact that it existed
+    assert db.one("SELECT 1 AS ok FROM audit_log WHERE action='project.delete'")["ok"] == 1
+    db.close()
+
+
+def test_deleting_a_project_with_spend_needs_force_and_records_the_amount(tmp_path):
+    """Usage rows are the accounting. They may go when the whole project goes,
+    but not silently — the refusal names the amount and forcing records it."""
+    client, home = _client(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    client.post("/api/teams", json={"id": "t1", "name": "T"})
+    client.post("/api/projects", json={"id": "spendy", "repo_path": str(repo),
+                                       "team_id": "t1"})
+    client.post("/api/agents", json={"id": "a1", "name": "A",
+                                     "executor_type": "claude-code"})
+    db = Db(home.db_path)
+    ts = now()
+    db.write("INSERT INTO jobs(id, project_id, stages_snapshot_json, title, spec_md, "
+             "stage, status, created_at, updated_at) VALUES('j1','spendy','[]','t','s',"
+             "'work','done',?,?)", (ts, ts))
+    db.write("INSERT INTO runs(id, job_id, stage, attempt, agent_id, executor_type, "
+             "status) VALUES('r1','j1','work',1,'a1','claude-code','succeeded')")
+    db.write("INSERT INTO resources(id, kind, name, endpoint, api_flavor, "
+             "created_at, updated_at) VALUES('res1','llm','up','https://x','anthropic',"
+             "?,?)", (ts, ts))
+    db.write("INSERT INTO usage_ledger(id, run_id, resource_id, cost_usd, at) "
+             "VALUES('u1','r1','res1',1.25,?)", (ts,))
+    db.close()
+
+    refused = client.delete("/api/projects/spendy")
+    assert refused.status_code == 409
+    assert "1.2500" in refused.json()["detail"]     # the amount, not just "in use"
+
+    forced = client.delete("/api/projects/spendy?force=true")
+    assert forced.status_code == 200
+    body = forced.json()
+    assert (body["usage_rows"], body["usage_usd"]) == (1, 1.25)
+
+    db = Db(home.db_path)
+    detail = db.one("SELECT detail_json FROM audit_log WHERE action='project.delete'")
+    assert '"usage_usd": 1.25' in detail["detail_json"]   # written off on the record
+    assert db.query("SELECT * FROM jobs WHERE project_id='spendy'") == []
+    assert db.query("SELECT * FROM runs WHERE job_id='j1'") == []
+    db.close()
+
+
+def test_a_running_project_is_not_deleted_by_accident(tmp_path):
+    client, home = _client(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    client.post("/api/teams", json={"id": "t1", "name": "T"})
+    client.post("/api/projects", json={"id": "busy", "repo_path": str(repo),
+                                       "team_id": "t1"})
+    db = Db(home.db_path)
+    ts = now()
+    db.write("INSERT INTO jobs(id, project_id, stages_snapshot_json, title, spec_md, "
+             "stage, status, created_at, updated_at) VALUES('j9','busy','[]','t','s',"
+             "'work','in_progress',?,?)", (ts, ts))
+    db.close()
+
+    refused = client.delete("/api/projects/busy")
+
+    assert refused.status_code == 409
+    assert "j9" in refused.json()["detail"]      # which job is in the way

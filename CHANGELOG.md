@@ -8,6 +8,21 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.18.1] - 2026-07-31
+
+### Added — a project can be deleted
+Trial projects accumulate (a workflow test, a lifecycle probe) and there was no
+way to remove one, so the only option was editing the database by hand. Admins
+get a delete button on the project card: it takes the project's jobs, runs,
+gates, worktrees, role assignments, project-scoped grants and chat sessions. The
+audit trail stays — that the project existed is part of the record — and its
+team memories stay in AMOS, where the memory tab manages them.
+
+Two refusals, both with the reason: work in flight (deleting rows under a running
+job leaves the runner driving a ghost) and runs that spent money (removing usage
+rows lowers reported spend). `force` overrides either, and the written-off total
+goes into the audit row rather than quietly disappearing.
+
 ## [0.18.0] - 2026-07-31
 
 ### Added — a failed gate is handled by the agents, not by you
