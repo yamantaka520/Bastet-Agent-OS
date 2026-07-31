@@ -8,6 +8,19 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.11.1] - 2026-07-31
+
+### Fixed
+- A breakdown made *before* provenance existed reported neither a source nor
+  staleness, so on the validation host the very plan that started this — seven
+  tasks describing a direction the conversation had abandoned — still looked
+  authoritative. Such a plan is now marked `unverified` and the card warns that
+  there is no way to tell which version of the plan it reflects, with the advice
+  to clear it and re-run.
+- Staleness compares against the time the breakdown was *taken*
+  (`source.at`, stamped only by a decomposition) rather than the plan's last-write
+  time, which moves whenever a job is linked and would otherwise mask it.
+
 ## [0.11.0] - 2026-07-31
 
 ### Added — the task breakdown is traceable to the conversation it came from

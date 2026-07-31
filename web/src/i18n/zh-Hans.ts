@@ -491,7 +491,7 @@ const zhHans: Dict = {
   "proj.job.missing": "任务已不存在",
   "proj.planSyncHint": "有 job 编号的任务就是看板上的同一张卡片，状态会同步；没有编号的还没派发。",
   "proj.planSource": "拆分来源：{by} · {when} · 当时对话 {messages} 条",
-  "proj.planNoSource": "这份拆分没有记录来源（在支持来源记录之前产生）",
+  "proj.planNoSource": "⚠ 这份拆分没有来源记录（在支持来源记录之前产生），无法确认它反映的是哪一版规划 — 建议清除后重新拆分",
   "proj.planStale": "⚠ 这份拆分是旧快照：对话在拆分后又更新了（目前 {messages} 条）。重新拆分才会反映实际规划。",
   "proj.clearTasks": "清除未派发的拆分",
   "proj.clearConfirm": "确定清除未派发的拆分？已派发的任务会保留。",

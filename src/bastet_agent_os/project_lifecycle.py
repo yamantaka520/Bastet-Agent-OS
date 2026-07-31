@@ -273,7 +273,21 @@ def plan_with_jobs(db, project_id: str) -> dict[str, Any]:
     source = plan.get("source") or {}
     seen = source.get("messages")
     proposal = [t for t in plan["tasks"] if not t.get("job_id")]
-    stale = bool(proposal and isinstance(seen, int) and chat["messages"] > seen)
+    # `source.at` is stamped only by a decomposition; plan["at"] moves whenever
+    # the plan is touched (linking a job), so it would mask staleness
+    taken_at = source.get("at")
+    if isinstance(seen, int):
+        provenance = "recorded"
+        stale = bool(proposal and chat["messages"] > seen)
+    elif taken_at:
+        provenance = "recorded"
+        stale = bool(proposal and chat["last_at"] and chat["last_at"] > taken_at)
+    else:
+        # a plan from before provenance existed: we cannot know when it was taken,
+        # and an unverifiable breakdown is precisely what passes for "the plan"
+        # while describing something the conversation abandoned
+        provenance = "unknown"
+        stale = False
     tasks = []
     for task in plan["tasks"]:
         item = dict(task)
@@ -287,6 +301,8 @@ def plan_with_jobs(db, project_id: str) -> dict[str, Any]:
                 item["job_stage"] = job["stage"]
         tasks.append(item)
     return {**plan, "tasks": tasks, "stale": stale, "chat": chat,
+            "provenance": provenance,
+            "unverified": bool(proposal and provenance == "unknown"),
             "dispatched": sum(1 for t in tasks if t.get("job_id"))}
 
 

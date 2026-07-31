@@ -199,7 +199,8 @@ async def decompose(db, home_root, project_id: str, agent_id: str = "",
     chat = lifecycle.chat_state(db, project_id)
     lifecycle.save_task_plan(db, project_id, [*dispatched, *fresh],
                              by=agent["id"],
-                             source={"kind": "chat", "messages": chat["messages"],
+                             source={"kind": "chat", "at": now(),
+                                     "messages": chat["messages"],
                                      "chat_at": chat["last_at"]})
     db.audit(actor or "system", "project.decompose", "project", project_id,
              {"agent": agent["id"], "tasks": len(fresh),

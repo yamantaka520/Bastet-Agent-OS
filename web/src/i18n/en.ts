@@ -471,7 +471,7 @@ const en: Dict = {
   "proj.job.missing": "job no longer exists",
   "proj.planSyncHint": "A task with a job id is the same card you see on the board, status included; one without has not been dispatched yet.",
   "proj.planSource": "Breakdown from: {by} · {when} · {messages} chat messages at the time",
-  "proj.planNoSource": "This breakdown has no recorded source (made before provenance was tracked)",
+  "proj.planNoSource": "⚠ This breakdown has no recorded source (made before provenance was tracked), so there is no way to tell which version of the plan it reflects — clear it and re-run",
   "proj.planStale": "⚠ This breakdown is an old snapshot: the conversation moved on after it was taken ({messages} messages now). Re-run it to reflect the actual plan.",
   "proj.clearTasks": "Clear the undispatched breakdown",
   "proj.clearConfirm": "Clear the undispatched breakdown? Tasks already dispatched are kept.",

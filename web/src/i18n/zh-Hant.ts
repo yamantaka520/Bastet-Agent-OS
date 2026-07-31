@@ -490,7 +490,7 @@ const zhHant = {
   "proj.job.missing": "任務已不存在",
   "proj.planSyncHint": "有 job 編號的任務就是看板上的同一張卡片，狀態會同步；沒有編號的還沒派工。",
   "proj.planSource": "拆分來源：{by} · {when} · 當時對話 {messages} 則",
-  "proj.planNoSource": "這份拆分沒有記錄來源（在支援來源記錄之前產生）",
+  "proj.planNoSource": "⚠ 這份拆分沒有來源記錄（在支援來源記錄之前產生），無法確認它反映的是哪一版規劃 — 建議清除後重新拆分",
   "proj.planStale": "⚠ 這份拆分是舊快照：對話在拆分後又更新了（目前 {messages} 則）。重新拆分才會反映實際規劃。",
   "proj.clearTasks": "清除未派工的拆分",
   "proj.clearConfirm": "確定清除未派工的拆分？已派工的任務會保留。",

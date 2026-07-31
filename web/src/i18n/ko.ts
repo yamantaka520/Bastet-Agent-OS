@@ -471,7 +471,7 @@ const ko: Dict = {
   "proj.job.missing": "작업이 존재하지 않음",
   "proj.planSyncHint": "job id 가 있는 작업은 보드에 보이는 같은 카드이며 상태도 동기화됩니다. id 가 없으면 아직 배정되지 않은 것입니다.",
   "proj.planSource": "분해 출처: {by} · {when} · 당시 대화 {messages} 건",
-  "proj.planNoSource": "이 분해에는 출처 기록이 없습니다（출처 기록 기능 이전에 생성）",
+  "proj.planNoSource": "⚠ 이 분해에는 출처 기록이 없습니다（출처 기록 기능 이전에 생성）. 어떤 버전의 기획을 반영하는지 확인할 수 없습니다 — 지우고 다시 실행하세요",
   "proj.planStale": "⚠ 이 분해는 오래된 스냅숏입니다: 이후 대화가 진행되었습니다（현재 {messages} 건）. 실제 기획을 반영하려면 다시 실행하세요.",
   "proj.clearTasks": "미배정 분해 지우기",
   "proj.clearConfirm": "미배정 분해를 지울까요? 이미 배정된 작업은 유지됩니다.",

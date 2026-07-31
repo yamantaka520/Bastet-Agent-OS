@@ -327,3 +327,36 @@ def test_clearing_a_stale_plan_keeps_the_running_work(proj):
     assert [t["title"] for t in tasks] == ["跑著的"]
     assert lifecycle.clear_undispatched(proj, "proj1") == 0      # idempotent
     assert proj.query("SELECT * FROM audit_log WHERE action='project.tasks.clear'")
+
+
+def test_a_plan_with_no_recorded_source_is_flagged_unverified(proj):
+    """The plans that existed when provenance shipped have no source. Passing
+    them off as verified is how a breakdown describing an abandoned direction
+    keeps looking authoritative."""
+    lifecycle.save_task_plan(proj, "proj1", [{"title": "來源不明的提案", "spec": "s"}],
+                             by="pm", confirmed=False, source={})
+    plan = lifecycle.plan_with_jobs(proj, "proj1")
+    assert plan["provenance"] == "unknown" and plan["unverified"] is True
+    assert plan["stale"] is False          # unknowable, not proven stale
+
+
+def test_linking_a_job_cannot_mask_staleness(proj):
+    """plan["at"] moves when a job is linked; the staleness check must use the
+    time the breakdown was *taken*."""
+    from bastet_agent_os import chat as chat_mod
+    from bastet_agent_os.db import now as _now
+
+    session = chat_mod.create_session(proj, scope_type="project", scope_id="proj1",
+                                      responder_kind="agent", responder_id="ag1")
+    chat_mod.add_message(proj, session, role="user", content="第一版")
+    lifecycle.save_task_plan(proj, "proj1", [{"title": "提案", "spec": "s"}], by="pm",
+                             source={"kind": "chat", "at": _now(), "messages": 1})
+    chat_mod.add_message(proj, session, role="user", content="其實改成別的")
+    assert lifecycle.plan_with_jobs(proj, "proj1")["stale"] is True
+
+    # linking a job re-saves the plan (bumping plan["at"]) — still stale
+    proj.write("INSERT INTO jobs(id, project_id, stages_snapshot_json, title, stage, "
+               "status, created_at, updated_at) VALUES('jn','proj1','[]','其他事',"
+               "'x','in_progress',?,?)", (_now(), _now()))
+    lifecycle.link_job(proj, "proj1", "jn", "其他事", "s", origin="chat")
+    assert lifecycle.plan_with_jobs(proj, "proj1")["stale"] is True

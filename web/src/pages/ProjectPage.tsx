@@ -24,8 +24,9 @@ type PoolResource = { id: string; name: string; kind: string };
 type Task = { title: string; spec: string; role?: string; job_id?: string;
                origin?: string; job_status?: string; job_stage?: string };
 type Plan = { tasks: Task[]; confirmed: boolean; by: string; at?: string;
-              stale?: boolean; dispatched?: number;
-              source?: { kind?: string; messages?: number; chat_at?: string };
+              stale?: boolean; unverified?: boolean; dispatched?: number;
+              source?: { kind?: string; at?: string; messages?: number;
+                         chat_at?: string };
               chat?: { messages: number; last_at: string | null } };
 type Overview = {
   project: { id: string; team_id: string; repo_path: string | null;
@@ -385,13 +386,17 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
         <p className="error">{t("proj.planStale",
           { messages: plan.chat?.messages ?? 0 })}</p>
       )}
+      {plan?.unverified && !plan.stale && (
+        <p className="error">{t("proj.planNoSource")}</p>
+      )}
       {!!tasks.length && plan && (
         <p className="muted">
           {plan.source?.messages != null
             ? t("proj.planSource", { by: plan.by || "—",
-                                     when: (plan.at || "").replace("T", " ").slice(0, 16),
+                                     when: (plan.source.at || plan.at || "")
+                                             .replace("T", " ").slice(0, 16),
                                      messages: plan.source.messages })
-            : t("proj.planNoSource")}
+            : ""}
           {plan.dispatched
             ? ` · ${t("proj.dispatchedCount", { n: plan.dispatched })}` : ""}
         </p>
