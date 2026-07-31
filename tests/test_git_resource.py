@@ -162,3 +162,42 @@ def test_an_ssh_repo_without_a_key_is_advertised_as_broken(db, tmp_path):
     access = resource_access.build(db, tmp_path, "p", "t", "run-nokey")
     item = next(m for m in access.manifest if m["name"] == "no-key-repo")
     assert any("no key configured" in h for h in item["how"])
+
+
+# ---- a private key pasted into a one-line field --------------------------------------
+
+def test_a_single_line_pem_paste_is_repaired_not_stored_broken(tmp_path):
+    """The live cause of `error in libcrypto`: the credential field was a one-line
+    input, so the browser stripped every newline out of the pasted key."""
+    from bastet_agent_os import secrets_store
+
+    body = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmU" * 8
+    mangled = f"-----BEGIN OPENSSH PRIVATE KEY----- {body} -----END OPENSSH PRIVATE KEY-----"
+    fixed, repaired = secrets_store.normalise_private_key(mangled)
+    assert repaired is True
+    lines = fixed.splitlines()
+    assert lines[0] == "-----BEGIN OPENSSH PRIVATE KEY-----"
+    assert lines[-1] == "-----END OPENSSH PRIVATE KEY-----"
+    assert fixed.endswith("\n")                       # ssh needs the final newline
+    assert "".join(lines[1:-1]) == body               # payload preserved exactly
+    assert all(len(line) <= 70 for line in lines[1:-1])
+
+    # a key that already has its newlines is left exactly as it is
+    intact = "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n"
+    assert secrets_store.normalise_private_key(intact) == (intact, False)
+    # a token is not a key
+    assert secrets_store.normalise_private_key("glpat-abc123") == ("glpat-abc123", False)
+    # something that only looks like one is left alone rather than guessed at
+    assert secrets_store.normalise_private_key(
+        "-----BEGIN OPENSSH PRIVATE KEY----- (no footer") [1] is False
+
+
+def test_ensure_ref_stores_a_repaired_key(tmp_path):
+    from bastet_agent_os import secrets_store
+
+    body = "AAAAB3NzaC1yc2EAAAADAQAB" * 4
+    mangled = f"-----BEGIN OPENSSH PRIVATE KEY----- {body} -----END OPENSSH PRIVATE KEY-----"
+    ref = secrets_store.ensure_ref(mangled, tmp_path, "gitlab-key")
+    stored = secrets_store.resolve(ref)
+    assert stored.count("\n") >= 2                    # usable by ssh
+    assert "".join(stored.splitlines()[1:-1]) == body

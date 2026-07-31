@@ -419,10 +419,11 @@ function ResourceForm({ draft, setDraft, catalog, secrets, projects, teams, edit
             </select>
           </label>
           {draft.secret === "__manual__" && (
-            <input type="password" placeholder={t("res.secretManualPh")}
-                   style={{ width: "22rem" }} value={draft.secretManual}
-                   onChange={(e) =>
-                     setDraft({ ...draft, secretManual: e.target.value })} />
+            <textarea placeholder={t("res.secretManualPh")} rows={2}
+                      spellCheck={false} className="secret-value"
+                      value={draft.secretManual}
+                      onChange={(e) =>
+                        setDraft({ ...draft, secretManual: e.target.value })} />
           )}
           {!secrets.length && <span className="muted">{t("res.noSecrets")}</span>}
         </div>

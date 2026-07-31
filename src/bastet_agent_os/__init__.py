@@ -5,4 +5,4 @@ any OpenAI/Claude-compatible endpoint) with resource governance, gated
 workflows, and shared memory via Agent Memory OS. See SPEC.md.
 """
 
-__version__ = "0.14.0"
+__version__ = "0.14.1"

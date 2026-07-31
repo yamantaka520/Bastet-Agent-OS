@@ -8,6 +8,21 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.14.1] - 2026-07-31
+
+### Fixed — a private key could not be entered at all
+The SSH check on the validation host reported `error in libcrypto`: the stored key
+was 398 bytes on a **single line**. The cause was the form, not the key — the
+credential field was a one-line `<input>`, so the browser stripped every newline
+out of the pasted PEM block, and ssh rejects a key without them.
+
+- The credential value fields (new credential, edit, and the resource form's
+  manual ref) are multi-line textareas that keep line breaks.
+- `secrets_store.normalise_private_key()` re-wraps a PEM block that still arrives
+  as one line: header and footer make the intended structure unambiguous, so this
+  is a repair rather than a guess. Anything without both markers is stored
+  untouched instead of being mangled by a guess.
+
 ## [0.14.0] - 2026-07-31
 
 ### Added — SSH is a first-class git transport, not just a testable one

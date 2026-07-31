@@ -74,6 +74,34 @@ def store_keyring(service: str, name: str, value: str) -> str:
 KNOWN_SCHEMES = ("env:", "file:", "keyring:", "secret:")
 
 
+PEM_MARKERS = ("PRIVATE KEY", "CERTIFICATE")
+
+
+def normalise_private_key(value: str) -> tuple[str, bool]:
+    """Restore the line structure a single-line input destroyed.
+
+    A PEM key pasted into a one-line field arrives as
+    `-----BEGIN OPENSSH PRIVATE KEY----- AAAA…== -----END …-----` and ssh answers
+    `error in libcrypto`. Header and footer make the intended structure
+    unambiguous, so re-wrapping is a repair, not a guess. Returns
+    (value, repaired)."""
+    text = (value or "").strip()
+    if "\n" in text or not any(marker in text for marker in PEM_MARKERS):
+        return value, False
+    import re
+
+    match = re.match(r"^(-{5}BEGIN [A-Z0-9 ]+-{5})(.*?)(-{5}END [A-Z0-9 ]+-{5})$",
+                     text, re.S)
+    if not match:
+        return value, False
+    header, body, footer = match.groups()
+    body = "".join(body.split())          # the base64 payload, whitespace removed
+    if not body:
+        return value, False
+    wrapped = "\n".join(body[i:i + 70] for i in range(0, len(body), 70))
+    return f"{header}\n{wrapped}\n{footer}\n", True
+
+
 def ensure_ref(value: str, home_root, hint: str) -> str:
     """Accept either a proper secret ref or a RAW secret value.
 
@@ -87,6 +115,7 @@ def ensure_ref(value: str, home_root, hint: str) -> str:
     value = (value or "").strip()
     if not value or value.startswith(KNOWN_SCHEMES):
         return value
+    value, _ = normalise_private_key(value)   # a one-line paste is still a key
     secrets_dir = Path(home_root) / "secrets"
     secrets_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(secrets_dir, 0o700)

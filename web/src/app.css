@@ -243,3 +243,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .job-removal .muted { flex-basis: 100%; font-size: .78rem; }
 
 .gate-config-error { font-size: .8rem; color: #e0b050; margin-top: .2rem; }
+
+/* multi-line secret values (PEM keys, service-account JSON) */
+.secret-value { width: 20rem; font-family: ui-monospace, monospace; font-size: .78rem;
+                resize: vertical; }

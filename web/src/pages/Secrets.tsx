@@ -91,9 +91,11 @@ export default function SecretsSection({ projects, teams, onChanged }: {
       <div className="inline-form">
         <input placeholder={t("sec.namePh")} value={form.name}
                onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        <input type="password" placeholder={t("sec.valuePh")}
-               style={{ width: "18rem" }} value={form.value}
-               onChange={(e) => setForm({ ...form, value: e.target.value })} />
+        {/* a textarea, not an input: a PEM private key pasted into a one-line
+            field loses every newline and ssh then rejects it outright */}
+        <textarea placeholder={t("sec.valuePh")} rows={2} spellCheck={false}
+                  className="secret-value" value={form.value}
+                  onChange={(e) => setForm({ ...form, value: e.target.value })} />
         <input placeholder={t("sec.envPh")} value={form.env_name}
                onChange={(e) => setForm({ ...form, env_name: e.target.value })} />
         <select value={form.scope_type}
@@ -124,9 +126,10 @@ export default function SecretsSection({ projects, teams, onChanged }: {
           <div className="inline-form">
             <input value={editing.name} placeholder={t("sec.namePh")}
                    onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
-            <input type="password" placeholder={t("sec.keepValuePh")}
-                   style={{ width: "18rem" }} value={editing.value}
-                   onChange={(e) => setEditing({ ...editing, value: e.target.value })} />
+            <textarea placeholder={t("sec.keepValuePh")} rows={2} spellCheck={false}
+                      className="secret-value" value={editing.value}
+                      onChange={(e) =>
+                        setEditing({ ...editing, value: e.target.value })} />
             <input value={editing.env_name} placeholder={t("sec.envPh")}
                    onChange={(e) =>
                      setEditing({ ...editing, env_name: e.target.value })} />
@@ -181,6 +184,7 @@ export default function SecretsSection({ projects, teams, onChanged }: {
             }}>{t("c.delete")}</button>
           </span>,
         ])} />
+      <p className="muted">{t("sec.multilineHint")}</p>
       <p className="muted">{t("sec.hint")}</p>
     </Section>
   );

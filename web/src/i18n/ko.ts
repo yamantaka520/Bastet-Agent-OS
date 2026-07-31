@@ -494,6 +494,7 @@ const ko: Dict = {
   "tpl.editingInPlace": "「{name}」을 직접 편집하고 있습니다: 저장하면 버전이 +1 되고 이후 배정은 새 버전을 따릅니다. 이미 실행 중인 작업은 시작 당시 스냅샷을 유지합니다.",
   "res.gitHttpsHint": "HTTPS 방식: endpoint 는 repo URL（예: https://gitlab.com/group/project.git）이고 자격 증명은 access token 이어야 합니다（GitLab 은 read_repository 권한 필요）. SSH 로 바꾸려면 endpoint 를 git@host:group/project.git 로 설정하세요.",
   "res.gitSshHint": "SSH 방식: endpoint 는 git@host:group/project.git（또는 ssh://）이고, 자격 증명에는 SSH 개인 키 전문을 붙여넣습니다（공개 키가 아니며 끝에 줄바꿈이 필요합니다）. 해당 공개 키는 Git 서비스의 SSH／배포 키에 등록하세요. 실행 시 Bastet 이 키를 0600 파일로 쓰고 GIT_SSH_COMMAND 를 설정하므로 agent 가 바로 git clone 할 수 있고, run 이 끝나면 삭제됩니다.",
+  "sec.multilineHint": "SSH 개인 키나 service account JSON 처럼 여러 줄인 값은 그대로 붙여넣을 수 있습니다（이 필드는 줄바꿈을 유지합니다）. 한 줄로 들어온 경우 BEGIN/END 표시를 근거로 Bastet 이 줄바꿈을 복원하지만, 원문 그대로 붙여넣는 것이 가장 안전합니다.",
 };
 
 export default ko;

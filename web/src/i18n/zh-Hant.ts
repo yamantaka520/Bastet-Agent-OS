@@ -513,6 +513,7 @@ const zhHant = {
   "tpl.editingInPlace": "正在就地編輯「{name}」：儲存後版本 +1，之後派工都會走新版本。已經在跑的任務保留當初的流程快照，不受影響。",
   "res.gitHttpsHint": "HTTPS 方式：endpoint 填 repo 網址（例 https://gitlab.com/group/project.git），憑證要用 access token（GitLab 需 read_repository 權限）。要改用 SSH 就把 endpoint 換成 git@host:group/project.git。",
   "res.gitSshHint": "SSH 方式：endpoint 是 git@host:group/project.git（或 ssh://），憑證請貼 SSH 私鑰全文（不是公鑰，結尾要有換行），並把對應公鑰加到該 Git 服務的 SSH Keys / Deploy Keys。執行時 Bastet 會把金鑰寫成 0600 檔案並設好 GIT_SSH_COMMAND，agent 直接 git clone 就能用，run 結束即刪除。",
+  "sec.multilineHint": "SSH 私鑰、service account JSON 這類多行內容可以直接整段貼進來（欄位是多行的）。萬一貼成一行，Bastet 會依 BEGIN/END 標記自動修復換行 —— 但貼原樣最保險。",
 } as const;
 
 export type Dict = { [K in keyof typeof zhHant]: string };

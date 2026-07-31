@@ -494,6 +494,7 @@ const en: Dict = {
   "tpl.editingInPlace": "Editing “{name}” in place: saving bumps its version and future dispatches follow the new one. Jobs already running keep the workflow snapshot they started with.",
   "res.gitHttpsHint": "HTTPS: the endpoint is the repo URL (e.g. https://gitlab.com/group/project.git) and the credential must be an access token (GitLab needs read_repository). For SSH instead, make the endpoint git@host:group/project.git.",
   "res.gitSshHint": "SSH: the endpoint is git@host:group/project.git (or ssh://), and the credential is the full SSH private key — not the public one, and it needs its trailing newline. Add the matching public key to the provider's SSH/deploy keys. At run time Bastet writes the key to a 0600 file and sets GIT_SSH_COMMAND, so the agent can just git clone; it is deleted when the run ends.",
+  "sec.multilineHint": "Multi-line values — SSH private keys, service-account JSON — can be pasted whole; this field keeps line breaks. If one does arrive as a single line, Bastet re-wraps it using the BEGIN/END markers, but pasting it intact is safest.",
 };
 
 export default en;
