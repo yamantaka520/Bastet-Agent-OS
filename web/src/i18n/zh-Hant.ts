@@ -508,6 +508,9 @@ const zhHant = {
   "board.removalHint": "封存＝從看板隱藏，執行與用量紀錄全部保留（可還原）；刪除＝真的移除，只允許沒有任何用量紀錄的任務。兩者都寫稽核。",
   "board.archived": "已封存",
   "board.configError": "⚙ 這是工作流設定問題，不是測試不通過 — 重跑 agent 沒有用，請先修正階段的測試指令。",
+  "tpl.editInPlace": "編輯（就地更新）",
+  "tpl.saveAsCopy": "另存為新範本",
+  "tpl.editingInPlace": "正在就地編輯「{name}」：儲存後版本 +1，之後派工都會走新版本。已經在跑的任務保留當初的流程快照，不受影響。",
 } as const;
 
 export type Dict = { [K in keyof typeof zhHant]: string };

@@ -489,6 +489,9 @@ const en: Dict = {
   "board.removalHint": "Archive hides the card and keeps every run and usage row (reversible). Delete removes it for good and is only allowed for a job that spent nothing. Both are audited.",
   "board.archived": "archived",
   "board.configError": "⚙ This is a workflow configuration problem, not a failing test — re-running the agent cannot help. Fix the stage's test command first.",
+  "tpl.editInPlace": "Edit (in place)",
+  "tpl.saveAsCopy": "Save as a new template",
+  "tpl.editingInPlace": "Editing “{name}” in place: saving bumps its version and future dispatches follow the new one. Jobs already running keep the workflow snapshot they started with.",
 };
 
 export default en;

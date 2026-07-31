@@ -26,7 +26,8 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
   const [templates, reloadTemplates] = useList<Template>("/api/templates", props.refreshKey);
   const [projects, reloadProjects] = useList<Project>("/api/projects", props.refreshKey);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [builder, setBuilder] = useState<{ name: string; stages: Stage[] } | null>(null);
+  const [builder, setBuilder] = useState<{ name: string; stages: Stage[];
+                                           editing?: boolean } | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -48,9 +49,11 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
 
   const refreshAll = () => { reloadTemplates(); reloadProjects(); };
 
-  const copyToMine = (name: string, stages: Stage[]) => {
-    setBuilder({ name: `${name}${t("tpl.myCopySuffix")}`,
-                 stages: stages.map((s) => ({ ...s })) });
+  /** Load a template into the builder. `keepName` edits it in place (saving
+   *  bumps its version); otherwise it becomes a new template. */
+  const openInBuilder = (name: string, stages: Stage[], keepName = false) => {
+    setBuilder({ name: keepName ? name : `${name}${t("tpl.myCopySuffix")}`,
+                 stages: stages.map((s) => ({ ...s })), editing: keepName });
     setError("");
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   };
@@ -113,7 +116,7 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
                         t={t} />
             {props.canOperate && (
               <div className="inline-form">
-                <button onClick={() => copyToMine(p.name, p.stages)}>
+                <button onClick={() => openInBuilder(p.name, p.stages)}>
                   {t("tpl.copyEdit")}</button>
                 <AssignPicker projects={projects} label={t("tpl.assignDirect")}
                               onPick={async (projectId) => {
@@ -147,8 +150,11 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
                 {props.canOperate && (
                   <span className="row-ops">
                     <button className="ghost"
-                            onClick={() => copyToMine(tpl.id, stages)}>
-                      {t("tpl.editSaveAs")}</button>
+                            onClick={() => openInBuilder(tpl.id, stages, true)}>
+                      {t("tpl.editInPlace")}</button>
+                    <button className="ghost"
+                            onClick={() => openInBuilder(tpl.id, stages)}>
+                      {t("tpl.saveAsCopy")}</button>
                     <AssignPicker projects={projects} label={t("c.assign")}
                                   onPick={(pid) => assign(pid, tpl.id)} />
                     <button className="ghost danger-text" onClick={async () => {
@@ -209,7 +215,8 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
         <Section title={t("tpl.editor")}
                  action={!builder ? (
                    <button onClick={() =>
-                     setBuilder({ name: "", stages: [{ ...BLANK_STAGE }] })}>
+                     setBuilder({ name: "", stages: [{ ...BLANK_STAGE }],
+                                  editing: false })}>
                      {t("tpl.fromScratch")}</button>
                  ) : undefined}>
           {!builder && <p className="muted">{t("tpl.editorHint")}</p>}
@@ -313,9 +320,9 @@ function TemplatePicker({ templates, label, onPick }: {
 /** Form-based stage builder: no JSON, live diagram preview. */
 function Builder({ builder, catalog, setBuilder, onSave, onCancel, roleLabel,
                   gateInfo, t }: {
-  builder: { name: string; stages: Stage[] };
+  builder: { name: string; stages: Stage[]; editing?: boolean };
   catalog: Catalog;
-  setBuilder: (b: { name: string; stages: Stage[] }) => void;
+  setBuilder: (b: { name: string; stages: Stage[]; editing?: boolean }) => void;
   onSave: () => void; onCancel: () => void;
   roleLabel: (id?: string | null) => string; gateInfo: (id: string) => Gate;
   t: T;
@@ -336,6 +343,8 @@ function Builder({ builder, catalog, setBuilder, onSave, onCancel, roleLabel,
 
   return (
     <>
+      {builder.editing && <p className="notice">{t("tpl.editingInPlace",
+                                                   { name: builder.name })}</p>}
       <div className="inline-form">
         <input placeholder={t("tpl.namePh")} style={{ width: "22rem" }}
                value={builder.name}

@@ -509,6 +509,9 @@ const zhHans: Dict = {
   "board.removalHint": "归档＝从看板隐藏，运行与用量记录全部保留（可还原）；删除＝真的移除，只允许没有任何用量记录的任务。两者都写审计。",
   "board.archived": "已归档",
   "board.configError": "⚙ 这是工作流配置问题，不是测试不通过 — 重跑 agent 没有用，请先修正阶段的测试命令。",
+  "tpl.editInPlace": "编辑（就地更新）",
+  "tpl.saveAsCopy": "另存为新模板",
+  "tpl.editingInPlace": "正在就地编辑“{name}”：保存后版本 +1，之后派发都会走新版本。已经在跑的任务保留当初的流程快照，不受影响。",
 };
 
 export default zhHans;

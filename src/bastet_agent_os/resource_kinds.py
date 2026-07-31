@@ -121,4 +121,11 @@ def validate(kind: str, endpoint: str | None, secret_ref: str | None,
             problems.append("git-provider-invalid")
         if provider == "custom" and not endpoint:
             problems.append("endpoint-missing")
+        # an SSH URL needs a key and an HTTPS URL needs a token; the pairing is
+        # visible from the config alone, so say it before a run finds out
+        url = (endpoint or "").strip()
+        if url.startswith(("git@", "ssh://")) and (secret_ref or "").startswith("env:"):
+            pass                      # cannot tell what an env var holds
+        if url.startswith(("http://", "https://")) and "ssh" in (secret_ref or "").lower():
+            problems.append("git-https-with-ssh-key")
     return problems

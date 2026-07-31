@@ -8,6 +8,36 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.13.0] - 2026-07-31
+
+### Fixed — git resources are tested the way an agent uses them
+A live GitLab resource failed both ways, and each failure was ours:
+
+- **A repo URL is not an API host.** The check appended `/api/v4/user` to
+  `https://gitlab.com/user/project.git`. Now the endpoint's shape decides:
+  `git ls-remote` (the handshake a clone starts with) for a repo URL or an SSH
+  URL, and the provider's identity endpoint only when the URL names a host with
+  no project.
+- **An SSH private key cannot authenticate HTTPS**, and the checker never used
+  the key for SSH at all. A key paired with an HTTPS URL — or a token paired with
+  an SSH URL — is now reported as the mismatch it is, before touching the network,
+  and the row carries a `git-https-with-ssh-key` problem.
+- SSH is tested with the configured key only (`IdentitiesOnly`, `BatchMode`,
+  `accept-new`), written to a 0600 temp file and deleted afterwards, with hints
+  for the usual causes: public key not added, key format wrong (a missing trailing
+  newline is the classic), host unreachable.
+- HTTPS sends the token in an env-provided `http.extraHeader`, never in the URL.
+- **A bot-check interstitial is not a rejected credential.** A Cloudflare "Just a
+  moment…" page now reports as `warn` saying the verdict is unknown, instead of
+  blaming the credential.
+
+### Added — editing a workflow template in place
+- 我的範本 gains **編輯（就地更新）** next to **另存為新範本**. Until now every edit
+  path renamed the template, so there was no way to change an existing one — which
+  is exactly what a wrong test command needs. Saving bumps the version; jobs
+  already running keep the workflow snapshot they started with, and the builder
+  says so while editing.
+
 ## [0.12.3] - 2026-07-31
 
 ### Fixed

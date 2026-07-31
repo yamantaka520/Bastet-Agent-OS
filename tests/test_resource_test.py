@@ -185,23 +185,28 @@ def test_skill_source_is_checked_on_the_bastet_host(db, tmp_path):
 
 
 def test_git_without_a_credential_says_only_public_was_checked(db, monkeypatch):
-    add(db, "git-pub", "git", config={"git_provider": "github"})
+    """A host-only URL (no project path) still uses the provider's identity API."""
+    add(db, "git-pub", "git", endpoint="https://github.example",
+        config={"git_provider": "github"})
     monkeypatch.setattr(resource_test, "_get",
                         lambda url, headers: {"status": "ok", "detail": "HTTP 200"})
     state = resource_test.run(db, "git-pub", "tester")
     assert state["status"] == "ok" and "no credential configured" in state["detail"]
 
 
-def test_custom_git_over_ssh_uses_ls_remote(db, tmp_path, monkeypatch):
+def test_a_repo_url_is_checked_with_ls_remote_not_an_api_call(db, monkeypatch):
+    """The live bug: a repo URL had /api/v4/user appended to it."""
     calls = {}
-    def fake(url):
-        calls["url"] = url
-        return {"status": "ok", "checked": f"git ls-remote {url}", "detail": "HEAD"}
-    monkeypatch.setattr(resource_test, "_git_ls_remote", fake)
-    add(db, "git-ssh", "git", endpoint="git@example.com:team/repo.git",
-        config={"git_provider": "custom"})
-    assert resource_test.run(db, "git-ssh", "tester")["status"] == "ok"
-    assert calls["url"] == "git@example.com:team/repo.git"
+    monkeypatch.setattr(resource_test, "_ls_remote_https",
+                        lambda url, secret, provider: calls.setdefault("url", url)
+                        and {} or {"status": "ok", "checked": f"git ls-remote {url}",
+                                   "detail": "ok"})
+    add(db, "git-repo", "git", endpoint="https://gitlab.com/me/project.git",
+        config={"git_provider": "gitlab"})
+    state = resource_test.run(db, "git-repo", "tester")
+    assert state["status"] == "ok"
+    assert calls["url"] == "https://gitlab.com/me/project.git"
+    assert "api/v4" not in state["checked"]
 
 
 # ---- the button, end to end -------------------------------------------------------

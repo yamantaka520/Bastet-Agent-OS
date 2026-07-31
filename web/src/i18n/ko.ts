@@ -489,6 +489,9 @@ const ko: Dict = {
   "board.removalHint": "보관은 보드에서 숨기기만 하고 실행·사용량 기록은 모두 남깁니다（복구 가능）. 삭제는 완전히 제거하며, 비용 기록이 없는 작업만 허용됩니다. 둘 다 감사에 기록됩니다.",
   "board.archived": "보관됨",
   "board.configError": "⚙ 이것은 워크플로 설정 문제이며 테스트 실패가 아닙니다 — agent 를 다시 실행해도 해결되지 않습니다. 먼저 단계의 테스트 명령을 수정하세요.",
+  "tpl.editInPlace": "편집（현재 템플릿 수정）",
+  "tpl.saveAsCopy": "새 템플릿으로 저장",
+  "tpl.editingInPlace": "「{name}」을 직접 편집하고 있습니다: 저장하면 버전이 +1 되고 이후 배정은 새 버전을 따릅니다. 이미 실행 중인 작업은 시작 당시 스냅샷을 유지합니다.",
 };
 
 export default ko;
