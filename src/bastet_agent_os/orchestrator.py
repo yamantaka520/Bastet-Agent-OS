@@ -828,10 +828,52 @@ class Orchestrator:
 
     # -- worktree lifecycle (SPEC §5.4.3) ----------------------------------------------
 
+    def _commit_worktree(self, job, workdir: str) -> str | None:
+        """Commit whatever the agents produced onto the job's own branch.
+
+        Without this, cleanup threw the work away. `git worktree remove --force`
+        deletes uncommitted changes, and no stage commits anything, so a job that
+        ran a full rework loop and passed its tests left the branch pointing at
+        the commit it started from — the fix recoverable only by hand-applying a
+        diff file. Verified on a live host: the agent correctly changed
+        `a - b` to `a + b`, the gate went green, and the edit was then deleted.
+
+        This commits to `bastet/<job_id>`, never to the project's own branch:
+        merging stays a deliberate step (the 合併發布 / deploy stages), which is
+        the part that should keep asking a human."""
+        status = subprocess.run(["git", "-C", workdir, "status", "--porcelain"],
+                                capture_output=True, text=True)
+        if status.returncode != 0 or not status.stdout.strip():
+            return None                       # nothing to keep
+        title = (job["title"] or job["id"])[:60]
+        message = (f"bastet: {title}\n\njob {job['id']}\n"
+                   f"stage {job['stage']} · status {job['status']}")
+        for args in (["add", "-A"],
+                     ["-c", "user.name=Bastet Agent OS",
+                      "-c", "user.email=bastet@localhost",
+                      "commit", "--no-verify", "-q", "-m", message]):
+            proc = subprocess.run(["git", "-C", workdir, *args],
+                                  capture_output=True, text=True)
+            if proc.returncode != 0:
+                log.warning("could not preserve job %s work (%s): %s", job["id"],
+                            args[0], proc.stderr.strip()[:200])
+                return None
+        head = subprocess.run(["git", "-C", workdir, "rev-parse", "HEAD"],
+                              capture_output=True, text=True)
+        sha = head.stdout.strip()[:12] if head.returncode == 0 else "?"
+        self.db.audit("orchestrator", "worktree.committed", "job", job["id"],
+                      {"branch": f"bastet/{job['id']}", "commit": sha})
+        log.info("job %s: work committed to bastet/%s (%s)", job["id"],
+                 job["id"], sha)
+        return sha
+
     def cleanup_worktree(self, job_id: str) -> bool:
-        """Remove a terminal job's worktree. The bastet/<job> branch and the
-        diff artifact survive — only the checkout directory goes. Projects can
-        opt out with config_json {"keep_worktrees": true}."""
+        """Remove a terminal job's worktree, keeping the work.
+
+        Anything the agents changed is committed to the bastet/<job> branch
+        first, so the branch and the diff artifact both survive and only the
+        checkout directory goes. Projects can opt out of removal entirely with
+        config_json {"keep_worktrees": true}."""
         job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if job is None or not job["worktree_path"]:
             return False
@@ -840,6 +882,7 @@ class Orchestrator:
             return False
         if json.loads(project["config_json"] or "{}").get("keep_worktrees"):
             return False
+        self._commit_worktree(job, job["worktree_path"])
         proc = subprocess.run(
             ["git", "-C", project["repo_path"], "worktree", "remove", "--force",
              job["worktree_path"]],

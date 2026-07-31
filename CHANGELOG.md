@@ -33,6 +33,20 @@ An unrunnable test command (`npm ERR! Missing script: "test:e2e"`) now goes back
 too, with a brief that says to add the missing script or dependency for real and
 to report a genuinely wrong command instead of faking a green exit.
 
+### Fixed — the loop no longer throws away its own output
+Found while verifying the above on the live host: a job ran its rework cycle, the
+agent correctly changed `a - b` to `a + b`, the gate went green — and cleanup
+deleted the fix. `git worktree remove --force` discards uncommitted changes, and
+no stage ever commits, so the `bastet/<job>` branch still pointed at the commit
+the job started from. The work existed only as a diff file in
+`~/.bastet/artifacts`, recoverable by hand.
+
+Cleanup now commits whatever the agents produced onto the job's own branch first,
+so the branch really does carry the work (as the docstring had been claiming).
+The project's own branch is untouched — merging stays a deliberate step, which is
+the part that should keep asking a human. A run that changed nothing makes no
+commit.
+
 ### Added — 運維處理 and 持續維護 workflow presets
 Incident handling (locate → stop the bleeding → root cause → fix with a
 regression test → review → deploy → postmortem) and periodic maintenance

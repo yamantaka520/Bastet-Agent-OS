@@ -127,6 +127,10 @@ Three things still stop and ask you:
 | nothing earlier can write | a pipeline of read-only stages has nobody able to act |
 | cycles exhausted (`max_cycles`, default 3) | an agent that has failed three times is not converging |
 
+Whatever the agents produce is committed to the job's own `bastet/<job_id>`
+branch when the run ends, so a finished loop leaves reviewable work rather than a
+diff file. Your own branch is never written to: merging is a deliberate stage.
+
 Each hand-back is audited as `job.rework` and counted on the card. The
 notification for one reads as progress (what failed, who is fixing it, cycle N of
 M); the notification for a genuine stop carries the failing output and a retry

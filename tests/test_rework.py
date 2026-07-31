@@ -219,3 +219,54 @@ async def test_blocked_notification_carries_enough_to_act_on(orch, seeded):
     assert "AssertionError" in blocked["reason"]
     job = seeded.one("SELECT title FROM jobs WHERE id=?", (job_id,))
     assert job["title"] == "貓咪散步預約"
+
+
+async def test_the_work_survives_cleanup(orch, seeded, repo):
+    """Found on a live host: a job ran its rework loop, the tests went green,
+    and then cleanup deleted the fix. `git worktree remove --force` discards
+    uncommitted changes and no stage commits anything, so the bastet/<job>
+    branch still pointed at the commit the job started from — the agent's work
+    recoverable only by hand-applying a diff file."""
+    import subprocess
+
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "tests-pass",
+         "gate_config": {"command": "test -f fixed.txt"}},
+    ])
+    SCRIPT.append(RunResult(status="succeeded", summary="forgot"))
+    SCRIPT.append(fixes("fixed.txt"))
+
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True,
+                               title="修好加法"))
+    await orch.wait_idle()
+
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+    branch = f"bastet/{job_id}"
+    files = subprocess.run(["git", "-C", str(repo), "ls-tree", "-r", "--name-only",
+                            branch], capture_output=True, text=True)
+    assert "fixed.txt" in files.stdout, (
+        f"the agent's work is not on {branch}: {files.stdout!r}")
+    message = subprocess.run(["git", "-C", str(repo), "log", "-1", "--format=%s%n%b",
+                              branch], capture_output=True, text=True).stdout
+    assert "修好加法" in message and job_id in message   # traceable to the card
+    # and the project's own branch is untouched: merging stays a deliberate step
+    on_master = subprocess.run(["git", "-C", str(repo), "ls-tree", "-r",
+                                "--name-only", "HEAD"], capture_output=True, text=True)
+    assert "fixed.txt" not in on_master.stdout
+
+
+async def test_a_job_that_changed_nothing_makes_no_commit(orch, seeded, repo):
+    """An empty commit on every read-only run would be noise in the history."""
+    import subprocess
+
+    before = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                            capture_output=True, text=True).stdout.strip()
+    add_template(seeded, "dev", [{"name": "look", "gate": "auto", "read_only": True}])
+    SCRIPT.append(RunResult(status="succeeded", summary="read it, changed nothing"))
+
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True))
+    await orch.wait_idle()
+
+    tip = subprocess.run(["git", "-C", str(repo), "rev-parse", f"bastet/{job_id}"],
+                         capture_output=True, text=True).stdout.strip()
+    assert tip == before
