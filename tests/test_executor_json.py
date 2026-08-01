@@ -102,3 +102,59 @@ def test_verdict_extraction_uses_the_tolerant_parser(name):
     source = Path(f"src/bastet_agent_os/executors/{name}.py").read_text()
     verdict_block = source[source.index("verdict"):]
     assert "last_json_object(" in verdict_block
+
+
+# ---- oversized output lines --------------------------------------------------
+
+def test_the_stream_limit_is_large_enough_for_real_tool_output():
+    """asyncio's StreamReader defaults to 64 KiB per line, and every CLI executor
+    reads `stream-json` a line at a time. A single line carrying a file read or a
+    test log overruns that, and the run dies with "Separator is found, but chunk
+    is longer than limit" — which is exactly what killed a live CatsWalker stage
+    after minutes of real work."""
+    from bastet_agent_os.executors.base import STREAM_LIMIT
+
+    assert STREAM_LIMIT >= 8 * 1024 * 1024
+
+
+def test_every_cli_executor_passes_the_limit_to_its_subprocess():
+    """One executor left on the default is one executor that still dies."""
+    import inspect
+
+    from bastet_agent_os.executors import agy, claude_code, codex, grok, hermes
+
+    for module in (claude_code, codex, grok, agy, hermes):
+        source = inspect.getsource(module)
+        assert "create_subprocess_exec" in source, module.__name__
+        assert "limit=STREAM_LIMIT" in source, (
+            f"{module.__name__} still uses asyncio's default 64 KiB line limit")
+
+
+def test_every_cli_executor_survives_a_line_over_the_limit():
+    """Belt and braces: even above STREAM_LIMIT, losing one progress line must
+    beat losing the run. asyncio discards the offending line and the stream keeps
+    working, so the loop only has to not treat ValueError as fatal."""
+    import inspect
+
+    from bastet_agent_os.executors import agy, claude_code, codex, grok, hermes
+
+    for module in (claude_code, codex, grok, agy, hermes):
+        source = inspect.getsource(module)
+        assert "except ValueError:" in source, (
+            f"{module.__name__} lets an oversized line kill the run")
+
+
+@pytest.mark.asyncio
+async def test_asyncio_discards_the_bad_line_and_the_next_one_arrives():
+    """The assumption the guard rests on, pinned: skipping is only safe because
+    the reader clears the oversized data itself."""
+    import asyncio
+
+    reader = asyncio.StreamReader(limit=64)
+    reader.feed_data(b"x" * 500 + b"\n" + b'{"type":"result","ok":true}' + b"\n")
+    reader.feed_eof()
+
+    with pytest.raises(ValueError):
+        await reader.readline()
+
+    assert await reader.readline() == b'{"type":"result","ok":true}\n'

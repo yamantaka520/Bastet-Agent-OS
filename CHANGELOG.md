@@ -8,6 +8,25 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.18.4] - 2026-08-01
+
+### Fixed — a big tool result killed the run
+`asyncio`'s StreamReader defaults to a 64 KiB line limit, and every CLI executor
+reads its `stream-json` output one line at a time. One line carrying a large tool
+result — a file read, a long diff, a test log — overran it, `readline()` raised
+`LimitOverrunError`, and the run died with `ValueError: Separator is found, but
+chunk is longer than limit` after minutes of real work. Nothing in the message
+suggests the actual cause, and the stage looked like an executor crash.
+
+All five CLI executors now start their subprocess with a 32 MiB reader limit, and
+treat an over-limit line as a dropped progress line rather than a fatal error —
+asyncio discards the offending data itself and the stream recovers, so losing one
+line beats losing the run. Tests pin the limit, that every executor passes it, and
+the recovery behaviour the guard depends on.
+
+Found on the validation host: this is what `job_264bc8d2524a` was actually dying
+of, on both attempts.
+
 ## [0.18.3] - 2026-07-31
 
 ### Fixed — the event registry had drifted by eight types

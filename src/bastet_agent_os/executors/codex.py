@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import signal
 import sys
@@ -31,6 +32,7 @@ from typing import Any
 
 from ..pricing import Usage
 from .base import (
+    STREAM_LIMIT,
     SUMMARY_LIMIT,
     RunEvent,
     RunResult,
@@ -52,6 +54,9 @@ VERDICT_SCHEMA = {
     "required": ["verdict"],
     "additionalProperties": False,
 }
+
+
+log = logging.getLogger("bastet.executor")
 
 
 @dataclass
@@ -117,7 +122,8 @@ class CodexExecutor:
         cmd.append(prompt)
 
         handle.process = await asyncio.create_subprocess_exec(
-            *cmd, cwd=task.workdir, env=env,
+            *cmd,
+            limit=STREAM_LIMIT,     # a big tool result must not kill the run cwd=task.workdir, env=env,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=(sys.platform != "win32"))
         return handle
@@ -152,6 +158,14 @@ class CodexExecutor:
                 raw = await asyncio.wait_for(handle.process.stdout.readline(),
                                              timeout=min(remaining, 30))
             except TimeoutError:
+                continue
+            except ValueError:
+                # a line longer than the reader's limit. asyncio has already
+                # discarded it and the stream recovers, so losing one progress line
+                # beats losing the run — which is what used to happen ("Separator is
+                # found, but chunk is longer than limit" killed a live stage).
+                log.warning("run %s: dropped an oversized output line",
+                            handle.task.run_id)
                 continue
             if not raw:
                 return

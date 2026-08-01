@@ -11,6 +11,7 @@ Two accounting paths:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 import subprocess
@@ -20,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .base import (
+    STREAM_LIMIT,
     SUMMARY_LIMIT,
     RunEvent,
     RunResult,
@@ -27,6 +29,9 @@ from .base import (
     parse_event,
     register_builtin,
 )
+
+log = logging.getLogger("bastet.executor")
+
 
 GRACE_SECONDS = 10  # SIGTERM -> grace -> SIGKILL
 
@@ -98,6 +103,7 @@ class ClaudeCodeExecutor:
             env.pop("ANTHROPIC_API_KEY", None)
         handle.process = await asyncio.create_subprocess_exec(
             *cmd,
+            limit=STREAM_LIMIT,     # a big tool result must not kill the run
             cwd=task.workdir,
             env=env,
             stdout=asyncio.subprocess.PIPE,
@@ -122,6 +128,15 @@ class ClaudeCodeExecutor:
                                                  timeout=min(remaining, 30))
                 except TimeoutError:
                     continue  # no output this window; re-check the deadline
+                except ValueError:
+                    # one line longer than the reader's limit. asyncio has
+                    # already discarded it and the stream recovers, so losing a
+                    # progress line beats losing the run — which is what used to
+                    # happen ("Separator is found, but chunk is longer than
+                    # limit" killed a stage after minutes of real work).
+                    log.warning("run %s: dropped an oversized output line",
+                                handle.task.run_id)
+                    continue
                 if not raw:
                     return  # EOF
                 event = parse_event(raw)

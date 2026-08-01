@@ -16,6 +16,7 @@ Notes from the interface survey (verified against local v0.12 source):
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 import sys
@@ -24,10 +25,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..workflow import read_verdict
-from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
+from .base import STREAM_LIMIT, SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
 
 GRACE_SECONDS = 10
 DEFAULT_TOOLSETS = "terminal"
+
+
+log = logging.getLogger("bastet.executor")
 
 
 @dataclass
@@ -91,7 +95,9 @@ class HermesExecutor:
                "HERMES_HOME": str(profile_dir),
                "BASTET_RUN_TOKEN": task.run_token}
         handle.process = await asyncio.create_subprocess_exec(
-            *cmd, cwd=task.workdir, env=env,
+            *cmd,
+            limit=STREAM_LIMIT,     # a big tool result must not kill the run
+            cwd=task.workdir, env=env,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=(sys.platform != "win32"))
         return handle
@@ -111,6 +117,14 @@ class HermesExecutor:
                     raw = await asyncio.wait_for(handle.process.stdout.readline(),
                                                  timeout=min(remaining, 30))
                 except TimeoutError:
+                    continue
+                except ValueError:
+                    # a line longer than the reader's limit. asyncio has already
+                    # discarded it and the stream recovers, so losing one progress line
+                    # beats losing the run — which is what used to happen ("Separator is
+                    # found, but chunk is longer than limit" killed a live stage).
+                    log.warning("run %s: dropped an oversized output line",
+                                handle.task.run_id)
                     continue
                 if not raw:
                     return

@@ -88,6 +88,17 @@ def last_json_object(text: str) -> dict[str, Any] | None:
 # Still bounded, to keep a runaway agent out of the DB.
 SUMMARY_LIMIT = 200_000
 
+# asyncio's StreamReader defaults to a 64 KiB line limit, and every CLI executor
+# reads its `stream-json` output one line at a time. A single line carrying a
+# large tool result — a file read, a long diff, a test log — overruns it, and
+# `readline()` then raises LimitOverrunError, killing a run that was working
+# perfectly. Seen live: a CatsWalker stage died with "Separator is found, but
+# chunk is longer than limit" after several minutes of real work.
+#
+# The reader has to hold the largest single line an agent can emit, which is
+# bounded by the tool output it decides to print, not by anything we control.
+STREAM_LIMIT = 32 * 1024 * 1024
+
 
 @dataclass
 class RunResult:
