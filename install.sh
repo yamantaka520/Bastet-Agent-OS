@@ -73,11 +73,15 @@ note "安裝 Bastet Agent OS + Agent Memory OS（$VENV）"
 mkdir -p "$BASTET_HOME" "$BIN_DIR"
 [ -d "$VENV" ] || "$PY" -m venv "$VENV"
 "$VENV/bin/pip" install -q --upgrade pip
+# pillow: the standard tool for media pipelines (sprite slicing, alpha keying,
+# contact sheets). The bastet venv sits last on PATH, which makes a bare
+# `python` resolve to it on systems without /usr/bin/python — so it must carry
+# what media tasks need, or "No module named PIL" appears only inside runs.
 # pytest goes in because the shipped workflow presets run `pytest -q` at their
 # test gates; without it a project reaches that stage and fails on a missing
 # runner after burning a whole agent run.
 if "$VENV/bin/pip" install -q --upgrade "$REPO" 'agent-memory-os[full]' \
-     claude-agent-sdk keyring pytest; then
+     claude-agent-sdk keyring pytest pillow; then
   ln -sf "$VENV/bin/bastet" "$BIN_DIR/bastet"
   ln -sf "$VENV/bin/agent-memory" "$BIN_DIR/agent-memory" 2>/dev/null || true
   case ":$PATH:" in

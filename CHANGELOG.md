@@ -8,6 +8,15 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.21.4] - 2026-08-02
+
+### Fixed — "No module named PIL", but only inside runs
+Media runs failed on Pillow while the system `python3` had it all along. The
+bastet venv sits on PATH (last, by design), and on systems without
+`/usr/bin/python` that makes a bare `python` resolve to the venv — which did not
+carry Pillow. It does now, everywhere: `install.sh`, the Docker image, and the
+maintenance card track it as standard media tooling.
+
 ## [0.21.3] - 2026-08-02
 
 ### Fixed — a job approved into done never pushed

@@ -50,6 +50,12 @@ PIP_COMPONENTS = [
      "package": "numpy", "in_process": True},
     {"id": "pytest", "label": "pytest（工作流測試關卡）", "kind": "pip",
      "package": "pytest"},
+    # media pipelines slice sprites and key alpha with it; a bare `python`
+    # resolves to the venv on systems without /usr/bin/python, so the venv must
+    # carry it (live finding: runs failed with "No module named PIL" while the
+    # system python3 had Pillow all along)
+    {"id": "pillow", "label": "Pillow（媒體資產處理）", "kind": "pip",
+     "package": "pillow"},
 ]
 
 # executor CLIs, each with the vendor's own installer
