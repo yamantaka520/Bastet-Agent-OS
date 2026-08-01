@@ -8,6 +8,27 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.21.0] - 2026-08-02
+
+### Added — generated media come back into the conversation
+A chat agent that generates an image had nowhere to put it: the reply is text.
+Every agent-responder run now gets `$BASTET_CHAT_OUTBOX`; whatever it saves
+there (image, audio, video, document) is attached to the assistant message and
+rendered inline in the chat — images as images, audio with a player, video with
+controls. The prompt tells the agent to download the actual file rather than
+paste a vendor URL, because those expire. Caps: 8 files, 50 MB each; the outbox
+is removed after collection either way.
+
+### Added — media stages are told to persist their assets
+Q: does an async generation's expiring download URL survive? Only as a file. A
+stage whose project has media resources granted now carries an explicit rule in
+its brief: download generated assets into the worktree (the project's asset
+directory) before the stage ends, polling async jobs to completion within the
+run — the workflow then commits them to `bastet/<job_id>` and pushes, so the
+files (not the URLs) are what survive. A background fetcher for async jobs that
+outlive their run is on the roadmap; until then the brief demands honesty:
+"say the generation did not finish" beats leaving a dead link.
+
 ## [0.20.2] - 2026-08-02
 
 ### Fixed — the chat agent had the credential and no way to use it

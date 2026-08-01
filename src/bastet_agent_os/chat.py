@@ -44,6 +44,11 @@ TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".csv",
 
 SCOPES = ("global", "team", "project")
 
+# what a reply may carry back from the outbox: generated media are useful,
+# unbounded blobs are a disk grenade
+OUTBOX_MAX_FILES = 8
+OUTBOX_MAX_BYTES = 50 * 1024 * 1024
+
 # who owns a chat turn in AMOS: the control plane, not any one agent — the
 # memory outlives whichever agent happened to answer
 MEMORY_OWNER = "bastet"
@@ -386,11 +391,14 @@ async def reply(db, home_root: Path | str, session_id: str,
 
     if responder.kind == "resource":
         text, meta = await _reply_resource(db, session, history, responder)
+        generated = []      # a direct LLM call has no run and generates no files
     else:
-        text, meta = await _reply_agent(db, home_root, session, history, responder)
+        text, meta, generated = await _reply_agent(db, home_root, session,
+                                                   history, responder)
 
     message_id = add_message(db, session_id, role="assistant", content=text,
-                             author=f"{responder.kind}:{responder.id}", meta=meta)
+                             author=f"{responder.kind}:{responder.id}", meta=meta,
+                             attachments=generated)
     remember(db, session, "assistant", text)
     db.audit(actor or "chat", "chat.reply", "chat", session_id,
              {"responder": f"{responder.kind}:{responder.id}",
@@ -545,6 +553,12 @@ async def _reply_agent(db, home_root, session, history, responder) -> tuple[str,
     chat_run_id = new_id("chat")
     access = None
     resource_note = ""
+    # anything the agent generates (an image, a TTS clip, a document) comes back
+    # into the conversation through this directory — a media resource that can
+    # only describe its output in prose is half a feature
+    outbox = Path(home_root) / "chat-outbox" / chat_run_id
+    outbox.mkdir(parents=True, exist_ok=True)
+    extra_env["BASTET_CHAT_OUTBOX"] = str(outbox)
     if project_id:
         from . import resource_access
         try:
@@ -560,6 +574,10 @@ async def _reply_agent(db, home_root, session, history, responder) -> tuple[str,
         run_id=chat_run_id,
         prompt=f"{system_prompt(db, session)}\n\n"
                + (f"{resource_note}\n\n" if resource_note else "")
+               + "## 生成檔案的回傳\n"
+               "你產生的任何檔案（圖片、音訊、影片、文件）**存到 "
+               "$BASTET_CHAT_OUTBOX 目錄**（環境變數）就會自動附回這則對話。"
+               "不要只貼廠商給的暫時 URL —— 它會過期；把檔案下載下來放進去。\n\n"
                + f"## 對話紀錄\n{transcript}\n\n"
                f"請以繁體中文（或使用者的語言）回覆最後一則訊息。只輸出回覆內容。",
         workdir=workdir,
@@ -586,9 +604,37 @@ async def _reply_agent(db, home_root, session, history, responder) -> tuple[str,
             resource_access.cleanup(home_root, chat_run_id)
     if result.status != "succeeded" and not result.summary:
         raise ChatError(f"agent run {result.status} with no output")
+    attachments = _collect_outbox(home_root, session["id"], outbox)
     meta = {"responder": "agent", "agent_id": responder.id,
             "executor": agent["executor_type"], "status": result.status,
             "tokens_in": result.tokens_in, "tokens_out": result.tokens_out,
             "cost_usd": result.cost_usd,
             "precision": result.precision or "none"}
-    return (result.summary or "(empty response)"), meta
+    return (result.summary or "(empty response)"), meta, attachments
+
+
+def _collect_outbox(home_root, session_id: str, outbox: Path) -> list[dict[str, Any]]:
+    """Move what the agent left in the outbox into the session's attachment
+    store. Caps are enforced (files beyond them are named, not smuggled), and
+    the outbox dir is removed either way."""
+    import shutil
+
+    items: list[dict[str, Any]] = []
+    try:
+        if not outbox.is_dir():
+            return items
+        for path in sorted(outbox.iterdir()):
+            if not path.is_file():
+                continue
+            if len(items) >= OUTBOX_MAX_FILES:
+                log.info("chat outbox: file cap reached, skipping %s", path.name)
+                break
+            if path.stat().st_size > OUTBOX_MAX_BYTES:
+                log.info("chat outbox: %s over %d bytes, skipped",
+                         path.name, OUTBOX_MAX_BYTES)
+                continue
+            items.append(save_attachment(home_root, session_id, path.name,
+                                         path.read_bytes()))
+    finally:
+        shutil.rmtree(outbox, ignore_errors=True)
+    return items

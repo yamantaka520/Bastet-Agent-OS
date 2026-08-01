@@ -846,6 +846,17 @@ class Orchestrator:
             # the role definition frames HOW this stage's agent should behave
             parts.append(f"## 你的角色（{stage.role}）\n{role_prompt}")
         parts += [f"# Task: {job['title']}", job["spec_md"]]
+        if self._has_media_resources(job):
+            # a vendor's download URL expires; only a file in the worktree
+            # survives to the bastet/<job> branch and the remote
+            parts.append(
+                "## 生成資產的保存（重要）\n"
+                "用媒體資源（圖片/影片/音樂/語音）生成的產物，必須在這個階段結束前"
+                "**下載成 worktree 裡的實體檔案**，放到專案慣用的資產目錄"
+                "（assets/、public/、或任務指定的路徑）。廠商回傳的下載 URL 有"
+                "時效，過期就什麼都不剩；工作流會把 worktree 的檔案 commit 到任務"
+                "分支並推到遠端 —— 只有真的存在的檔案會被保存。非同步生成請在本"
+                "階段內輪詢到完成再下載；等不到就明說，不要留一個會過期的連結。")
         # a card that was sent back carries WHY, verbatim — the agent cannot fix
         # what it cannot see, and this is the difference between a loop that
         # converges and one that repeats the same run
@@ -919,6 +930,21 @@ class Orchestrator:
             self.db.audit("orchestrator", "job.previews", "job", job["id"],
                           {"files": kept})
         return kept
+
+    MEDIA_KINDS = ("image", "video", "music", "tts", "stt")
+
+    def _has_media_resources(self, job) -> bool:
+        project = self.db.one("SELECT team_id FROM projects WHERE id=?",
+                              (job["project_id"],))
+        team = project["team_id"] if project else ""
+        row = self.db.one(
+            "SELECT 1 AS x FROM grants g JOIN resources r ON r.id=g.resource_id "
+            "WHERE r.enabled=1 AND g.enabled=1 AND r.kind IN "
+            "('image','video','music','tts','stt') AND "
+            "(g.scope_type='global' OR (g.scope_type='project' AND g.scope_id=?) "
+            " OR (g.scope_type='team' AND g.scope_id=?)) LIMIT 1",
+            (job["project_id"], team))
+        return row is not None
 
     def _job_diff(self, job) -> str | None:
         workdir = job["worktree_path"] or self._project_repo(job)

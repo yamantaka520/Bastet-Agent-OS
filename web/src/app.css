@@ -360,3 +360,8 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
                    gap: .35rem; background: rgba(99,102,241,.06); }
 .config-proposal ul { margin: 0; padding-left: 1.2rem; }
 .config-proposal button { justify-self: start; }
+
+/* generated media inline in chat */
+.chat-media { max-width: 22rem; max-height: 16rem; border-radius: 8px;
+              border: 1px solid var(--line); display: block; margin-top: .3rem; }
+.chat-media-row { display: flex; align-items: center; gap: .5rem; }

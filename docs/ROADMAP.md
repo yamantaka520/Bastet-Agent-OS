@@ -20,6 +20,11 @@ it is to build.
   Reviewing and merging that is still a manual git operation; a diff view with a
   merge button belongs on the board.
 
+- **Async media fetcher.** Media stages must currently poll a vendor's async
+  generation to completion within their own run. A background fetcher that
+  claims the result later (before the URL expires) and files it into the
+  project would lift that limit.
+
 ## Under consideration
 
 - **More executors.** The plugin interface exists precisely so this is cheap.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, del, post, put, getToken } from "../api";
+import { api, apiBlob, del, post, put, getToken } from "../api";
 import { useT, type T } from "../i18n";
 import { Section, onEnterSubmit, useList, fmtTime } from "../ui";
 
@@ -313,9 +313,7 @@ function Conversation({ sessionId, agents, responders, canOperate, refreshKey,
             {!!m.attachments.length && (
               <div className="chat-files">
                 {m.attachments.map((a) => (
-                  <a key={a.id} className="role-chip"
-                     href={`/api/chat/sessions/${sessionId}/files/${a.id}`}
-                     target="_blank" rel="noreferrer">📎 {a.name}</a>
+                  <MediaAttachment key={a.id} sessionId={sessionId} item={a} />
                 ))}
               </div>
             )}
@@ -523,4 +521,47 @@ function ConfigProposal({ content, t }: { content: string; t: T }) {
       <p className="muted">{t("chat.cfgHint")}</p>
     </div>
   );
+}
+
+/** Generated media render inline — an image you have to download to see is a
+ *  broken loop. Files are fetched with the auth header (a bare src cannot carry
+ *  the token) and shown by mime: image/audio/video inline, the rest a link. */
+function MediaAttachment({ sessionId, item }: {
+  sessionId: string; item: { id: string; name: string; mime?: string };
+}) {
+  const [url, setUrl] = useState("");
+  const mime = item.mime || "";
+  const inline = /^(image|audio|video)\//.test(mime);
+
+  useEffect(() => {
+    if (!inline) return;
+    let dead = false;
+    let objectUrl = "";
+    apiBlob(`/api/chat/sessions/${sessionId}/files/${item.id}`)
+      .then((blob) => {
+        if (dead) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => setUrl(""));
+    return () => { dead = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [sessionId, item.id, inline]);
+
+  const open = async () => {
+    const blob = await apiBlob(`/api/chat/sessions/${sessionId}/files/${item.id}`);
+    window.open(URL.createObjectURL(blob), "_blank");
+  };
+
+  if (inline && url) {
+    if (mime.startsWith("image/")) {
+      return <a href={url} target="_blank" rel="noreferrer">
+        <img className="chat-media" src={url} alt={item.name} title={item.name} /></a>;
+    }
+    if (mime.startsWith("audio/")) {
+      return <span className="chat-media-row">🎵 {item.name}
+        <audio controls src={url} /></span>;
+    }
+    return <video className="chat-media" controls src={url} title={item.name} />;
+  }
+  return <button className="ghost" onClick={open}>📎 {item.name}</button>;
 }
