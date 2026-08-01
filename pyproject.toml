@@ -12,11 +12,15 @@ requires-python = ">=3.11"
 authors = [{ name = "yamantaka520" }]
 keywords = ["ai", "agents", "orchestration", "multi-agent", "local-first", "llm-gateway"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Build Tools",
+    "Framework :: FastAPI",
 ]
 dependencies = [
     "agent-memory-os",
@@ -33,6 +37,12 @@ dependencies = [
 dev = ["pytest", "pytest-asyncio", "ruff"]
 sdk = ["claude-agent-sdk"]     # claude-sdk executor (in-run interactions)
 keyring = ["keyring"]
+
+[project.urls]
+Homepage = "https://github.com/yamantaka520/Bastet-Agent-OS"
+Documentation = "https://github.com/yamantaka520/Bastet-Agent-OS/blob/main/docs/USER_GUIDE.md"
+Changelog = "https://github.com/yamantaka520/Bastet-Agent-OS/blob/main/CHANGELOG.md"
+Issues = "https://github.com/yamantaka520/Bastet-Agent-OS/issues"
 
 [project.scripts]
 bastet = "bastet_agent_os.cli:app"

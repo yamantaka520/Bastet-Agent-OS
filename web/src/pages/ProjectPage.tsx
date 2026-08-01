@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, del, post, put } from "../api";
 import { useT, useVocab, type T } from "../i18n";
-import { DataTable, Section, useList } from "../ui";
+import { DataTable, Section, useList, fmtTime } from "../ui";
 import { Secret, scopeText } from "./Secrets";
 
 /** One collapsible card per project, grouped by lifecycle status. The header
@@ -342,7 +342,7 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
       <DataTable
         head={[t("project.headJob"), t("c.stage"), t("c.status"), t("c.updatedAt")]}
         rows={ov.jobs.map((j) => [j.title, j.stage, j.status,
-                                  j.updated_at?.replace("T", " ") ?? ""])} />
+                                  fmtTime(j.updated_at)])} />
     </div>
   );
 }
@@ -426,8 +426,7 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
         <p className="muted">
           {plan.source?.messages != null
             ? t("proj.planSource", { by: plan.by || "—",
-                                     when: (plan.source.at || plan.at || "")
-                                             .replace("T", " ").slice(0, 16),
+                                     when: fmtTime(plan.source.at || plan.at),
                                      messages: plan.source.messages })
             : ""}
           {plan.dispatched

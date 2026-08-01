@@ -158,6 +158,11 @@ class Home:
             return json.loads(self.config_path.read_text())
         return {"host": DEFAULT_HOST, "port": DEFAULT_PORT}
 
+    def save_config(self, config: dict) -> None:
+        """Rewrite config.json, keeping it 0600 (it names hosts and URLs)."""
+        self.config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False))
+        os.chmod(self.config_path, 0o600)
+
     def server_url(self) -> str:
         cfg = self.config()
         return f"http://{cfg.get('host', DEFAULT_HOST)}:{cfg.get('port', DEFAULT_PORT)}"

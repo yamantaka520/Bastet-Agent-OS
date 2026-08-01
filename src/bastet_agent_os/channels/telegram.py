@@ -16,6 +16,7 @@ import json
 import logging
 import secrets
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import httpx
 
@@ -364,13 +365,19 @@ class TelegramChannel:
         if etype == "gate.pending":
             job = self.db.one("SELECT title, project_id FROM jobs WHERE id=?",
                               (event.get("job_id"),))
+            previews = event.get("previews") or self._preview_names(event.get("job_id"))
+            listing = (f"\n📎 預覽 {len(previews)} 件（圖片隨後送上，其餘見 WebUI）"
+                       if previews else "\n（這一關沒有附預覽 —— 判斷依據只有 diff）")
             text = (f"⏸ 需要你核准：{job['title'] if job else event.get('job_id')}\n"
                     f"專案 {job['project_id'] if job else '?'} · "
-                    f"階段 {event.get('stage')}\n{event.get('job_id')}")
+                    f"階段 {event.get('stage')}\n{event.get('job_id')}{listing}")
             keyboard = {"inline_keyboard": [[
                 {"text": "✅ Approve", "callback_data": f"apv:{event.get('job_id')}:yes"},
                 {"text": "❌ Reject", "callback_data": f"apv:{event.get('job_id')}:no"},
             ]]}
+            for binding in self._config().get("bindings", {}).values():
+                await self._send_previews(binding["chat_id"],
+                                          event.get("job_id"), previews)
         elif etype == "run.waiting_input":
             text = (f"✋ run {event.get('run_id')} asks: {event.get('kind')}\n"
                     f"{event.get('summary') or ''}")
@@ -453,6 +460,37 @@ class TelegramChannel:
         if len(text) > room:
             text = "…（前面省略）\n" + text[-room:]
         return "── 關卡輸出 ──\n" + text
+
+    def _preview_names(self, job_id: str | None) -> list[str]:
+        if not job_id or not self.home_root:
+            return []
+        folder = Path(self.home_root) / "artifacts" / job_id / "preview"
+        if not folder.is_dir():
+            return []
+        return sorted(p.name for p in folder.iterdir() if p.is_file())
+
+    async def _send_previews(self, chat_id: int, job_id: str | None,
+                             names: list[str]) -> None:
+        """Photos with the approval card: an approver on a phone should see the
+        screen they are approving, not a filename. Images go as photos (up to
+        four — a flood is not more informative); everything else is named and
+        left to the WebUI."""
+        if not job_id or not self.home_root:
+            return
+        folder = Path(self.home_root) / "artifacts" / job_id / "preview"
+        images = [n for n in names
+                  if Path(n).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")]
+        for name in images[:4]:
+            path = folder / Path(name).name
+            if not path.is_file():
+                continue
+            try:
+                await self._client.post(
+                    "/sendPhoto", data={"chat_id": str(chat_id), "caption": name},
+                    files={"photo": (name, path.read_bytes())})
+            except httpx.HTTPError as exc:
+                log.warning("telegram sendPhoto failed for %s: %s", name,
+                            type(exc).__name__)
 
     async def _send(self, chat_id: int, text: str, reply_markup: dict | None = None) -> None:
         # Telegram rejects anything over 4096 chars with a 400, and a rejected

@@ -328,3 +328,28 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
 .card-id { opacity: .6; font-size: .7rem; }
 .card-meta { white-space: normal; overflow-wrap: anywhere; }
 
+
+/* ---- board liveness -------------------------------------------------------- */
+.stage-progress { height: 4px; border-radius: 2px; background: var(--line);
+                  margin: .35rem 0 .25rem; overflow: hidden; }
+.stage-progress-fill { height: 100%; background: var(--accent);
+                       transition: width .4s ease; }
+.card-meta.pulse { color: var(--text); }
+/* the pulse dot breathes while the heartbeat is fresh, so "alive" is visible
+   at a glance without reading timestamps */
+.card-meta.pulse::first-letter { animation: bastet-pulse 2s ease-in-out infinite; }
+@keyframes bastet-pulse { 50% { opacity: .35; } }
+.card-meta.stale { color: var(--danger); }
+
+/* ---- previews for approval -------------------------------------------------- */
+.previews { display: flex; gap: .5rem; flex-wrap: wrap; margin: .4rem 0; }
+.previews img { max-width: 12rem; max-height: 9rem; border: 1px solid var(--line);
+                border-radius: 6px; object-fit: cover; }
+.previews img:hover { border-color: var(--accent); }
+
+/* ---- job supplies ------------------------------------------------------------ */
+.supplies { border: 1px dashed var(--line); border-radius: 8px;
+            padding: .6rem .7rem; margin: .8rem 0; display: grid; gap: .4rem; }
+.supplies textarea { width: 100%; }
+.supply-row { border-bottom: 1px solid var(--line); padding-bottom: .35rem; }
+.supply-row .spec { max-height: 8rem; }

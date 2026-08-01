@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { useT, type T } from "../i18n";
-import { DataTable, Section, onEnterSubmit } from "../ui";
+import { DataTable, Section, onEnterSubmit, fmtTime } from "../ui";
 
 /** The audit trail is the record of every state change; a log you cannot search
  *  is one nobody reads, so the filters come first and the rows follow. */
@@ -91,7 +91,7 @@ function AuditTable({ rows, t }: { rows: AuditRow[]; t: T }) {
       head={[t("aud.at"), t("aud.actor"), t("aud.action"), t("aud.target"),
              t("aud.detail")]}
       rows={rows.map((r) => [
-        r.at.replace("T", " ").replace("+00:00", "Z"),
+        fmtTime(r.at, { seconds: true }),
         r.actor, r.action, `${r.target_type}:${r.target_id}`,
         <code className="detail">{r.detail_json}</code>,
       ])} />

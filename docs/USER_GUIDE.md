@@ -42,12 +42,27 @@ Task cards in stage columns, moving live over WebSocket. A card shows its title
 first (the id is secondary), its stage and status, its template, and 🔧 how many
 times a gate handed it back.
 
+An in-progress card shows a **stage progress bar** (n of m stages) and a
+**heartbeat**: the run's last output line and how long ago — 🟢 while fresh,
+🟠 after three silent minutes with a "possibly stuck" hint. That is the
+difference between *working* and *stuck*, which `updated_at` cannot tell you.
+
 Click a card for the drawer: the spec, per-stage runs with cost, gate results,
 the diff, in-run interaction requests, and — when it is stuck — a retry that can
 switch agent, refresh the workflow from the template, or edit the spec first.
-Human-approve gates are approved or rejected here. Finished cards can be archived
-(kept, hidden) or deleted (refused if they spent money — the accounting is the
-product; archive those instead).
+Human-approve gates are approved or rejected here, **with the previews the stage
+left** (screenshots inline, HTML/Markdown snapshots one click away). Finished
+cards can be archived (kept, hidden) or deleted (refused if they spent money —
+the accounting is the product; archive those instead).
+
+**任務補給 (supplies)** — hand data to a job after dispatch: a deploy target, a
+Firebase project id, a decision the spec could not contain. It is included in
+every later run's brief (marked as overriding the original spec), and a live
+worktree also receives it as a `._bastet/inbox/` file. Credential-shaped content
+is refused with a pointer to the credentials card — a supply travels inside a
+prompt, and prompts go to LLM providers; credentials arrive as env vars and never
+do. Pending interaction requests also take an optional free-text message along
+with allow/deny.
 
 ### 對話 (Chat)
 
@@ -158,6 +173,10 @@ that ran.
 
 ### 管理 (Admin)
 
+- **系統設定** — the display timezone (IANA name, with a one-click "use the
+  host's zone"). Storage stays UTC — that is what makes the audit trail
+  comparable across machines — the setting only changes rendering, and it takes
+  effect immediately for every user.
 - **使用者** — create users with a real role (viewer / operator / admin), copy,
   disable, revoke, rotate or delete their tokens. Permissions take effect
   immediately; no re-issue needed.
@@ -267,7 +286,12 @@ stages:
   `{"verdict": "reject", "reasons": [...]}`) to `._bastet/verdict.json`. Prose
   never decides; a missing verdict is a rejection.
 - **`human-approve`** — waits for a person, via the board, the chat tab, or
-  Telegram.
+  Telegram (inline Approve/Reject buttons). The stage's brief asks the agent to
+  leave evidence in `._bastet/preview/` — screenshots, an HTML snapshot, or a
+  Markdown summary. Bastet copies those out before the worktree is removed,
+  shows them in the approval panel, and sends the images as photos with the
+  Telegram card. A gate with no preview says so, instead of presenting a bare
+  diff as if that were normal.
 
 ### When a gate fails
 

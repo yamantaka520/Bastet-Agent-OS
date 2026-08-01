@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, del, post, put } from "../api";
 import SecretsSection from "./Secrets";
 import { useT } from "../i18n";
-import { DataTable, InlineForm, Section, useList } from "../ui";
+import { DataTable, InlineForm, Section, useList, setDisplayZone, onEnterSubmit } from "../ui";
 
 const CHANNEL_STATUS: Record<string, string> = {
   polling: "adm.chPolling", credential_error: "adm.chCredError",
@@ -58,6 +58,8 @@ export default function AdminPage(props: { refreshKey: number }) {
                     setFreshToken={setFreshToken} />
 
       <SecretsSection projects={projects} teams={teams} />
+
+      <SystemSettingsSection />
 
       <MaintenanceSection />
 
@@ -389,6 +391,78 @@ function MaintenanceSection() {
         </div>
       )}
       <p className="muted">{t("mnt.hint")}</p>
+    </Section>
+  );
+}
+
+/** System settings. Timezone first: every timestamp was rendering as UTC.
+ *  Storage stays UTC — an audit trail in local time cannot be compared across
+ *  machines — the setting only changes how the browser displays it. */
+type Settings = { timezone: string; timezone_offset_minutes: number;
+                  host_timezone: string; common_timezones: string[] };
+
+function SystemSettingsSection() {
+  const t = useT();
+  const [cfg, setCfg] = useState<Settings | null>(null);
+  const [zone, setZone] = useState("");
+  const [custom, setCustom] = useState("");
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api<Settings>("/api/settings").then((c) => { setCfg(c); setZone(c.timezone); })
+      .catch((e) => setError(String((e as Error).message)));
+  }, []);
+
+  const save = async (value: string) => {
+    setError("");
+    setNotice("");
+    try {
+      const out = await put<Settings>("/api/settings", { timezone: value });
+      setCfg(out);
+      setZone(out.timezone);
+      setDisplayZone(out.timezone);
+      const sign = out.timezone_offset_minutes >= 0 ? "+" : "−";
+      const abs = Math.abs(out.timezone_offset_minutes);
+      setNotice(t("sys.saved", {
+        zone: out.timezone,
+        offset: `UTC${sign}${Math.floor(abs / 60)}:${String(abs % 60).padStart(2, "0")}`,
+      }));
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
+  return (
+    <Section title={t("sys.title")}>
+      {cfg && (
+        <div className="inline-form">
+          <label className="res-field">
+            <span>{t("sys.timezone")}</span>
+            <select value={cfg.common_timezones.includes(zone) ? zone : "custom"}
+                    onChange={(e) => {
+                      if (e.target.value === "custom") { setCustom(zone); return; }
+                      save(e.target.value);
+                    }}>
+              {cfg.common_timezones.map((z) => <option key={z} value={z}>{z}</option>)}
+              <option value="custom">{t("sys.customZone")}</option>
+            </select>
+          </label>
+          {(custom || !cfg.common_timezones.includes(zone)) && (
+            <>
+              <input placeholder="Area/City" value={custom}
+                     onChange={(e) => setCustom(e.target.value)}
+                     onKeyDown={onEnterSubmit(() => save(custom))} />
+              <button onClick={() => save(custom)}>{t("c.save")}</button>
+            </>
+          )}
+          {cfg.host_timezone !== cfg.timezone && (
+            <button className="ghost" onClick={() => save(cfg.host_timezone)}>
+              {t("sys.useHostZone", { zone: cfg.host_timezone })}</button>
+          )}
+        </div>
+      )}
+      {notice && <p className="notice">{notice}</p>}
+      {error && <p className="error">{error}</p>}
+      <p className="muted">{t("sys.hint")}</p>
     </Section>
   );
 }

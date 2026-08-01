@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { useT } from "../i18n";
-import { Section, onEnterSubmit } from "../ui";
+import { Section, onEnterSubmit, fmtTime } from "../ui";
 
 type Hit = { id: string; score: number; content: string; scope: string;
              type: string; visibility?: string[] };
@@ -116,7 +116,7 @@ function MemoryBrowse() {
             {(item.visibility ?? []).length ? ` · 📁 ${item.visibility!.join("、")}`
                                             : ""}
             {item.owner ? ` · ${item.owner}` : ""}
-            {item.created_at ? ` · ${item.created_at.replace("T", " ").slice(0, 16)}`
+            {item.created_at ? ` · ${fmtTime(item.created_at)}`
                              : ""}
           </div>
           <div>{item.content}</div>

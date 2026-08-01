@@ -24,8 +24,10 @@ EVENT_TYPES = {
     # jobs
     "job.created", "job.stage_changed", "job.done", "job.blocked", "job.cancelled",
     "job.rework", "job.resumed", "job.retried", "job.archived", "job.deleted",
+    "job.supplied",
     # runs
     "run.queued", "run.started", "run.waiting_input", "run.finished",
+    "run.progress",
     # gates (emitted as gate.<verdict>)
     "gate.pending", "gate.passed", "gate.failed",
     # projects

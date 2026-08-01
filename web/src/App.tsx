@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, getToken, setToken, openEventSocket, Me } from "./api";
 import { LanguagePicker, useT } from "./i18n";
-import { onEnterSubmit } from "./ui";
+import { onEnterSubmit, setDisplayZone } from "./ui";
 import AdminPage from "./pages/Admin";
 import AuditPage from "./pages/Audit";
 import BoardPage from "./pages/Board";
@@ -90,6 +90,14 @@ function Workbench({ me }: { me: Me }) {
   const rank = ROLE_RANK[me.role] ?? 0;
   const canOperate = rank >= 1;
   const isAdmin = rank >= 2;
+
+  // the display timezone is a system setting; load it once per login so every
+  // fmtTime() call renders in it (storage stays UTC)
+  useEffect(() => {
+    api<{ timezone: string }>("/api/settings")
+      .then((cfg) => setDisplayZone(cfg.timezone))
+      .catch(() => setDisplayZone("UTC"));
+  }, [refreshKey]);
 
   const loadProjects = useCallback(() => {
     api<{ id: string }[]>("/api/projects").then((rows) => {

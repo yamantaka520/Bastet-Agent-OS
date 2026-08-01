@@ -50,18 +50,42 @@ Flags:
 `bastet-lite` needs no installation — it is built in, and takes its credentials
 from the resource pool.
 
+## Docker
+
+The image carries the control plane, gateway, WebUI and the built-in
+`bastet-lite` executor:
+
+```bash
+docker run -d --name bastet -p 8890:8890 -v bastet-home:/data \
+  yamantaka520/bastet-agent-os
+docker exec bastet cat /data/api_token      # the WebUI login
+```
+
+Or with compose (`docker-compose.yml` is in the repo): `docker compose up -d`.
+
+What the image deliberately does **not** contain: the vendor CLIs
+(claude/codex/grok/agy/hermes). Their logins are interactive and their
+credentials are yours, so they belong on a host — or in your own derived image —
+not baked into a public one. Use the container for gateway/board/memory duty
+with `bastet-lite` + pool LLM resources, and run Bastet directly on a host when
+you need the full executor set.
+
+State lives in the `/data` volume (`bastet-home` above); the container runs as
+uid 1000 and exposes a `/api/version` healthcheck.
+
 ## Manual install
 
 ```bash
 python3 -m venv ~/.bastet/venv
-~/.bastet/venv/bin/pip install "git+https://github.com/yamantaka520/Bastet-Agent-OS.git"
-~/.bastet/venv/bin/pip install "agent-memory-os[full]" claude-agent-sdk pytest
+~/.bastet/venv/bin/pip install bastet-agent-os "agent-memory-os[full]" claude-agent-sdk pytest
 ~/.bastet/venv/bin/bastet init
 ~/.bastet/venv/bin/bastet serve
 ```
 
-There is no PyPI release yet; installation is from source. That is also what the
-maintenance card's update button uses.
+The package is on PyPI (`pip install bastet-agent-os`), wheel included UI and
+all — no Node needed on the host. Installing from the GitHub source
+(`pip install "git+https://github.com/yamantaka520/Bastet-Agent-OS.git"`) tracks
+`main` instead of releases.
 
 For development, from a clone:
 

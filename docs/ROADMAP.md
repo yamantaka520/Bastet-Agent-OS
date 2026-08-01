@@ -11,9 +11,6 @@ it is to build.
 - **Scheduled workflows.** The 持續維護 preset is written to be run repeatedly,
   but something still has to press the button. A schedule per project (cron-like,
   with the same audit trail) is the missing half.
-- **PyPI release.** Installation is from GitHub source today. A published package
-  makes `pip install bastet-agent-os` and version comparison in the maintenance
-  card work the way people expect.
 - **Prune `~/.bastet/secrets`.** Rotated credential files accumulate; nothing
   removes the superseded ones.
 - **Cost ceilings that stop work.** Budgets are recorded per grant and enforced

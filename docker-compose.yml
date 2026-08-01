@@ -1,0 +1,22 @@
+# Bastet Agent OS — compose deployment.
+#
+#   docker compose up -d
+#   docker compose exec bastet cat /data/api_token     # the WebUI login
+#
+# Mount your repos read-write under /repos and register projects with those
+# paths. The vendor executor CLIs are not in the image (interactive logins);
+# use bastet-lite + pool LLM resources, or run Bastet on a host for the full
+# executor set.
+services:
+  bastet:
+    image: yamantaka520/bastet-agent-os:latest
+    build: .
+    ports:
+      - "8890:8890"
+    volumes:
+      - bastet-home:/data
+      # - ~/Github:/repos            # your project repos
+    restart: unless-stopped
+
+volumes:
+  bastet-home:

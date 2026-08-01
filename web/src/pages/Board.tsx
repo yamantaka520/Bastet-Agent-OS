@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  api, post, Interaction, Job, JobDetail, UsageRow,
+  api, apiBlob, post, Interaction, Job, JobDetail, UsageRow,
 } from "../api";
-import { useT } from "../i18n";
+import { useT, type T } from "../i18n";
 import { del } from "../api";
+import { fmtAgo, fmtTime } from "../ui";
 
 const STATUS_BADGE: Record<string, string> = {
   in_progress: "🔵", blocked: "🟠", done: "✅", cancelled: "⚪", open: "⚪",
@@ -83,12 +84,53 @@ function Board({ jobs, onSelect }: { jobs: Job[]; onSelect: (id: string) => void
                 {job.template_id ? ` · ${job.template_id}` : ""}
                 {job.rework_count ? ` · 🔧 ${t("board.reworked",
                                                { n: job.rework_count })}` : ""}</div>
+              <StageProgress job={job} />
+              {job.status === "in_progress" && <Heartbeat job={job} t={t} />}
               <div className="card-meta card-id">{job.id}</div>
             </button>
           ))}
         </section>
       ))}
     </main>
+  );
+}
+
+/** Where the card is in its pipeline: n of m stages done. Derived from the
+ *  snapshot, so it is honest about pipelines of different lengths. */
+function StageProgress({ job }: { job: Job }) {
+  let stages: { name: string }[] = [];
+  try { stages = JSON.parse(job.stages_snapshot_json || "[]"); } catch { /* keep [] */ }
+  if (stages.length < 2) return null;
+  const index = Math.max(0, stages.findIndex((s) => s.name === job.stage));
+  const done = job.status === "done" ? stages.length : index;
+  return (
+    <div className="stage-progress" title={`${job.stage} (${index + 1}/${stages.length})`}>
+      <div className="stage-progress-fill"
+           style={{ width: `${(done / stages.length) * 100}%` }} />
+    </div>
+  );
+}
+
+/** Liveness: what the run last said and how long ago. This is the difference
+ *  between "working" and "stuck" — updated_at cannot tell you, because a long
+ *  stage legitimately goes minutes between DB writes. Re-renders on a timer so
+ *  the "ago" counts up even without new events. */
+function Heartbeat({ job, t }: { job: Job; t: T }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => tick((n) => n + 1), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const at = job.heartbeat_at;
+  if (!at) return <div className="card-meta pulse">⏳ {t("board.starting")}</div>;
+  const seconds = Math.round((Date.now() - new Date(at.match(/[+Z]/i) ? at : at + "Z").getTime()) / 1000);
+  const stale = seconds > 180;
+  return (
+    <div className={`card-meta ${stale ? "stale" : "pulse"}`}>
+      {stale ? "🟠" : "🟢"} {fmtAgo(at, t)}
+      {job.progress_text ? ` · ${job.progress_text.slice(0, 60)}` : ""}
+      {stale ? ` · ${t("board.maybeStuck")}` : ""}
+    </div>
   );
 }
 
@@ -198,6 +240,57 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
     api<{ id: string }[]>("/api/agents").then(setAgents).catch(() => {});
   }, []);
 
+  const [answerText, setAnswerText] = useState<Record<string, string>>({});
+  const [previews, setPreviews] = useState<string[]>([]);
+  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
+  const [supplies, setSupplies] = useState<{ id: string; name: string;
+    content: string; created_at: string }[]>([]);
+  const [supplyName, setSupplyName] = useState("");
+  const [supplyText, setSupplyText] = useState("");
+  const [supplyError, setSupplyError] = useState("");
+  const [supplyNote, setSupplyNote] = useState("");
+
+  useEffect(() => {
+    api<string[]>(`/api/jobs/${jobId}/previews`).then(setPreviews)
+      .catch(() => setPreviews([]));
+    api<typeof supplies>(`/api/jobs/${jobId}/supplies`).then(setSupplies)
+      .catch(() => setSupplies([]));
+  }, [jobId, job?.status]);
+
+  /* preview files sit behind the API token, so <img src> cannot fetch them
+     directly — pull each one with the auth header and hand out a blob URL */
+  useEffect(() => {
+    let dead = false;
+    const urls: Record<string, string> = {};
+    (async () => {
+      for (const name of previews) {
+        if (!/\.(png|jpe?g|gif|webp)$/i.test(name)) continue;
+        try {
+          const blob = await apiBlob(`/api/jobs/${jobId}/previews/${encodeURIComponent(name)}`);
+          if (dead) return;
+          urls[name] = URL.createObjectURL(blob);
+          setPreviewUrls({ ...urls });
+        } catch { /* listed but unreadable: the name row still shows */ }
+      }
+    })();
+    return () => { dead = true; Object.values(urls).forEach(URL.revokeObjectURL); };
+  }, [previews.join("|"), jobId]);
+
+  const addSupply = async () => {
+    setSupplyError("");
+    setSupplyNote("");
+    try {
+      const out = await post<{ delivered_to_live_worktree: boolean }>(
+        `/api/jobs/${jobId}/supplies`, { name: supplyName, content: supplyText });
+      setSupplyName("");
+      setSupplyText("");
+      setSupplyNote(out.delivered_to_live_worktree
+        ? t("board.supplyLive") : t("board.supplyNextRun"));
+      api<typeof supplies>(`/api/jobs/${jobId}/supplies`).then(setSupplies);
+    } catch (e) { setSupplyError(String((e as Error).message)); }
+  };
+
+
   if (!job) return null;
   const lastGate = job.gates[job.gates.length - 1];
   const waitingApproval = job.status === "blocked" && lastGate?.verdict === "pending";
@@ -223,8 +316,11 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   };
 
   const answer = async (runId: string, requestId: string, allow: boolean) => {
+    const message = (answerText[requestId] || "").trim();
     await post(`/api/runs/${runId}/respond`,
-               { request_id: requestId, reply: { behavior: allow ? "allow" : "deny" } });
+               { request_id: requestId,
+                 reply: { behavior: allow ? "allow" : "deny",
+                          ...(message ? { message } : {}) } });
     onChanged();
     load();
   };
@@ -265,6 +361,19 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
       {canOperate && waitingApproval && (
         <div className="approval">
           <h3>{t("board.waitingApproval")}</h3>
+          {previews.length > 0 ? (
+            <div className="previews">
+              {previews.map((name) => previewUrls[name] ? (
+                <a key={name} href={previewUrls[name]} target="_blank" rel="noreferrer">
+                  <img src={previewUrls[name]} alt={name} title={name} />
+                </a>
+              ) : (
+                <PreviewLink key={name} jobId={jobId} name={name} />
+              ))}
+            </div>
+          ) : (
+            <p className="muted">{t("board.noPreview")}</p>
+          )}
           <input placeholder={t("board.commentPh")} value={comment}
                  onChange={(e) => setComment(e.target.value)} />
           <div>
@@ -280,6 +389,10 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
           <div className="approval" key={i.request_id}>
             <h3>✋ {i.kind} — run {runId} · {t("board.needsYou")}</h3>
             <pre className="spec">{i.payload_json}</pre>
+            <input placeholder={t("board.answerPh")}
+                   value={answerText[i.request_id] || ""}
+                   onChange={(e) => setAnswerText({ ...answerText,
+                                                    [i.request_id]: e.target.value })} />
             <div>
               <button onClick={() =>
                 answer(runId, i.request_id, true)}>{t("board.allow")}</button>
@@ -288,6 +401,30 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
             </div>
           </div>
         )))}
+
+      {canOperate && job.status !== "done" && job.status !== "cancelled" && (
+        <div className="supplies">
+          <h3>📦 {t("board.supplies")}</h3>
+          {supplies.map((sup) => (
+            <div key={sup.id} className="supply-row">
+              <b>{sup.name}</b> <span className="card-meta">{fmtTime(sup.created_at)}</span>
+              <pre className="spec">{sup.content}</pre>
+            </div>
+          ))}
+          <input placeholder={t("board.supplyNamePh")} value={supplyName}
+                 onChange={(e) => setSupplyName(e.target.value)} />
+          <textarea rows={3} placeholder={t("board.supplyContentPh")}
+                    value={supplyText}
+                    onChange={(e) => setSupplyText(e.target.value)} />
+          <div className="row">
+            <button disabled={!supplyName.trim() || !supplyText.trim()}
+                    onClick={addSupply}>{t("board.supplyAdd")}</button>
+            <span className="muted">{t("board.supplyHint")}</span>
+          </div>
+          {supplyNote && <p className="notice">{supplyNote}</p>}
+          {supplyError && <p className="error">{supplyError}</p>}
+        </div>
+      )}
 
       {canOperate && (job.status === "cancelled" || job.status === "done") && (
         <div className="row job-removal">
@@ -344,4 +481,14 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
       )}
     </aside>
   );
+}
+
+/** A non-image preview (HTML snapshot, Markdown summary): fetched with auth and
+ *  opened as a blob, because a plain link cannot carry the token. */
+function PreviewLink({ jobId, name }: { jobId: string; name: string }) {
+  const open = async () => {
+    const blob = await apiBlob(`/api/jobs/${jobId}/previews/${encodeURIComponent(name)}`);
+    window.open(URL.createObjectURL(blob), "_blank");
+  };
+  return <button className="ghost" onClick={open}>📄 {name}</button>;
 }

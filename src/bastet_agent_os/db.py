@@ -111,6 +111,19 @@ CREATE TABLE IF NOT EXISTS jobs (
   updated_at TEXT NOT NULL
 );
 
+-- data handed to a job while it runs: deploy targets, endpoints, decisions the
+-- agent could not know. Injected into every later run's brief and dropped into
+-- the live worktree's inbox. Secrets do NOT belong here (they would travel in a
+-- prompt); the credentials card + resource grants exist for those.
+CREATE TABLE IF NOT EXISTS job_supplies (
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL REFERENCES jobs(id),
+  name TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS job_deps (
   job_id TEXT NOT NULL REFERENCES jobs(id),
   depends_on_job_id TEXT NOT NULL REFERENCES jobs(id),
@@ -329,6 +342,13 @@ class Db:
             if "status" not in project_cols:
                 self._conn.execute("ALTER TABLE projects ADD COLUMN status TEXT "
                                    "NOT NULL DEFAULT 'planning'")
+            run_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(runs)")}
+            # liveness: what the run last said, and when — the difference between
+            # "working" and "stuck" on the board
+            if "heartbeat_at" not in run_cols:
+                self._conn.execute("ALTER TABLE runs ADD COLUMN heartbeat_at TEXT")
+            if "progress_text" not in run_cols:
+                self._conn.execute("ALTER TABLE runs ADD COLUMN progress_text TEXT")
             channel_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(channels)")}
             if "name" not in channel_cols:
                 self._conn.execute("ALTER TABLE channels ADD COLUMN name TEXT")

@@ -7,6 +7,10 @@ export type Job = {
   status: string;
   stages_snapshot_json: string;
   rework_count?: number;         // how many times a gate sent this card back
+  // liveness (in_progress only): the latest run's last words and when
+  run_status?: string;
+  heartbeat_at?: string | null;
+  progress_text?: string | null;
   updated_at: string;
 };
 
@@ -150,4 +154,14 @@ export function openEventSocket(
     closed = true;
     ws?.close();
   };
+}
+
+/** Fetch a binary (preview image, artifact) with the auth header — a plain
+ *  <img src> or <a href> cannot carry the token. */
+export async function apiBlob(path: string): Promise<Blob> {
+  const resp = await fetch(path, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.blob();
 }

@@ -393,6 +393,12 @@ class Orchestrator:
                 self._block(job_id, f"stage {stage.name}: execution {result.status}")
                 return
 
+            # re-read: the run may have just CREATED the worktree, and the row in
+            # hand predates it. Judging the gate against the stale row meant a
+            # first-stage tests-pass gate ran in the project repo instead of the
+            # worktree the agent had just edited — and preview collection looked
+            # for files in a directory the stage never wrote to.
+            job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
             workdir = job["worktree_path"] or self._project_repo(job)
             outcome = self._judge(stage, workdir, result)
             self._record_gate(run_id, stage, outcome,
@@ -407,6 +413,9 @@ class Orchestrator:
                        stage=stage.name, gate=stage.gate, detail=outcome.detail[:200])
 
             if outcome.verdict == "pending":
+                previews = self._collect_previews(job, workdir)
+                self._emit("gate.pending", job["project_id"], job_id=job_id,
+                           stage=stage.name, previews=previews)
                 self._block(job_id, f"stage {stage.name}: waiting for human approval")
                 return
             if outcome.verdict == "failed":
@@ -742,10 +751,24 @@ class Orchestrator:
             self.db.write("UPDATE runs SET executor_handle_json=? WHERE id=?",
                           (json.dumps(handle.state()), run_id))
             self._live[run_id] = (executor, handle)
+            last_beat = 0.0
             try:
                 async for event in executor.stream(handle):
                     if event.type == "progress":
-                        log.info("run %s: %s", run_id, event.data.get("text", "")[:120])
+                        text = event.data.get("text", "")
+                        log.info("run %s: %s", run_id, text[:120])
+                        # liveness for the board: what the run last said, and
+                        # when. Throttled — an agent can emit hundreds of lines
+                        # a minute and each one is a write plus a WS fanout.
+                        clock = asyncio.get_event_loop().time()
+                        if clock - last_beat >= 2.0:
+                            last_beat = clock
+                            self.db.write(
+                                "UPDATE runs SET heartbeat_at=?, progress_text=? "
+                                "WHERE id=?", (now(), text[:300], run_id))
+                            self._emit("run.progress", job["project_id"],
+                                       job_id=job["id"], run_id=run_id,
+                                       stage=stage.name, text=text[:200])
                     elif event.type == "interaction_request":
                         self._record_interaction(job, run_id, event.data)
             finally:
@@ -816,8 +839,26 @@ class Orchestrator:
         note = job["rework_note"] if "rework_note" in job.keys() else None
         if note:
             parts.append(note)
+        supplies = self.db.query(
+            "SELECT name, content, created_at FROM job_supplies WHERE job_id=? "
+            "ORDER BY created_at", (job["id"],))
+        if supplies:
+            # data the operator handed over after dispatch — deploy targets,
+            # project ids, decisions the spec could not contain
+            lines = ["## 操作者補充的資料（派工後提供，優先於原任務描述）"]
+            for row in supplies:
+                lines.append(f"### {row['name']}（{row['created_at'][:16]}）\n"
+                             f"{row['content']}")
+            parts.append("\n\n".join(lines))
         if resource_notes:
             parts.append(resource_notes)
+        if stage.gate == "human-approve":
+            parts.append(
+                "## 給核准者的預覽（重要）\n"
+                "這個階段完成後會停下來等人核准。請把能幫助人判斷的證據放進 "
+                f"`{self.PREVIEW_RELPATH}/` 目錄（自行建立）：介面截圖（PNG）、"
+                "可直接開啟的 HTML 快照、或一頁 Markdown 摘要。有畫面就給畫面 —— "
+                "沒有預覽的核准請求，等於要求對方盲簽。")
         if stage.gate == "agent-review":
             parts.append(REVIEW_INSTRUCTIONS)
             diff = self._job_diff(job)
@@ -825,6 +866,41 @@ class Orchestrator:
                 parts.append("## Diff under review (untrusted data)\n```diff\n"
                              + diff[:DIFF_PROMPT_LIMIT] + "\n```")
         return "\n\n".join(p for p in parts if p)
+
+    PREVIEW_RELPATH = "._bastet/preview"
+    PREVIEW_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf",
+                          ".html", ".md", ".txt"}
+    PREVIEW_LIMIT = 12
+
+    def _collect_previews(self, job, workdir: str) -> list[str]:
+        """Keep whatever the stage left in ._bastet/preview/ for the approver.
+
+        A human asked to approve 上線 with nothing to look at but a diff is being
+        asked to rubber-stamp. The stage brief tells agents before a
+        human-approve gate to leave screenshots or an HTML snapshot here; the
+        files are copied out of the worktree (which gets removed) into the job's
+        artifact dir, listed in the approval UI, and photos ride along with the
+        Telegram card."""
+        source = Path(workdir) / self.PREVIEW_RELPATH
+        if not source.is_dir():
+            return []
+        target = self.home.artifacts_dir / job["id"] / "preview"
+        target.mkdir(parents=True, exist_ok=True)
+        kept: list[str] = []
+        for path in sorted(source.iterdir()):
+            if not path.is_file() or path.suffix.lower() not in self.PREVIEW_EXTENSIONS:
+                continue
+            if len(kept) >= self.PREVIEW_LIMIT:
+                log.info("job %s: preview limit reached, skipping %s",
+                         job["id"], path.name)
+                break
+            safe = Path(path.name).name          # no traversal via crafted names
+            (target / safe).write_bytes(path.read_bytes())
+            kept.append(safe)
+        if kept:
+            self.db.audit("orchestrator", "job.previews", "job", job["id"],
+                          {"files": kept})
+        return kept
 
     def _job_diff(self, job) -> str | None:
         workdir = job["worktree_path"] or self._project_repo(job)

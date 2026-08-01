@@ -10,6 +10,7 @@ Ref schemes:
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 
@@ -146,3 +147,31 @@ def reject_secrets_in_config(config: dict) -> None:
         raise SecretError(
             f"config_json must not contain secret fields {sorted(bad)}; use secret_ref instead"
         )
+
+
+# Patterns that mean "this is credential material, not data". Used to refuse
+# putting it somewhere it would travel inside a prompt.
+_SECRET_SHAPES = (
+    ("PEM 私鑰", re.compile(r"-{5}BEGIN [A-Z0-9 ]*PRIVATE KEY-{5}")),
+    ("service account 金鑰", re.compile(r'"private_key"\s*:')),
+    ("API key", re.compile(r"\b(sk|rk|pk)-[A-Za-z0-9_-]{16,}")),
+    ("AWS access key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")),
+    ("GitLab token", re.compile(r"\bglpat-[A-Za-z0-9_-]{16,}\b")),
+    ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
+    ("Bearer token", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{24,}=*")),
+    ("Telegram bot token", re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b")),
+)
+
+
+def smells_like_secret(text: str) -> str:
+    """Name the first credential shape found in `text`, or '' if none.
+
+    A heuristic, deliberately one-sided: it exists to stop credentials being
+    pasted into places that end up in prompts (job supplies, specs). A false
+    positive costs the user a click through the proper credentials card; a false
+    negative sends a key to an LLM provider."""
+    for label, pattern in _SECRET_SHAPES:
+        if pattern.search(text or ""):
+            return label
+    return ""

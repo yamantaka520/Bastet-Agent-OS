@@ -159,6 +159,18 @@ class GrantIn(BaseModel):
     on_exceed: str = "block"
 
 
+class SettingsIn(BaseModel):
+    # PEP 563 note: request models must live at module level — FastAPI resolves
+    # the (stringified) annotation against module globals, and a class local to
+    # create_app silently degrades into a required query parameter
+    timezone: str
+
+
+class SupplyIn(BaseModel):
+    name: str
+    content: str
+
+
 class DispatchIn(BaseModel):
     project_id: str
     prompt: str
@@ -1808,11 +1820,25 @@ def create_app(home: Home) -> FastAPI:
         if not include_archived:
             clauses.append("archived=0")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        return [dict(r) for r in db.query(
+        rows = [dict(r) for r in db.query(
             "SELECT id, project_id, template_id, title, stage, status, priority, "
             "archived, rework_count, stages_snapshot_json, created_at, updated_at "
             f"FROM jobs {where} ORDER BY updated_at DESC LIMIT ?",
             (*params, limit))]
+        # liveness for the board: the latest run's heartbeat says whether an
+        # in-progress card is working or stuck — updated_at alone cannot,
+        # because a long stage legitimately goes minutes between DB writes
+        for row in rows:
+            if row["status"] != "in_progress":
+                continue
+            beat = db.one(
+                "SELECT status, heartbeat_at, progress_text, started_at FROM runs "
+                "WHERE job_id=? ORDER BY rowid DESC LIMIT 1", (row["id"],))
+            if beat is not None:
+                row["run_status"] = beat["status"]
+                row["heartbeat_at"] = beat["heartbeat_at"] or beat["started_at"]
+                row["progress_text"] = beat["progress_text"]
+        return rows
 
     @app.get("/api/jobs/{job_id}", dependencies=[Depends(require_role("viewer"))])
     def get_job(job_id: str):
@@ -1830,6 +1856,94 @@ def create_app(home: Home) -> FastAPI:
             "SELECT g.* FROM gate_results g JOIN runs r ON r.id=g.run_id "
             "WHERE r.job_id=? ORDER BY g.at", (job_id,))]
         return job
+
+    @app.post("/api/jobs/{job_id}/supplies")
+    def add_supply(job_id: str, body: SupplyIn,
+                   auth: Auth = Depends(require_role("operator"))):
+        """Hand data to a job after dispatch — a deploy target, a project id, a
+        decision the spec could not contain. It reaches the agents two ways:
+        every later run's brief carries it, and if a worktree is live it is also
+        dropped into `._bastet/inbox/` for the current run to pick up.
+
+        Secrets are refused: a supply travels inside a prompt, which means it
+        travels to the LLM provider. Credentials belong on the Admin card, where
+        they arrive as env vars and never enter a prompt."""
+        job = db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job["status"] in ("done", "cancelled"):
+            raise HTTPException(status_code=409,
+                                detail=f"任務已{job['status']}，補給沒有對象了 — "
+                                       f"需要的話請重試或重新派工再提供")
+        if not body.name.strip() or not body.content.strip():
+            raise HTTPException(status_code=400, detail="名稱與內容都要填")
+        looks_secret = secrets_store.smells_like_secret(body.content)
+        if looks_secret:
+            raise HTTPException(
+                status_code=400,
+                detail=f"內容看起來是機敏資料（{looks_secret}）。補給會進入 prompt "
+                       f"送到 LLM 供應商 —— 請改用「管理 → 憑證」建立後掛到專案資源，"
+                       f"它會以環境變數交給 agent，不經過 prompt。")
+        supply_id = new_id("sup")
+        db.write("INSERT INTO job_supplies(id, job_id, name, content, created_by, "
+                 "created_at) VALUES(?,?,?,?,?,?)",
+                 (supply_id, job_id, body.name.strip(), body.content.strip(),
+                  auth.actor, now()))
+        db.audit(auth.actor, "job.supply", "job", job_id,
+                 {"name": body.name.strip(), "chars": len(body.content)})
+        # best effort for the run that is already going: an inbox file in the
+        # worktree. The brief tells agents to check it; a -p CLI that never
+        # looks still gets the supply on its next stage.
+        delivered_live = False
+        if job["worktree_path"] and Path(job["worktree_path"]).is_dir():
+            inbox = Path(job["worktree_path"]) / "._bastet" / "inbox"
+            inbox.mkdir(parents=True, exist_ok=True)
+            safe = "".join(c if c.isalnum() or c in "-_" else "-"
+                           for c in body.name.strip())[:60] or "supply"
+            (inbox / f"{supply_id}-{safe}.md").write_text(
+                f"# {body.name.strip()}\n\n{body.content.strip()}\n")
+            delivered_live = True
+        bus.emit("job.supplied", project_id=job["project_id"], job_id=job_id,
+                 name=body.name.strip())
+        return {"id": supply_id, "delivered_to_live_worktree": delivered_live}
+
+    @app.get("/api/jobs/{job_id}/supplies",
+             dependencies=[Depends(require_role("viewer"))])
+    def list_supplies(job_id: str):
+        return [dict(r) for r in db.query(
+            "SELECT id, name, content, created_by, created_at FROM job_supplies "
+            "WHERE job_id=? ORDER BY created_at", (job_id,))]
+
+    @app.delete("/api/jobs/{job_id}/supplies/{supply_id}")
+    def delete_supply(job_id: str, supply_id: str,
+                      auth: Auth = Depends(require_role("operator"))):
+        gone = db.write("DELETE FROM job_supplies WHERE id=? AND job_id=?",
+                        (supply_id, job_id)).rowcount
+        if not gone:
+            raise HTTPException(status_code=404, detail="supply not found")
+        db.audit(auth.actor, "job.supply_removed", "job", job_id,
+                 {"supply": supply_id})
+        return {"deleted": supply_id}
+
+    # ---- previews for human approval -----------------------------------------
+
+    @app.get("/api/jobs/{job_id}/previews",
+             dependencies=[Depends(require_role("viewer"))])
+    def list_previews(job_id: str):
+        folder = home.artifacts_dir / job_id / "preview"
+        if not folder.is_dir():
+            return []
+        return sorted(p.name for p in folder.iterdir() if p.is_file())
+
+    @app.get("/api/jobs/{job_id}/previews/{name}",
+             dependencies=[Depends(require_role("viewer"))])
+    def get_preview(job_id: str, name: str):
+        from fastapi.responses import FileResponse
+        safe = Path(name).name                     # no traversal
+        path = home.artifacts_dir / job_id / "preview" / safe
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="preview not found")
+        return FileResponse(str(path), filename=safe)
 
     @app.post("/api/jobs/{job_id}/retry")
     async def retry_job(job_id: str, body: RetryIn,
@@ -1899,6 +2013,32 @@ def create_app(home: Home) -> FastAPI:
             f"FROM runs r JOIN jobs j ON j.id = r.job_id {where} "
             "GROUP BY j.project_id, r.agent_id, r.accounting_precision", params)
         return [dict(r) for r in rows]
+
+    # ---- system settings (timezone first) -----------------------------------
+
+    @app.get("/api/settings", dependencies=[Depends(require_role("viewer"))])
+    def get_settings():
+        """Installation-level settings the UI needs. Storage stays UTC — an
+        audit trail in local time cannot be compared across machines — and the
+        timezone here only decides how the browser renders timestamps."""
+        from . import settings as settings_mod
+        return settings_mod.public(home.config())
+
+    @app.put("/api/settings")
+    def put_settings(body: SettingsIn,
+                     auth: Auth = Depends(require_role("admin"))):
+        from . import settings as settings_mod
+        if not settings_mod.valid_timezone(body.timezone):
+            raise HTTPException(status_code=400,
+                                detail=f"未知的時區：{body.timezone}（要 IANA 名稱，"
+                                       f"例如 Asia/Taipei）")
+        config = home.config()
+        previous = config.get("timezone") or "UTC"
+        config["timezone"] = body.timezone
+        home.save_config(config)
+        db.audit(auth.actor, "settings.timezone", "settings", "timezone",
+                 {"from": previous, "to": body.timezone})
+        return settings_mod.public(config)
 
     @app.get("/api/audit", dependencies=[Depends(require_role("viewer"))])
     def audit_log(limit: int = 100, q: str = "", action: str = "", actor: str = "",

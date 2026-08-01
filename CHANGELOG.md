@@ -8,6 +8,65 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.19.0] - 2026-08-02
+
+### Added — a display timezone, as a system setting
+Every timestamp rendered as UTC. The Admin tab gains a 系統設定 card: pick a
+timezone (common list + any IANA name, with one-click "use the host's zone") and
+every timestamp in the UI renders in it immediately, for every user. Storage
+stays UTC — an audit trail in local time cannot be compared across machines —
+and the five hand-rolled time renderings were replaced by one formatter, so the
+next fix to time display is one edit.
+
+### Added — the board shows that work is happening
+An in-progress card carries a stage progress bar (n of m stages) and a
+heartbeat: the run's last output line and how long ago — 🟢 while fresh, 🟠
+after three silent minutes with a "possibly stuck" hint. Runs persist a
+throttled heartbeat (`heartbeat_at`, `progress_text`) and emit `run.progress`
+on the bus. `updated_at` could not tell working from stuck, because a long
+stage legitimately goes minutes between DB writes.
+
+### Added — 任務補給: handing data to a running job
+The Firebase case: mid-project, the agent needs a deploy target or a project id
+that the spec never contained, and there was nowhere to put it. The job drawer
+gains a supplies box: what you provide is included in every later run's brief
+(marked as overriding the original spec), and a live worktree also receives it
+as a `._bastet/inbox/` file. Credential-shaped content is refused with a pointer
+to the credentials card — a supply travels inside a prompt, and prompts go to
+LLM providers; credentials arrive as env vars and never do. Interaction requests
+(`run.waiting_input`) also take an optional free-text message with allow/deny.
+
+### Added — previews for human approval
+A human asked to approve 上線 with nothing but a diff is being asked to
+rubber-stamp. The brief for a human-approve stage now instructs the agent to
+leave evidence in `._bastet/preview/` (screenshots, an HTML snapshot, a Markdown
+summary); Bastet copies it out before the worktree is removed, shows images
+inline in the approval panel, and sends them as photos with the Telegram
+approval card — which keeps its inline Approve/Reject buttons. A gate with no
+preview says so instead of presenting a bare diff as if that were normal.
+
+### Added — PyPI package and a Docker image
+`pip install bastet-agent-os` — the wheel carries the built WebUI, so no Node on
+the host. `yamantaka520/bastet-agent-os` on Docker Hub: control plane, gateway,
+WebUI and bastet-lite in a container (non-root, healthcheck, state in a `/data`
+volume); the vendor CLIs stay out of the image deliberately, because their
+interactive logins and credentials belong to you, not to a public image. A
+release workflow publishes both on every version tag (PyPI via Trusted
+Publishing).
+
+### Fixed — first-stage gates judged the wrong directory
+Found by the preview tests: the gate and preview collection used a job row read
+*before* the run created its worktree, so a first-stage `tests-pass` gate
+evaluated in the project repo instead of the worktree the agent had just edited.
+The row is re-read after the run.
+
+### Fixed — request models must live at module level
+`PUT /api/settings` returned 422 with the body treated as a query parameter:
+under `from __future__ import annotations`, FastAPI resolves the stringified
+annotation against module globals, and a Pydantic model defined inside
+`create_app` silently degrades. Both new models moved out, with a comment that
+says why.
+
 ## [0.18.4] - 2026-08-01
 
 ### Fixed — a big tool result killed the run

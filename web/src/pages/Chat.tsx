@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, del, post, put, getToken } from "../api";
 import { useT, type T } from "../i18n";
-import { Section, onEnterSubmit, useList } from "../ui";
+import { Section, onEnterSubmit, useList, fmtTime } from "../ui";
 
 /** The human end of the loop: plan a project by talking about it, hand over
  *  files, then dispatch or authorise from the same place. Sessions are bound to
@@ -298,7 +298,7 @@ function Conversation({ sessionId, agents, responders, canOperate, refreshKey,
               <b>{m.role === "user" ? t("chat.you")
                   : m.role === "system" ? t("chat.system")
                   : responderLabel?.label ?? m.author}</b>
-              <span className="card-meta">{(m.at || "").replace("T", " ").slice(0, 19)}
+              <span className="card-meta">{fmtTime(m.at, { seconds: true })}
                 {typeof m.meta.tokens_in === "number" && (m.meta.tokens_in as number) > 0
                   ? ` · ${t("chat.usage", {
                       tokens: (m.meta.tokens_in as number)
