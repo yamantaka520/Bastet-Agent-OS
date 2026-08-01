@@ -115,3 +115,28 @@ def test_host_parsing_handles_both_url_shapes():
     assert git_push._host_of("git@gitlab.com:meow/catswalker.git") == "gitlab.com"
     assert git_push._host_of("https://github.com/yamantaka520/x.git") == "github.com"
     assert git_push._host_of("/local/path.git") == ""
+
+
+async def test_a_job_approved_into_done_also_pushes(orch, seeded, repo, origin):
+    """Live gap: the art card finished through approve() — the human gate was
+    the last stage — and never pushed, with no audit row of any kind. Both
+    completion paths must deliver."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "auto"},
+        {"name": "ship", "gate": "human-approve"},
+    ])
+    SCRIPT.append(fixes("feature.txt"))
+    SCRIPT.append(RunResult(status="succeeded", summary="ready"))
+
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True))
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] \
+        == "blocked"                                # waiting at the human gate
+
+    orch.approve(job_id, True, comment="looks good", user="manfred")
+
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] \
+        == "done"
+    assert f"bastet/{job_id}" in branch_tips(origin)
+    assert seeded.one("SELECT 1 AS x FROM audit_log WHERE action='job.pushed'") \
+        is not None

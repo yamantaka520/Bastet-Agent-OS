@@ -8,6 +8,15 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.21.3] - 2026-08-02
+
+### Fixed — a job approved into done never pushed
+Auto-push (and the done audit row, the finished-memory write, and the job.done
+event) hung off the driver loop's completion branch only. A job whose LAST stage
+is human-approve completes through `approve()` instead — the live art card did
+exactly that, and its 52 freshly generated PNGs stayed local with no audit row
+of any kind. Both completion paths now deliver identically.
+
 ## [0.21.2] - 2026-08-02
 
 ### Fixed — the second way the art card got stuck

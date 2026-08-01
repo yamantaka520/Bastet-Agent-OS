@@ -577,7 +577,19 @@ class Orchestrator:
         if idx + 1 >= len(stages):
             self.db.write("UPDATE jobs SET status='done', updated_at=? WHERE id=?",
                           (now(), job_id))
+            self.db.audit("orchestrator", "job.done", "job", job_id,
+                          {"via": "approve"})
+            run_memory.job_finished(self.db, job, "done")
+            self._emit("job.done", job["project_id"], job_id=job_id)
             self.cleanup_worktree(job_id)
+            # a job approved into done deserves the same delivery as one that
+            # finishes in the driver loop — the live art card completed via this
+            # path and never pushed, silently (no audit row of any kind)
+            try:
+                from . import git_push
+                git_push.push_job_branch(self.db, job, emit=self._emit)
+            except Exception as exc:
+                log.warning("job %s: auto-push crashed: %r", job_id, exc)
             self._sync_project(job["project_id"])
             return {"job_id": job_id, "status": "done"}
         self.db.write("UPDATE jobs SET stage=?, status='in_progress', updated_at=? WHERE id=?",
