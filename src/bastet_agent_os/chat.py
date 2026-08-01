@@ -499,20 +499,32 @@ async def _reply_resource(db, session, history, responder) -> tuple[str, dict]:
 
 
 async def _reply_agent(db, home_root, session, history, responder) -> tuple[str, dict]:
-    """The agent's own executor answers: same account, same model, and it can
-    read the project's repo — a read-only run with the transcript as its task."""
+    """The agent's own executor answers: same account, same model, with the
+    project's repo in view and the project's granted resources callable.
+
+    Tools are deliberately NOT the file-editing set: Read/Grep/Glob for the
+    repo, WebFetch/WebSearch for docs, and Bash so granted APIs (a TTS voice, an
+    image model) can actually be invoked from the conversation — the first live
+    attempt had the credentials wired and no way to use them, so the agent
+    truthfully said it had no credential. Bash means the responder can act on
+    the host; chat.send is an operator permission, and the resources it can
+    reach are exactly the ones the project granted."""
     from .executors.base import TaskSpec, get_executor
 
     agent = db.one("SELECT * FROM agents WHERE id=?", (responder.id,))
     workdir = str(home_root)
+    project_id = team_id = ""
     if session["scope_type"] == "project":
-        project = db.one("SELECT repo_path FROM projects WHERE id=?",
+        project = db.one("SELECT repo_path, team_id FROM projects WHERE id=?",
                          (session["scope_id"],))
-        if project is not None and project["repo_path"]:
-            from .config import expand_repo_path
-            candidate = Path(expand_repo_path(project["repo_path"]))
-            if candidate.is_dir():
-                workdir = str(candidate)
+        if project is not None:
+            project_id = session["scope_id"]
+            team_id = project["team_id"] or ""
+            if project["repo_path"]:
+                from .config import expand_repo_path
+                candidate = Path(expand_repo_path(project["repo_path"]))
+                if candidate.is_dir():
+                    workdir = str(candidate)
 
     transcript = "\n\n".join(
         f"### {m['role']}\n{m['content']}"
@@ -528,22 +540,50 @@ async def _reply_agent(db, home_root, session, history, responder) -> tuple[str,
         if account is not None:
             extra_env = account_env(agent["executor_type"], account["home_dir"])
 
+    # granted resources reach the conversation the same way they reach a run:
+    # env vars + MCP config + a manifest in the prompt
+    chat_run_id = new_id("chat")
+    access = None
+    resource_note = ""
+    if project_id:
+        from . import resource_access
+        try:
+            access = resource_access.build(db, home_root, project_id, team_id,
+                                           chat_run_id,
+                                           audit_actor=f"chat:{session['id']}")
+            extra_env.update(access.env)
+            resource_note = access.notes or ""
+        except Exception as exc:          # resources are a bonus, not the chat
+            log.warning("chat resource access failed: %r", exc)
+
     spec = TaskSpec(
-        run_id=new_id("chat"),
-        prompt=f"{system_prompt(db, session)}\n\n## 對話紀錄\n{transcript}\n\n"
+        run_id=chat_run_id,
+        prompt=f"{system_prompt(db, session)}\n\n"
+               + (f"{resource_note}\n\n" if resource_note else "")
+               + f"## 對話紀錄\n{transcript}\n\n"
                f"請以繁體中文（或使用者的語言）回覆最後一則訊息。只輸出回覆內容。",
         workdir=workdir,
         timeout_s=CHAT_TIMEOUT_S,
-        read_only=True,            # chat never writes: it is a conversation
+        # not read_only: that flag forces the reviewer tool set. The chat set
+        # excludes Edit/Write (a conversation should not edit the repo) but
+        # includes Bash — the only way a granted API is actually callable.
+        read_only=False,
+        allowed_tools=["Read", "Grep", "Glob", "WebFetch", "WebSearch", "Bash"],
         llm={"model": agent_cfg.get("model")} if agent_cfg.get("model") else None,
         extra_env=extra_env,
+        mcp_config=access.mcp_config_path if access else None,
         isolation="chat",          # not a run: no worktree, no container wrap
     )
     executor = get_executor(agent["executor_type"])
-    handle = await executor.start(spec)
-    async for _ in executor.stream(handle):
-        pass
-    result = await executor.result(handle)
+    try:
+        handle = await executor.start(spec)
+        async for _ in executor.stream(handle):
+            pass
+        result = await executor.result(handle)
+    finally:
+        if access is not None:            # the MCP file holds resolved secrets
+            from . import resource_access
+            resource_access.cleanup(home_root, chat_run_id)
     if result.status != "succeeded" and not result.summary:
         raise ChatError(f"agent run {result.status} with no output")
     meta = {"responder": "agent", "agent_id": responder.id,

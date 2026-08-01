@@ -8,6 +8,33 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.20.2] - 2026-08-02
+
+### Fixed — the chat agent had the credential and no way to use it
+The Novita case, part two. The resource had `NOVITA_API_KEY` wired, but a chat
+responder run never built resource access at all: no env vars, no MCP config,
+no manifest — and its tool set had neither Bash nor a web tool, so even a wired
+credential would have been uninvokable. The agent truthfully said it had no
+credential.
+
+A project-scoped chat now hands the responder exactly what a workflow run gets:
+`BASTET_RES_<NAME>_URL/_KEY/…` env vars, the MCP config, and the resource
+manifest in its prompt. Its tool set is Read/Grep/Glob/WebFetch/WebSearch/Bash —
+no Edit/Write (a conversation should not edit the repo), but Bash so a granted
+API is actually callable from the conversation. The secret-bearing access dir is
+removed when the reply finishes, same as a run.
+
+### Fixed — `auth_header` as a full header line crashed every probe
+The field means "header name" (`X-API-Key`), but an agent reading vendor docs
+naturally writes the whole line — `Authorization: Bearer {API_KEY}` — and the
+live Novita setup did exactly that, so both resources' test buttons failed with
+`Illegal header name`, which reads as "our test connector is broken". Both
+shapes are legitimate input now, normalised in one place (`auth_header_pair`)
+and used by the test probe and the MCP header path alike: placeholders
+(`{API_KEY}`, `{TOKEN}`, …) are substituted with the resolved credential, a bare
+`Authorization` still gets its `Bearer` prefix. The config guide documents both
+shapes.
+
 ## [0.20.1] - 2026-08-02
 
 ### Fixed — WebFetch / WebSearch were not permitted

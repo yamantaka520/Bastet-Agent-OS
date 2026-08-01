@@ -198,9 +198,9 @@ def _mcp_server(row, config: dict[str, Any], secret: str | None) -> dict[str, An
             return None
         server: dict[str, Any] = {"type": "http", "url": url}
         if secret:
-            header = config.get("auth_header") or "Authorization"
-            value = secret if secret.lower().startswith("bearer ") else f"Bearer {secret}"
-            server["headers"] = {header: value}
+            from . import resource_kinds as rk
+            name, value = rk.auth_header_pair(config, secret)
+            server["headers"] = {name: value}
         return server
     command = (config.get("mcp_command") or "").strip()
     if not command:

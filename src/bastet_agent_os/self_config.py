@@ -102,6 +102,11 @@ def guide_markdown() -> str:
                      f"{auth_text.get(kind.get('auth'), '')}")
     lines += [
         "",
+        "### auth_header 的寫法",
+        "接受兩種形態，系統會自動正規化：只寫名稱（`X-API-Key`、`Authorization`）",
+        "或完整一行含占位符（`Authorization: Bearer {API_KEY}`）。實際金鑰由",
+        "secret_ref 指向的憑證在使用時代入，永遠不要把金鑰寫進 auth_header。",
+        "",
         "### SKILL 的安裝",
         "skill 資源可帶 `install_command`（config 內）。流程：提案建立 → 人套用 → ",
         "人到「資源」頁按「安裝」（admin 權限、完整輸出回傳、有稽核）。安裝指令",

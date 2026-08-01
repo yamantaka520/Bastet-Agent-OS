@@ -189,10 +189,9 @@ def _test_http_endpoint(row, config: dict[str, Any], secret: str | None) -> dict
                 "detail": "no endpoint configured"}
     headers: dict[str, str] = {}
     if secret:
-        header = config.get("auth_header") or "Authorization"
-        headers[header] = (secret if header != "Authorization"
-                           or secret.lower().startswith("bearer ")
-                           else f"Bearer {secret}")
+        from . import resource_kinds as rk
+        name, value = rk.auth_header_pair(config, secret)
+        headers[name] = value
     result = _get(base, headers)
     result["checked"] = f"GET {base}"
     return result

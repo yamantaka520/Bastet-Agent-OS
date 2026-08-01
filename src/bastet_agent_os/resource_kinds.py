@@ -129,3 +129,34 @@ def validate(kind: str, endpoint: str | None, secret_ref: str | None,
         if url.startswith(("http://", "https://")) and "ssh" in (secret_ref or "").lower():
             problems.append("git-https-with-ssh-key")
     return problems
+
+
+def auth_header_pair(config: dict[str, Any], secret: str) -> tuple[str, str]:
+    """(header name, header value) from whatever shape `auth_header` is in.
+
+    The field means "header name" (`X-API-Key`), but agents reading vendor docs
+    naturally write the whole line — `Authorization: Bearer {API_KEY}` — and the
+    first live Novita setup did exactly that. Consuming it verbatim as a *name*
+    crashed every probe with `Illegal header name`. Both shapes are legitimate
+    input; this is the one place that understands them:
+
+      "X-API-Key"                        -> ("X-API-Key", secret)
+      "Authorization"                    -> ("Authorization", "Bearer <secret>")
+      "Authorization: Bearer {API_KEY}"  -> ("Authorization", "Bearer <secret>")
+    """
+    raw = (config.get("auth_header") or "Authorization").strip()
+    if ":" in raw:
+        name, _, template = raw.partition(":")
+        name = name.strip()
+        template = template.strip()
+        value = template
+        for placeholder in ("{API_KEY}", "{KEY}", "{TOKEN}", "{SECRET}",
+                            "{api_key}", "{key}", "{token}", "{secret}"):
+            value = value.replace(placeholder, secret)
+        if value == template and secret not in value:
+            # a line with no placeholder: treat the template as a prefix
+            value = f"{template} {secret}".strip()
+        return name, value
+    if raw.lower() == "authorization" and not secret.lower().startswith("bearer "):
+        return raw, f"Bearer {secret}"
+    return raw, secret
