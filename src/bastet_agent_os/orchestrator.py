@@ -863,8 +863,13 @@ class Orchestrator:
                 "**下載成 worktree 裡的實體檔案**，放到專案慣用的資產目錄"
                 "（assets/、public/、或任務指定的路徑）。廠商回傳的下載 URL 有"
                 "時效，過期就什麼都不剩；工作流會把 worktree 的檔案 commit 到任務"
-                "分支並推到遠端 —— 只有真的存在的檔案會被保存。非同步生成請在本"
-                "階段內輪詢到完成再下載；等不到就明說，不要留一個會過期的連結。")
+                "分支並推到遠端 —— 只有真的存在的檔案會被保存。\n"
+                "**絕對不要把生成丟到背景然後結束回合**：這是一次性的 headless "
+                "執行，你結束的瞬間所有子行程一併回收，沒有任何『完成通知』會送達"
+                "—— 曾有任務因此空轉三輪（每輪都啟動管線、退場、什麼都沒留下）。"
+                "正確做法是**前景等待**：迴圈裡輪詢（sleep 後檢查檔案是否落地），"
+                "直到所有目標檔案存在、驗證通過才結束。生成很多張就分批，每批等完"
+                "再下一批；時間真的不夠就先完成一部分並明說做到哪，讓下一輪接續。")
         # a card that was sent back carries WHY, verbatim — the agent cannot fix
         # what it cannot see, and this is the difference between a loop that
         # converges and one that repeats the same run

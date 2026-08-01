@@ -8,6 +8,22 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.21.2] - 2026-08-02
+
+### Fixed — the second way the art card got stuck
+After the DNS blip cleared and the retry refilled the budget, the card stalled a
+new way: the agent kicked its generation pipeline into the **background** and
+ended its run — "the background task will notify me when it finishes". It
+cannot: a headless run is one-shot, its children are reaped the moment it ends,
+and no notification ever arrives. Three cycles of start-pipeline-and-exit, each
+honestly rejected by the reviewer over empty asset directories.
+
+The media brief now states this bluntly, with the incident in it: never
+background the generation and end the turn; poll in the foreground (sleep +
+check files) until the assets exist, batch when there are many, and if time
+truly runs out, finish part of the set and say exactly where you stopped so the
+next cycle continues.
+
 ## [0.21.1] - 2026-08-02
 
 ### Fixed — a human retry refills the rework budget

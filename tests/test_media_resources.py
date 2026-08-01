@@ -196,3 +196,7 @@ async def test_media_stages_are_told_to_persist_assets(orch, seeded, monkeypatch
 
     assert "生成資產的保存" in seen[0]
     assert "下載成 worktree 裡的實體檔案" in seen[0]
+    # the rule that came from a real three-cycle stall: the agent backgrounded
+    # the pipeline and waited for a notification that can never arrive
+    assert "不要把生成丟到背景" in seen[0]
+    assert "前景等待" in seen[0]
