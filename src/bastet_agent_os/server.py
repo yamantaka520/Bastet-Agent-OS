@@ -159,6 +159,10 @@ class GrantIn(BaseModel):
     on_exceed: str = "block"
 
 
+class ConfigApplyIn(BaseModel):
+    actions: list[dict]
+
+
 class SettingsIn(BaseModel):
     # PEP 563 note: request models must live at module level — FastAPI resolves
     # the (stringified) annotation against module globals, and a class local to
@@ -1140,6 +1144,14 @@ def create_app(home: Home) -> FastAPI:
     from . import project_runner as runner_mod
 
     app.state.project_runner = runner_mod.ProjectRunner(db, orch, bus)
+    # the self-configuration skill: the guide file tracks the code, so it is
+    # rewritten on every boot; the pool resource is created once
+    from . import self_config as self_config_mod
+    try:
+        self_config_mod.seed_skill(db, home.root)
+    except Exception as exc:                     # a broken seed must not stop serve
+        log.warning("bastet-config skill seed failed: %r", exc)
+
     # reconcile/resume happens in the lifespan, where there is a running loop
     for healed in lifecycle_mod.reconcile_all(db):
         log.info("project %s reconciled at startup: %s", healed["project"], healed)
@@ -2039,6 +2051,17 @@ def create_app(home: Home) -> FastAPI:
         db.audit(auth.actor, "settings.timezone", "settings", "timezone",
                  {"from": previous, "to": body.timezone})
         return settings_mod.public(config)
+
+    @app.post("/api/config/apply")
+    def config_apply(body: ConfigApplyIn,
+                     auth: Auth = Depends(require_role("admin"))):
+        """Apply a chat-proposed configuration. The model proposed; the human
+        pressing this is the authority, and the audit rows carry their name."""
+        from . import self_config as self_config_mod
+        results = self_config_mod.apply(db, home.root, body.actions, auth.actor)
+        return {"results": results,
+                "ok": sum(1 for r in results if r["status"] == "ok"),
+                "failed": sum(1 for r in results if r["status"] != "ok")}
 
     @app.get("/api/audit", dependencies=[Depends(require_role("viewer"))])
     def audit_log(limit: int = 100, q: str = "", action: str = "", actor: str = "",

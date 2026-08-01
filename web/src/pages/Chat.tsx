@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, del, post, put, getToken } from "../api";
 import { useT, type T } from "../i18n";
 import { Section, onEnterSubmit, useList, fmtTime } from "../ui";
@@ -307,6 +307,9 @@ function Conversation({ sessionId, agents, responders, canOperate, refreshKey,
                   : ""}</span>
             </div>
             <div className="chat-msg-body">{m.content}</div>
+            {m.role === "assistant" && canOperate && (
+              <ConfigProposal content={m.content} t={t} />
+            )}
             {!!m.attachments.length && (
               <div className="chat-files">
                 {m.attachments.map((a) => (
@@ -444,6 +447,78 @@ function Composer({ busy, onSend, onUpload, onTypingChange, t }: {
         <button onClick={submit} disabled={busy || (!draft.trim() && !files.length)}>
           {busy ? t("chat.thinking") : t("c.send")}</button>
       </div>
+    </div>
+  );
+}
+
+/** A ```bastet-config``` block in an assistant reply is a configuration
+ *  PROPOSAL. This card is the human half: it lists the actions in plain terms
+ *  and the button is the authority — the audit rows name whoever clicks. */
+function ConfigProposal({ content, t }: { content: string; t: T }) {
+  const [results, setResults] = useState<{ op: string; status: string;
+    detail: string }[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const actions = useMemo(() => {
+    const marker = "```bastet-config";
+    if (!content.includes(marker)) return null;
+    const chunk = content.split(marker).pop() ?? "";
+    if (!chunk.includes("```")) return null;
+    try {
+      const data = JSON.parse(chunk.split("```")[0].trim());
+      return Array.isArray(data.actions) && data.actions.length
+        ? data.actions as Record<string, string>[] : null;
+    } catch { return null; }
+  }, [content]);
+  if (!actions) return null;
+
+  const describe = (a: Record<string, string>) => {
+    if (a.op === "resource.create") return t("chat.cfgCreate", {
+      kind: a.kind ?? "?", name: a.name ?? "?" });
+    if (a.op === "resource.update") return t("chat.cfgUpdate", {
+      name: a.name ?? a.id ?? "?" });
+    if (a.op === "grant.create") return t("chat.cfgGrant", {
+      resource: a.resource ?? "?",
+      scope: `${a.scope_type ?? "?"}:${a.scope_id ?? "*"}` });
+    if (a.op === "settings.timezone") return t("chat.cfgTimezone", {
+      zone: a.timezone ?? "?" });
+    return a.op ?? "?";
+  };
+
+  const applyAll = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const out = await post<{ results: typeof results }>(
+        "/api/config/apply", { actions });
+      setResults(out.results);
+    } catch (e) { setError(String((e as Error).message)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="config-proposal">
+      <b>⚙ {t("chat.cfgTitle", { n: actions.length })}</b>
+      <ul>
+        {actions.map((a, i) => (
+          <li key={i}>
+            {describe(a)}
+            {results?.[i] && (
+              <span className={results[i].status === "ok" ? "notice" : "error"}>
+                {" "}{results[i].status === "ok" ? "✅" : "❌"} {results[i].detail}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {!results && (
+        <button disabled={busy} onClick={applyAll}>
+          {busy ? t("chat.cfgApplying") : t("chat.cfgApply")}</button>
+      )}
+      {results && <span className="muted">{t("chat.cfgDone")}</span>}
+      {error && <p className="error">{error}</p>}
+      <p className="muted">{t("chat.cfgHint")}</p>
     </div>
   );
 }

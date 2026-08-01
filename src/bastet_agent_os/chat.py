@@ -274,6 +274,8 @@ def system_prompt(db, session) -> str:
                  "- 使用者說「派工/開始執行」時，回覆一份可直接送出的任務規格；"
                  "實際派工與批准由使用者在介面上按下確認，你不會自己執行\n"
                  "誠實優先：不確定就說不確定，不要編造專案內容或檔案。")
+    from .self_config import PROMPT_NOTE
+    parts.append(PROMPT_NOTE.strip())
     return "\n\n".join(parts)
 
 

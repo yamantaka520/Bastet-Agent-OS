@@ -8,6 +8,46 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.20.0] - 2026-08-02
+
+### Fixed — model pickers that were stale the day a vendor shipped
+The executor model lists were curated once and wrong already: grok's entire
+lineup had turned over (the CLI itself now offers only `grok-4.5`), and claude
+gained the `fable` alias. Three changes so this cannot rot again the same way:
+the Claude lists carry the current aliases and full ids (fable/opus/sonnet/haiku,
+claude-fable-5 …); `grok models` is asked **live** and the curated entry is only
+the fallback; and every model field is now free-entry with suggestions
+(datalist) instead of a closed dropdown — any model id a vendor ships tomorrow
+is usable the same day.
+
+### Added — Bastet configures Bastet, from the conversation
+A built-in `bastet-config` **skill** (globally granted, regenerated each boot)
+documents Bastet's own configuration: every resource kind — including the
+multimedia ones (image / video / music / tts / stt) — its fields, how
+credentials travel, scopes, and an action protocol. A chat responder asked to
+"set up an ElevenLabs TTS resource" reads it like any other skill and ends its
+reply with a fenced ```bastet-config``` proposal block.
+
+The chat renders that block as a card. **The model proposes; the human
+applies**: nothing happens until the 套用 button, the audit rows name the person
+who pressed it (`via: "chat"`), and per-action results mean one typo doesn't
+void four good actions. The whitelist is deliberately small — resources, grants,
+timezone. Users, tokens and channels are *not* in it: anything that changes who
+can act is not configuration, and a prompt-injected "add an admin" must find
+nothing here to call. Raw keys in a proposal are refused outright (they already
+travelled through the model); `secret:<id>` pointers only.
+
+### Added — finished work pushes itself to the project's remote
+When a job walks its whole pipeline — tests green, reviews approved, human gates
+passed — its `bastet/<job_id>` branch is pushed to the project's remote:
+`origin` if the repo has one, else a granted git resource's URL. Credentials
+come from the project's git resources (deploy key via `GIT_SSH_COMMAND`, or a
+token in an env-provided header — never argv, never the URL). The project's own
+branch is **never** pushed: parking work somewhere reviewable is automation,
+merging it is a decision. Per-project opt-out (`git_auto_push: false`); an
+unchanged branch (read-only stages) is not pushed; a failed push is audited and
+non-fatal — the job is done and the work is safe locally.
+
 ## [0.19.0] - 2026-08-02
 
 ### Added — a display timezone, as a system setting

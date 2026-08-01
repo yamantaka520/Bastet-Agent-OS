@@ -66,6 +66,13 @@ with allow/deny.
 
 ### 對話 (Chat)
 
+**Configuring Bastet from the conversation**: ask for a resource ("幫我接上
+ElevenLabs 的 TTS") and the responder reads the built-in `bastet-config` skill
+and replies with a proposal card — the listed actions apply when *you* press
+套用, the audit names you, and raw keys are refused (`secret:<id>` pointers
+only; credentials still come from the Admin card). Users, tokens and channels
+are deliberately outside this protocol.
+
 Pick who answers — an agent (its own executor and account, read-only, with the
 project's repo in view) or a pool LLM — and a scope: project, team, global.
 Project scope puts real state in the prompt: description, repo, workflow, roles,
@@ -94,6 +101,11 @@ Each card carries the light, progress, and the controls that its state allows:
 | ⏸ 暫停 | stop the *next* dispatch; the current task finishes |
 | ■ 停止 | cancel what is in flight |
 | 結案 / 重啟 | close, or reopen a closed project |
+
+When a job finishes its pipeline, its `bastet/<job_id>` branch is **pushed to
+the project's remote** automatically (origin, or a granted git resource), using
+the project's git credentials. Your own branch is never pushed; opt out with
+`git_auto_push: false` in the project config.
 | 刪除 | remove the project (admin only) — see below |
 
 Expanded, a card shows the task plan (with provenance: which conversation it came

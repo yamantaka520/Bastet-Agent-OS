@@ -206,7 +206,7 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
         name: (document.getElementById(`edit-name-${agentId}`) as HTMLInputElement).value,
         executor_type: (document.getElementById(`edit-exec-${agentId}`) as HTMLSelectElement).value,
         account_id: (document.getElementById(`edit-acct-${agentId}`) as HTMLSelectElement).value,
-        model: (document.getElementById(`edit-model-${agentId}`) as HTMLSelectElement).value,
+        model: (document.getElementById(`edit-model-${agentId}`) as HTMLInputElement).value,
       });
       setEditing(null);
       reloadAgents();
@@ -270,12 +270,19 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
                 ))}
               </select>
             )}
-            {(selected?.models.length ?? 0) > 0 && (
-              <select value={form.model}
-                      onChange={(e) => setForm({ ...form, model: e.target.value })}>
-                <option value="">{t("org.modelDefault")}</option>
-                {selected!.models.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
+            {selected && selected.kind !== "bastet-lite" && (
+              /* free entry with suggestions: a closed dropdown is stale the day
+                 the vendor ships a model, and "the new one isn't listed" was a
+                 real complaint. grok's list is even detected live from the CLI. */
+              <>
+                <input list={`models-${selected.kind}`} value={form.model}
+                       placeholder={t("org.modelDefault")}
+                       style={{ width: "11rem" }}
+                       onChange={(e) => setForm({ ...form, model: e.target.value })} />
+                <datalist id={`models-${selected.kind}`}>
+                  {selected.models.map((m) => <option key={m} value={m} />)}
+                </datalist>
+              </>
             )}
             <button onClick={addAgent} disabled={!form.id}>{t("c.add")}</button>
             {selected && selected.kind !== "bastet-lite" && (
@@ -319,11 +326,15 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
             {accounts.filter((x) => x.executor_type === a.executor_type)
                      .map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
           </select>,
-          <select key="m" defaultValue={agentModel(a)} id={`edit-model-${a.id}`}>
-            <option value="">{t("c.defaultModel")}</option>
-            {(executors.find((e) => e.kind === a.executor_type)?.models ?? [])
-              .map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>,
+          <span key="m">
+            <input defaultValue={agentModel(a)} id={`edit-model-${a.id}`}
+                   list={`models-${a.executor_type}`} style={{ width: "10rem" }}
+                   placeholder={t("c.defaultModel")} />
+            <datalist id={`models-${a.executor_type}`}>
+              {(executors.find((e) => e.kind === a.executor_type)?.models ?? [])
+                .map((m) => <option key={m} value={m} />)}
+            </datalist>
+          </span>,
           a.enabled ? "✅" : "⛔",
           <span key="ops" className="row-ops">
             <button onClick={() => saveEdit(a.id)}>{t("c.save")}</button>

@@ -430,7 +430,14 @@ class Orchestrator:
                 run_memory.job_finished(self.db, job, "done")
                 self._emit("job.done", job["project_id"], job_id=job_id)
                 self._sync_project(job["project_id"])
-                self.cleanup_worktree(job_id)
+                self.cleanup_worktree(job_id)   # commits the work to bastet/<job>
+                # deliver the finished branch to the project's remote — a push
+                # failure is a delivery problem, never a reason to un-finish
+                try:
+                    from . import git_push
+                    git_push.push_job_branch(self.db, job, emit=self._emit)
+                except Exception as exc:
+                    log.warning("job %s: auto-push crashed: %r", job_id, exc)
                 return
             # the note has served its purpose: the gate it described just passed
             self.db.write("UPDATE jobs SET stage=?, rework_note=NULL, updated_at=? "

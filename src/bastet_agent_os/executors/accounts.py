@@ -28,24 +28,36 @@ GLOBAL_AUTH_ONLY = {"agy"}
 # kinds that never need an account (credentials come from Bastet resources)
 NO_ACCOUNT = {"bastet-lite"}
 
-# model lists: curated from each tool's current lineup; the empty choice means
-# "official default" (no --model flag passed)
+# Model lists are SUGGESTIONS, not a gate: the UI offers them in a datalist and
+# accepts any id, because a curated list is stale the day a vendor ships. Where
+# a CLI can enumerate its own lineup (grok models), detect_models() asks it and
+# the curated entry is only the fallback. The empty choice means "official
+# default" (no --model flag passed).
 EXECUTOR_CATALOG = [
     {"kind": "claude-code", "name": "Claude Code (headless)", "binary": "claude",
      "config_dir": "~/.claude",
-     "models": ["sonnet", "opus", "haiku"]},
+     # aliases resolve to the latest of each line (per `claude --help`), full
+     # ids pin a version
+     "models": ["fable", "opus", "sonnet", "haiku",
+                "claude-fable-5", "claude-opus-5", "claude-sonnet-5",
+                "claude-haiku-4-5"]},
     {"kind": "claude-sdk", "name": "Claude Code (Agent SDK, in-run approvals)",
      "binary": "claude", "config_dir": "~/.claude",
-     "models": ["sonnet", "opus", "haiku"]},
+     "models": ["fable", "opus", "sonnet", "haiku",
+                "claude-fable-5", "claude-opus-5", "claude-sonnet-5",
+                "claude-haiku-4-5"]},
     {"kind": "codex", "name": "OpenAI Codex CLI", "binary": "codex",
      "config_dir": "~/.codex",
-     "models": ["gpt-5.1-codex", "gpt-5.1-codex-mini"]},
+     # codex has no enumeration command; these are the known ids and the field
+     # is free-entry for anything newer
+     "models": ["gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5.1"]},
     {"kind": "hermes", "name": "NousResearch Hermes", "binary": "hermes",
      "config_dir": "~/.hermes",
      "models": []},   # model comes from the gateway resource routing
     {"kind": "grok", "name": "xAI Grok Build", "binary": "grok",
      "config_dir": "~/.grok",
-     "models": ["grok-code-fast-1", "grok-4", "grok-4-1-fast", "grok-3"]},
+     # fallback only — `grok models` enumerates the real lineup per login
+     "models": ["grok-4.5"]},
     {"kind": "agy", "name": "Google Antigravity", "binary": "agy",
      "config_dir": "~/.gemini",
      "models": ["gemini-3.6-flash-high", "gemini-3.6-flash-medium",
@@ -56,6 +68,37 @@ EXECUTOR_CATALOG = [
      "config_dir": None,
      "models": []},   # model comes from the gateway resource routing
 ]
+
+
+def detect_models(kind: str, home_dir: str | None = None) -> list[str]:
+    """Ask the tool itself what models it offers, when it can answer.
+
+    The curated catalog went stale within days (grok's whole lineup turned
+    over), so wherever a CLI can enumerate — today that is `grok models` — the
+    live answer wins and the catalog is only the fallback. Returns [] when the
+    tool cannot say, so callers keep their fallback."""
+    import shutil
+    import subprocess
+
+    if kind != "grok":
+        return []
+    binary = shutil.which("grok")
+    if not binary:
+        return []
+    env = dict(os.environ)
+    if home_dir:
+        env["GROK_HOME"] = home_dir
+    try:
+        proc = subprocess.run([binary, "models"], capture_output=True, text=True,
+                              timeout=15, env=env)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    names = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("*"):
+            names.append(line.lstrip("* ").split(" ")[0])
+    return names
 
 
 def login_command(kind: str, home_dir: str | None) -> tuple[dict[str, str], list[str]] | None:
@@ -113,10 +156,21 @@ def profile_status(kind: str, home_dir: str) -> str:
     return "empty"
 
 
+_DETECTED_MODELS: dict[str, list[str]] = {}
+
+
 def catalog_with_availability() -> list[dict]:
     rows = []
     for entry in EXECUTOR_CATALOG:
         installed = bool(entry["binary"] is None or shutil.which(entry["binary"]))
+        # live model lineup where the tool can answer, cached per process — the
+        # curated list stays as the fallback for tools that cannot
+        models = entry["models"]
+        if installed and entry["kind"] not in _DETECTED_MODELS:
+            _DETECTED_MODELS[entry["kind"]] = detect_models(entry["kind"])
+        if _DETECTED_MODELS.get(entry["kind"]):
+            models = _DETECTED_MODELS[entry["kind"]]
+        entry = {**entry, "models": models}
         # "configured" = the CLI's default config/auth dir exists with content;
         # the one-click installer installs everything, so login/setup state is
         # the signal users actually need

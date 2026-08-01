@@ -119,7 +119,9 @@ def test_update_and_delete_resource(client):
     assert client.put(f"/api/resources/{rid}",
                       json={"config": {"api_key": "leak"}}).status_code == 400
     assert client.delete(f"/api/resources/{rid}").status_code == 200
-    assert client.get("/api/resources").json() == []
+    # the built-in bastet-config skill survives — only ours is gone
+    left = [r["name"] for r in client.get("/api/resources").json()]
+    assert "new" not in left and "bastet-config" in left
 
 
 # ---- MCP install -----------------------------------------------------------------
@@ -176,7 +178,11 @@ def test_project_card_can_add_and_remove_resources(client):
     rid = client.post("/api/resources", json={"name": "proj-api", "kind": "api",
                                               "endpoint": "https://a",
                                               "secret_ref": "env:X"}).json()["id"]
-    assert client.get("/api/projects/proj1/overview").json()["resources"] == []
+    # global bastet-config is visible everywhere; the project starts with ONLY it
+    def project_resources():
+        return [r["name"] for r in
+                client.get("/api/projects/proj1/overview").json()["resources"]]
+    assert project_resources() == ["bastet-config"]
 
     client.post("/api/projects/proj1/resources", json={"resource_id": rid})
     row = client.get("/api/projects/proj1/overview").json()["resources"][0]
@@ -185,7 +191,11 @@ def test_project_card_can_add_and_remove_resources(client):
                        json={"resource_id": rid}).status_code == 409
 
     assert client.delete(f"/api/projects/proj1/resources/{rid}").status_code == 200
-    assert client.get("/api/projects/proj1/overview").json()["resources"] == []
+    # global bastet-config is visible everywhere; the project starts with ONLY it
+    def project_resources():
+        return [r["name"] for r in
+                client.get("/api/projects/proj1/overview").json()["resources"]]
+    assert project_resources() == ["bastet-config"]
 
 
 def test_inherited_access_shows_up_but_cannot_be_detached_from_the_project(client):

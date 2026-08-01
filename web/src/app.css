@@ -353,3 +353,10 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
 .supplies textarea { width: 100%; }
 .supply-row { border-bottom: 1px solid var(--line); padding-bottom: .35rem; }
 .supply-row .spec { max-height: 8rem; }
+
+/* ---- chat config proposal ---------------------------------------------------- */
+.config-proposal { border: 1px solid var(--accent); border-radius: 8px;
+                   padding: .55rem .7rem; margin-top: .45rem; display: grid;
+                   gap: .35rem; background: rgba(99,102,241,.06); }
+.config-proposal ul { margin: 0; padding-left: 1.2rem; }
+.config-proposal button { justify-self: start; }

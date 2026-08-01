@@ -34,8 +34,10 @@ def client(tmp_path):
          "res_x", '{"name":"gitlab-token"}'),
     ]
     # the audit table is hash-chained, so backdated history is written with a
-    # valid chain rather than by bypassing it
-    prev = "genesis"
+    # valid chain rather than by bypassing it — continuing from whatever the
+    # server already wrote at startup (e.g. seeding the bastet-config skill)
+    last = db.one("SELECT row_hash FROM audit_log ORDER BY id DESC LIMIT 1")
+    prev = last["row_hash"] if last else "genesis"
     for at, actor, action, ttype, tid, detail in rows:
         payload = f"{prev}|{at}|{actor}|{action}|{ttype}|{tid}|{detail}"
         row_hash = hashlib.sha256(payload.encode()).hexdigest()
@@ -66,7 +68,9 @@ def test_unfiltered_returns_newest_first(client):
 def test_categories_come_from_the_table(client):
     """The filter offers what exists. A hard-coded list goes stale the first
     time a new event type is added."""
-    assert get(client)["categories"] == ["job", "project", "secret"]
+    # the seeded bastet-config skill adds a real `resource` row at startup —
+    # which is precisely the point: categories reflect the table, not a list
+    assert get(client)["categories"] == ["job", "project", "resource", "secret"]
 
 
 def test_category_filter_matches_the_whole_family(client):
@@ -104,7 +108,8 @@ def test_filters_compose(client):
 
 def test_limit_is_clamped_not_trusted(client):
     assert len(get(client, limit=1)["rows"]) == 1
-    assert get(client, limit=10**9)["count"] == 4     # no crash, no unbounded scan
+    total = get(client, limit=10**9)["count"]         # no crash, no unbounded scan
+    assert total >= 4                                 # ours + whatever startup wrote
 
 
 def test_no_match_is_an_empty_result_not_an_error(client):
