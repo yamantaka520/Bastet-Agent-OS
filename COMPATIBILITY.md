@@ -8,7 +8,7 @@ Current version: 0.18.1
 |---|---|
 | Linux (Ubuntu 24.04 / 26.04) | supported — the validation host runs Ubuntu 26.04 with a systemd user service |
 | macOS (Apple Silicon, Intel) | supported — primary development platform |
-| Windows 10/11 | supported for the control plane and CLI; container isolation needs Docker Desktop |
+| Windows 10/11 | runs (control plane + CLI), but the test suite is not green there yet — the CI leg is informational. Treat as experimental; container isolation needs Docker Desktop |
 
 ## Python
 

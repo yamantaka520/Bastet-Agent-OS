@@ -68,6 +68,11 @@ every feature is confirmed against real agents rather than fakes:
 
 ## Open items
 
+- **Windows CI has never been green** (~35 failures: POSIX shell-script test
+  fakes, path-separator assertions, cp1252 vs CJK messages). The leg is now
+  non-blocking so it reports without masking real regressions elsewhere;
+  COMPATIBILITY.md says "experimental" until this is actually fixed.
+
 - **Telegram bot token rotation.** A token was pasted in plaintext during an
   early session. It works, and it should still be rotated in BotFather.
 - **`~/.bastet/secrets` accumulates** rotated credential files; nothing prunes

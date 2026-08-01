@@ -362,9 +362,14 @@ def test_the_venv_bin_is_on_path_for_gate_commands():
 
     from bastet_agent_os.config import augment_path
 
+    own = str(pathlib.Path(sys.executable).parent)
+    # CI runners put the python bin dir FIRST on PATH, which made this test's
+    # precondition false: augment_path correctly does nothing when the dir is
+    # already present. Strip it so the append-last behaviour is what's tested.
+    os.environ["PATH"] = os.pathsep.join(
+        entry for entry in os.environ["PATH"].split(os.pathsep) if entry != own)
     augment_path()
     entries = os.environ["PATH"].split(os.pathsep)
-    own = str(pathlib.Path(sys.executable).parent)
     assert own in entries
     assert entries.index(own) == len(entries) - 1
 

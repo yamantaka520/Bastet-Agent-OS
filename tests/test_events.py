@@ -21,7 +21,7 @@ def emitted_literals() -> set[str]:
     """Every event type the code publishes as a literal string."""
     found: set[str] = set()
     for path in SRC.rglob("*.py"):
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")   # CI Windows is cp1252
         found |= set(re.findall(r'(?:_emit|bus\.emit)\(\s*"([a-z_.]+)"', text))
     return found
 

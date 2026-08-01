@@ -77,6 +77,11 @@ def test_a_reachable_repo_passes(db, tmp_path):
                  ["remote", "add", "origin", str(origin)],
                  ["push", "-q", "origin", "HEAD:refs/heads/main"]):
         subprocess.run(["git", "-C", str(work), *args], check=True)
+    # the bare repo's HEAD follows the machine's init.defaultBranch (master on CI
+    # runners), and we pushed main — ls-remote HEAD then resolves to nothing and
+    # the test fails only on machines configured differently from this one
+    subprocess.run(["git", "--git-dir", str(origin), "symbolic-ref", "HEAD",
+                    "refs/heads/main"], check=True)
 
     add_git(db, "g4", endpoint=str(origin), provider="custom")
     state = resource_test.run(db, "g4", "tester")
