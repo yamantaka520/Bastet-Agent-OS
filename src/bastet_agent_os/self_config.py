@@ -147,13 +147,34 @@ def seed_skill(db: Db, home_root) -> str:
 
 # ---- the prompt side ------------------------------------------------------------
 
+# The schema travels IN the prompt, not by reference: the first live test showed
+# an agent that could not read the skill file inventing its own shape
+# (type/payload instead of op/fields), which parses as nothing. A chat responder
+# has no filesystem guarantee, so the contract must be self-contained here; the
+# skill file remains the deeper reference for agents that can read it.
 PROMPT_NOTE = (
     "\n## 設定 Bastet 本身（bastet-config）\n"
-    "使用者要求新增/調整 Bastet 的資源（LLM、MCP、API、SKILL、git、媒體）或系統"
-    "設定時：讀取 bastet-config skill 的指南，在回覆**最後**用 ```" + FENCE + "``` "
-    "圍欄放一個 {\"actions\": [...]} 區塊提出設定。規則：(1) 你只能提出，套用由人"
-    "按按鈕完成，不要宣稱已設定；(2) 憑證一律引用 secret:<id>，缺憑證就先請使用者"
-    "到 管理→憑證 建立；(3) 不確定欄位就先問，不要猜端點。\n"
+    "使用者要求新增/調整 Bastet 的資源或系統設定時，在回覆**最後**用 ```"
+    + FENCE + "``` 圍欄放一個提案區塊，**欄位必須完全依照這個 schema**（不要自創"
+    "欄位名）：\n"
+    '```' + FENCE + '\n'
+    '{"actions": [\n'
+    '  {"op": "resource.create", "kind": "tts", "name": "eleven-tts",\n'
+    '   "endpoint": "https://api.elevenlabs.io", "secret_ref": "secret:res_xxx",\n'
+    '   "config": {"default_model": "eleven_v3", "note": "說明"},\n'
+    '   "scope_type": "project", "scope_id": "CatsWalker"},\n'
+    '  {"op": "grant.create", "resource": "eleven-tts", "scope_type": "team",\n'
+    '   "scope_id": "Meow1"},\n'
+    '  {"op": "settings.timezone", "timezone": "Asia/Taipei"}\n'
+    ']}\n'
+    '```\n'
+    "op 只有四種：resource.create / resource.update / grant.create / "
+    "settings.timezone。kind ∈ llm|mcp|api|skill|git|image|video|music|tts|stt。"
+    "config 常用鍵：default_model、mcp_transport、mcp_command、mcp_url、"
+    "auth_header、skill_source、git_provider、note。\n"
+    "規則：(1) 你只能提出，套用由人按按鈕完成，不要宣稱已設定；(2) secret_ref "
+    "只能是 secret:<憑證id> 指標，缺憑證就先請使用者到 管理→憑證 建立，欄位留空；"
+    "(3) 不確定欄位就先問，不要猜端點。細節見 bastet-config skill 指南。\n"
 )
 
 
