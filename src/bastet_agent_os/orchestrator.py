@@ -642,6 +642,14 @@ class Orchestrator:
             job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if job["stage"] not in [s.name for s in stages]:
             raise ValueError(f"job {job_id} is at unknown stage {job['stage']!r}")
+        # a human retry is a fresh lease for the rework loop. Live case: a card
+        # exhausted its 3 cycles on a transient DNS failure; the operator pressed
+        # retry three times and got three instant re-blocks, because the retried
+        # REVIEWER kept rejecting the same diff and the spent budget meant the
+        # card could never travel back to the writing stage that would actually
+        # regenerate the work.
+        self.db.write("UPDATE jobs SET rework_count=0, rework_note=NULL WHERE id=?",
+                      (job_id,))
         agent = agent_id or job["default_agent_id"]
         if agent_id:
             self.db.write("UPDATE jobs SET default_agent_id=? WHERE id=?",

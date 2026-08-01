@@ -342,3 +342,43 @@ async def test_resume_leaves_a_live_job_alone(orch, seeded):
     assert "joblive" not in out["resumed"] and "joblive" not in out["parked"]
     assert seeded.one("SELECT status FROM jobs WHERE id='joblive'")["status"] \
         == "in_progress"
+
+
+async def test_a_human_retry_refills_the_rework_budget(orch, seeded):
+    """Live case: a transient network failure burned all 3 cycles; the operator
+    pressed retry three times and got three instant re-blocks — the retried
+    reviewer kept rejecting the same diff, and the spent budget meant the card
+    could never travel back to the stage that would regenerate the work."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "auto"},
+        {"name": "review", "gate": "agent-review", "read_only": True,
+         "max_cycles": 1},
+    ])
+    # transient-broken world: implement "works", review honestly rejects twice
+    SCRIPT.append(RunResult(status="succeeded", summary="v1（網路掛了，什麼都沒生成）"))
+    SCRIPT.append(RunResult(status="succeeded", summary="no",
+                            structured_verdict={"verdict": "reject",
+                                                "reasons": ["nothing was generated"]}))
+    SCRIPT.append(RunResult(status="succeeded", summary="v2 still nothing"))
+    SCRIPT.append(RunResult(status="succeeded", summary="no",
+                            structured_verdict={"verdict": "reject",
+                                                "reasons": ["still nothing"]}))
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+    job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+    assert (job["status"], job["rework_count"]) == ("blocked", 1)  # budget spent
+
+    # the world is fixed; the human presses retry at the review stage
+    SCRIPT.append(RunResult(status="succeeded", summary="no",
+                            structured_verdict={"verdict": "reject",
+                                                "reasons": ["same old diff"]}))
+    SCRIPT.append(RunResult(status="succeeded", summary="v3 real assets this time"))
+    SCRIPT.append(RunResult(status="succeeded", summary="ok",
+                            structured_verdict={"verdict": "approve"}))
+    orch.retry(job_id)
+    await orch.wait_idle()
+
+    job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+    assert job["status"] == "done", (
+        "with a refilled budget, the failed review hands back to implement "
+        "instead of instantly re-blocking")

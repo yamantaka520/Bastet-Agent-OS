@@ -8,6 +8,21 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.21.1] - 2026-08-02
+
+### Fixed — a human retry refills the rework budget
+Live case: a transient DNS failure burned all three rework cycles on an art
+task (nothing could be generated, review honestly rejected, loop exhausted —
+all correct). Then the operator pressed retry three times and got three instant
+re-blocks. The retry re-ran the *reviewer*, which rejected the same diff, and
+the spent budget meant the failed gate could never hand the card back to the
+writing stage that would actually regenerate the work.
+
+Retry now resets `rework_count` (and the stale rework note): a person pressing
+the button after fixing the world is a fresh lease, so the failed review flows
+back to the writer and the pipeline finishes on its own — which is the entire
+point of the loop.
+
 ## [0.21.0] - 2026-08-02
 
 ### Added — generated media come back into the conversation
