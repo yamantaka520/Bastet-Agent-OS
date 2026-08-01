@@ -475,7 +475,9 @@ function ConfigProposal({ content, t }: { content: string; t: T }) {
 
   const describe = (a: Record<string, string>) => {
     if (a.op === "resource.create") return t("chat.cfgCreate", {
-      kind: a.kind ?? "?", name: a.name ?? "?" });
+      kind: a.kind ?? "?", name: a.name ?? "?" })
+      + (a.endpoint ? ` → ${a.endpoint}` : "")
+      + (a.secret_ref ? ` 🔑 ${a.secret_ref}` : "");
     if (a.op === "resource.update") return t("chat.cfgUpdate", {
       name: a.name ?? a.id ?? "?" });
     if (a.op === "grant.create") return t("chat.cfgGrant", {

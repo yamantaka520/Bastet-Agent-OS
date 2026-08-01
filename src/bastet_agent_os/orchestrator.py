@@ -409,13 +409,15 @@ class Orchestrator:
                           {"stage": stage.name, "gate": stage.gate,
                            "config_error": outcome.config_error,
                            "detail": outcome.detail[:300]})
+            # previews ride on the ONE gate.pending event — a second emit here
+            # meant every approval arrived on Telegram twice (review finding)
+            previews = (self._collect_previews(job, workdir)
+                        if outcome.verdict == "pending" else [])
             self._emit(f"gate.{outcome.verdict}", job["project_id"], job_id=job_id,
-                       stage=stage.name, gate=stage.gate, detail=outcome.detail[:200])
+                       stage=stage.name, gate=stage.gate, detail=outcome.detail[:200],
+                       previews=previews)
 
             if outcome.verdict == "pending":
-                previews = self._collect_previews(job, workdir)
-                self._emit("gate.pending", job["project_id"], job_id=job_id,
-                           stage=stage.name, previews=previews)
                 self._block(job_id, f"stage {stage.name}: waiting for human approval")
                 return
             if outcome.verdict == "failed":
@@ -739,7 +741,11 @@ class Orchestrator:
                 prompt=self._stage_prompt(job, stage, access.notes),
                 workdir=workdir,
                 timeout_s=req.timeout_s,
-                allowed_tools=req.allowed_tools or ["Read", "Edit", "Write", "Bash"],
+                # WebFetch/WebSearch included by default: an agent implementing
+                # against a vendor API needs the vendor's docs, and "no
+                # permission" was the live complaint
+                allowed_tools=req.allowed_tools or ["Read", "Edit", "Write", "Bash",
+                                                    "WebFetch", "WebSearch"],
                 read_only=stage.read_only,
                 context_text=context_text,
                 gateway_url=self.gateway_url if job["resource_id"] else None,
@@ -878,6 +884,7 @@ class Orchestrator:
     PREVIEW_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf",
                           ".html", ".md", ".txt"}
     PREVIEW_LIMIT = 12
+    PREVIEW_MAX_BYTES = 10 * 1024 * 1024   # a "preview" bigger than this is an asset
 
     def _collect_previews(self, job, workdir: str) -> list[str]:
         """Keep whatever the stage left in ._bastet/preview/ for the approver.
@@ -901,6 +908,10 @@ class Orchestrator:
                 log.info("job %s: preview limit reached, skipping %s",
                          job["id"], path.name)
                 break
+            if path.stat().st_size > self.PREVIEW_MAX_BYTES:
+                log.info("job %s: preview %s over %d bytes, skipped",
+                         job["id"], path.name, self.PREVIEW_MAX_BYTES)
+                continue
             safe = Path(path.name).name          # no traversal via crafted names
             (target / safe).write_bytes(path.read_bytes())
             kept.append(safe)

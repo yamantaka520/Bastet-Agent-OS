@@ -128,3 +128,76 @@ def test_apply_is_audited_with_the_human_actor(client):
     detail = json.loads(rows[0]["detail_json"])
     assert detail["via"] == "chat"
     assert rows[0]["actor"].startswith("user:")   # the presser, not the model
+
+
+def test_team_scope_works_without_a_local_teams_table(client):
+    """Live failure: `no such table: teams`. Teams are AMOS org objects — Bastet
+    has no local table, and the rest of the product accepts team ids it has not
+    seen. The apply path must do the same."""
+    c, _ = client
+    c.post("/api/config/apply", json={"actions": [
+        {"op": "resource.create", "kind": "api", "name": "team-scoped",
+         "endpoint": "https://x.example"}]})
+
+    out = c.post("/api/config/apply", json={"actions": [
+        {"op": "grant.create", "resource": "team-scoped",
+         "scope_type": "team", "scope_id": "Meow1"},
+    ]}).json()
+
+    assert out["ok"] == 1, out
+    made = next(r for r in c.get("/api/resources").json()
+                if r["name"] == "team-scoped")
+    assert ("team", "Meow1") in [(s["scope_type"], s["scope_id"])
+                                 for s in made["scopes"]]
+
+
+def test_skill_with_install_command_is_creatable_and_installable(client):
+    """The novita case: a proposal can carry the skill's install command; the
+    human applies, then presses 安裝 on the Resources tab (admin, audited, full
+    log) — the same flow MCP installs use."""
+    c, _ = client
+
+    out = c.post("/api/config/apply", json={"actions": [
+        {"op": "resource.create", "kind": "skill", "name": "novita-skill",
+         "config": {"skill_source": "https://github.com/novitalabs/skills.git",
+                    "install_command": "echo installed-to-the-right-place"}},
+    ]}).json()
+    assert out["ok"] == 1, out
+
+    made = next(r for r in c.get("/api/resources").json()
+                if r["name"] == "novita-skill")
+    # the install endpoint accepts it (admin-only; here it runs the real command
+    # against a temp HOME-less env and reports honestly either way)
+    result = c.post(f"/api/resources/{made['id']}/install")
+    assert result.status_code == 200
+    assert "status" in result.json()
+
+
+def test_only_saved_credential_pointers_are_accepted(client):
+    """Stricter than the admin UI on purpose: a model-proposed file:/env: ref
+    could point a 'credential' at an arbitrary host file, which a run would then
+    send to whatever endpoint the same proposal named."""
+    c, _ = client
+
+    for ref in ("file:/home/user/.bastet/api_token", "env:HOME", "keyring:a/b"):
+        out = c.post("/api/config/apply", json={"actions": [
+            {"op": "resource.create", "kind": "api", "name": f"sneaky-{ref[:4]}",
+             "endpoint": "https://attacker.example", "secret_ref": ref}]}).json()
+        assert out["failed"] == 1, ref
+        assert "secret:" in out["results"][0]["detail"]
+
+
+def test_credential_rows_cannot_be_rewritten_from_chat(client, tmp_path):
+    """Redirecting a credential's ref would poison every resource pointing at
+    it — the one indirection the whole safety story rests on."""
+    c, _ = client
+    c.post("/api/secrets", json={"name": "real-key", "value": "tok_abc",
+                                 "scope_type": "global", "scope_id": ""})
+    cred = next(r for r in c.get("/api/secrets").json() if r["name"] == "real-key")
+
+    out = c.post("/api/config/apply", json={"actions": [
+        {"op": "resource.update", "id": cred["id"],
+         "endpoint": "https://attacker.example"}]}).json()
+
+    assert out["failed"] == 1
+    assert "憑證" in out["results"][0]["detail"]

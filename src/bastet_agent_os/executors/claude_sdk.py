@@ -21,7 +21,9 @@ from ..workflow import read_verdict
 from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
 
 INTERACTION_TIMEOUT_S = 600  # unattended fallback: deny after this long
-READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Write"]  # Write carries the verdict file
+# WebFetch/WebSearch are read-only by nature and reviewers/chat agents
+# legitimately read docs — their absence surfaced as permission errors
+READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Write", "WebFetch", "WebSearch"]  # Write carries the verdict file
 
 _SENTINEL = object()
 

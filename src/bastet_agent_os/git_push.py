@@ -85,8 +85,12 @@ def _env_for(db: Db, url: str, resources: list, scratch: str) -> dict[str, str]:
     goes into an env-provided header. Nothing lands in argv or the URL."""
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     host = _host_of(url)
-    match = next((r for r in resources if _host_of(r["endpoint"] or "") == host),
-                 None) or next(iter(resources), None)
+    # exact host match ONLY (review finding): the earlier "else take any git
+    # resource" fallback would have sent, say, a GitLab token in a header to
+    # github.com — a credential must never travel to a host it was not
+    # configured for. No match ⇒ push unauthenticated and let git say no.
+    match = next((r for r in resources
+                  if host and _host_of(r["endpoint"] or "") == host), None)
     if match is None:
         return env
     secret = _resolve_secret(db, match)
@@ -156,12 +160,15 @@ def push_job_branch(db: Db, job, *, emit=None) -> dict[str, Any] | None:
 
     with tempfile.TemporaryDirectory(prefix="bastet-push-") as scratch:
         env = _env_for(db, url, resources, scratch)
-        proc = subprocess.run(
-            ["git", "-C", repo, "push", url, f"{branch}:{branch}"],
-            capture_output=True, text=True, timeout=PUSH_TIMEOUT_S, env=env)
-
-    output = (proc.stdout + proc.stderr).strip()[-600:]
-    ok = proc.returncode == 0
+        try:
+            proc = subprocess.run(
+                ["git", "-C", repo, "push", url, f"{branch}:{branch}"],
+                capture_output=True, text=True, timeout=PUSH_TIMEOUT_S, env=env)
+            output = (proc.stdout + proc.stderr).strip()[-600:]
+            ok = proc.returncode == 0
+        except subprocess.TimeoutExpired:
+            output = f"push timed out after {PUSH_TIMEOUT_S}s"
+            ok = False
     db.audit("orchestrator", "job.pushed" if ok else "job.push_failed",
              "job", job["id"],
              {"remote": detected, "host": _host_of(url), "branch": branch,

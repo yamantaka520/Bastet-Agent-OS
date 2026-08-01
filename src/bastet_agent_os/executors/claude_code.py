@@ -39,7 +39,9 @@ GRACE_SECONDS = 10  # SIGTERM -> grace -> SIGKILL
 # verdict travels via a file (workflow.VERDICT_RELPATH) — headless
 # --allowedTools cannot scope Write to one path yet; the M4 Agent SDK
 # migration closes this gap.
-READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Write"]
+# WebFetch/WebSearch are read-only by nature and reviewers/chat agents
+# legitimately read docs — their absence surfaced as permission errors
+READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Write", "WebFetch", "WebSearch"]
 
 
 @dataclass

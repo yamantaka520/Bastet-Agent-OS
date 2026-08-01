@@ -8,6 +8,42 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.20.1] - 2026-08-02
+
+### Fixed — WebFetch / WebSearch were not permitted
+"讀一下這份文件" failed with a permission error: neither the default stage tools
+nor the read-only set (chat responders, reviewers) included the web tools. Both
+do now — an agent implementing against a vendor API needs the vendor's docs, and
+fetching them is read-only by nature.
+
+### Fixed — `no such table: teams` on chat-apply
+Teams are AMOS org objects; Bastet has no local `teams` table, and the apply
+path's scope check invented one. It now validates projects locally and accepts
+team ids the way the rest of the product does.
+
+### Fixed — four defects from a code-review pass over the recent features
+- **Every approval arrived on Telegram twice**: the preview work added a second
+  `gate.pending` emit. One event now, carrying the previews.
+- **A git credential could travel to the wrong host**: auto-push fell back to
+  "any granted git resource" when none matched the remote — which would send,
+  say, a GitLab token in a header to github.com. Exact host match only; no
+  match pushes unauthenticated and lets git say no.
+- **Chat proposals are now stricter than the admin UI about credentials**:
+  `secret:<id>` pointers only. A model-proposed `file:`/`env:` ref could point a
+  "credential" at an arbitrary host file, which a run would then send to
+  whatever endpoint the same proposal named. Credential rows are also not
+  updatable from chat, and the apply card now shows each action's endpoint and
+  ref, so the person clicking sees where data will flow.
+- **Preview files are size-capped** (10 MB) — `read_bytes()` on an unbounded
+  "preview" is a memory grenade — and a timed-out push is audited as failed
+  instead of vanishing.
+
+### Added — the guide teaches the skill-install flow
+The novita case: a proposal can create a skill resource carrying its
+`install_command`; the human applies, then presses 安裝 on the Resources tab
+(admin, audited, full log) — the same flow MCP installs use. Shell on the host
+never runs as a side effect of applying a proposal.
+
 ## [0.20.0] - 2026-08-02
 
 ### Fixed — model pickers that were stale the day a vendor shipped

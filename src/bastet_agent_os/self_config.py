@@ -102,6 +102,12 @@ def guide_markdown() -> str:
                      f"{auth_text.get(kind.get('auth'), '')}")
     lines += [
         "",
+        "### SKILL 的安裝",
+        "skill 資源可帶 `install_command`（config 內）。流程：提案建立 → 人套用 → ",
+        "人到「資源」頁按「安裝」（admin 權限、完整輸出回傳、有稽核）。安裝指令",
+        "不會因套用提案而自動執行 —— 在主機上跑 shell 永遠是人親自按的那一下。",
+        "執行中的 agent 也可以在自己的 run 裡用 Bash 安裝到 worktree。",
+        "",
         "enum：`mcp_transport` ∈ " + str(catalog["enums"]["mcp_transport"]) +
         "；`git_provider` ∈ " + str(catalog["enums"]["git_provider"]),
         "",
@@ -208,11 +214,19 @@ def _find_resource(db: Db, ref: str):
 def _check_scope(db: Db, scope_type: str, scope_id: str) -> str | None:
     if scope_type == "global":
         return None
-    table = "projects" if scope_type == "project" else "teams"
     if scope_type not in ("team", "project"):
         return f"scope_type 必須是 global/team/project，不是 {scope_type!r}"
-    if not db.one(f"SELECT id FROM {table} WHERE id=?", (scope_id,)):
-        return f"{scope_type} {scope_id!r} 不存在"
+    if not scope_id:
+        return "team/project 範圍需要指定 id"
+    if scope_type == "project":
+        if not db.one("SELECT id FROM projects WHERE id=?", (scope_id,)):
+            return f"project {scope_id!r} 不存在"
+        return None
+    # Teams are AMOS org objects — there is NO local `teams` table, which the
+    # first live apply discovered the hard way (`no such table: teams`). What
+    # Bastet knows locally is which teams its projects reference; a team no
+    # project references yet is still legal (the rest of the product accepts
+    # it), so unknown is not an error here.
     return None
 
 
@@ -282,11 +296,15 @@ def _apply_one(db: Db, home_root, action: dict[str, Any], actor: str) -> dict:
               if k in rk.CONFIG_FIELDS or k == "note"}
     secrets_store.reject_secrets_in_config(config)
     raw_ref = action.get("secret_ref") or ""
-    if raw_ref and not raw_ref.startswith(secrets_store.KNOWN_SCHEMES):
-        # the protocol says pointers only — a raw key in a chat proposal has
-        # already been through the model, refuse rather than quietly file it
-        raise ValueError("secret_ref 必須是 secret:<憑證id> 等指標，不能是金鑰原文 "
-                         "—— 它已經流經對話。請先在 管理→憑證 建立。")
+    if raw_ref and not raw_ref.startswith("secret:"):
+        # secret: pointers ONLY — stricter than the admin UI on purpose (review
+        # finding). A raw key has already been through the model; and a
+        # model-proposed file:/env: ref could point a "credential" at an
+        # arbitrary host file (file:~/.bastet/api_token) which a run would then
+        # send to whatever endpoint the same proposal named. The saved-credential
+        # indirection is the whole safety story here.
+        raise ValueError("經由對話設定時 secret_ref 只能是 secret:<憑證id>（管理→憑證 "
+                         "建立後取得）。金鑰原文與 file:/env:/keyring: 指標都不收。")
 
     if op == "resource.create":
         if kind not in rk.BY_ID:
@@ -330,6 +348,10 @@ def _apply_one(db: Db, home_root, action: dict[str, Any], actor: str) -> dict:
     row = _find_resource(db, action.get("id") or action.get("name") or "")
     if row is None:
         raise ValueError(f"資源 {action.get('id') or action.get('name')!r} 不存在")
+    if row["kind"] == "secret":
+        # rewriting a credential row's ref through a model proposal would let a
+        # poisoned conversation redirect every resource that points at it
+        raise ValueError("憑證不能經由對話修改 —— 請用 管理→憑證。")
     merged = json.loads(row["config_json"] or "{}")
     merged.update(config)
     db.write("UPDATE resources SET endpoint=COALESCE(?, endpoint), "

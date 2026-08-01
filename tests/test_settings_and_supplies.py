@@ -183,3 +183,27 @@ async def test_the_heartbeat_lands_on_the_run(orch, seeded):
     row = seeded.one("SELECT heartbeat_at, progress_text FROM runs WHERE job_id=?",
                      (job_id,))
     assert row is not None
+
+
+async def test_gate_pending_is_emitted_exactly_once(orch, seeded):
+    """Review finding: the preview work added a second gate.pending emit, so
+    every approval request arrived on Telegram twice."""
+    from bastet_agent_os.events import EventBus
+
+    bus = EventBus()
+    orch.bus = bus
+    queue = bus.subscribe()
+    add_template(seeded, "dev", [{"name": "ship", "gate": "human-approve"}])
+    SCRIPT.append(RunResult(status="succeeded", summary="ready"))
+
+    orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    pending = []
+    while not queue.empty():
+        event = queue.get_nowait()
+        if event["type"] == "gate.pending":
+            pending.append(event)
+    assert len(pending) == 1, f"{len(pending)} gate.pending events for one gate"
+    assert "previews" in pending[0]        # and the one event carries the previews
+    bus.unsubscribe(queue)
