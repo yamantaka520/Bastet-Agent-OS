@@ -1,6 +1,6 @@
 # Bastet Agent OS — Project History and Design Log
 
-Last updated: 2026-07-31
+Last updated: 2026-08-01
 
 ## Purpose
 
@@ -219,6 +219,9 @@ Listed because each one changed how the code is written now.
 | The notify loop died while status said `polling` | a background loop that can die must report that it died |
 | A 2000-char truncation broke decomposition | when the summary *is* the payload, size limits are a design decision |
 | Two UI regressions from one CSS refactor (white-on-white cards) | block-shaped buttons opt out of the control system explicitly |
+| A restart left a live card `in_progress` forever, untouchable by any button | anything that can die must have something that notices and resumes it |
+| asyncio's 64 KiB line limit killed runs after minutes of work | a limit you did not choose is still a limit you own |
+| Fixing that, a trailing comment swallowed `cwd=`/`env=` in three executors | guards that matter parse the code; grep cannot see a kwarg that moved into a comment |
 
 ## Collaboration model
 

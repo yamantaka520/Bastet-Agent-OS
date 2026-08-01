@@ -348,7 +348,7 @@ running). Every user-visible change bumps it and adds a `CHANGELOG.md` entry —
 
 ```bash
 pip install -e '.[dev]'
-pytest -q                     # 328 tests
+pytest -q                     # 340 tests
 ruff check .
 cd web && npm install && npm run build   # output lands in src/bastet_agent_os/ui_dist
 ```

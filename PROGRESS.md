@@ -1,17 +1,17 @@
 # Bastet Agent OS Progress
 
-Last updated: 2026-07-31
+Last updated: 2026-08-01
 
 ## Current project status
 
-- Released: **v0.18.1**. Version arc v0.1.0 → v0.18.1 in four days
-  (2026-07-28 → 2026-07-31), 85 commits. See [CHANGELOG.md](CHANGELOG.md) for the
+- Released: **v0.18.4**. Version arc v0.1.0 → v0.18.4 in five days
+  (2026-07-28 → 2026-08-01), 89 commits. See [CHANGELOG.md](CHANGELOG.md) for the
   full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision went the
   way it did.
 - Milestones M0–M6 complete: control plane, gateway, workflow engine, Kanban,
   multi-project concurrency, multi-user auth, Telegram channel, federation, and
   the self-healing rework loop.
-- Test suite: **328 passing**, `ruff` clean. 37 test modules.
+- Test suite: **340 passing**, `ruff` clean. 39 test modules.
 - Executors implemented: `claude-code`, `claude-sdk`, `codex`, `grok`, `agy`,
   `hermes`, `bastet-lite`.
 - WebUI in five languages, typed against a canonical dictionary so a missing
@@ -54,6 +54,15 @@ every feature is confirmed against real agents rather than fakes:
   drawn from the table, inclusive date range.
 - **Project deletion.** Refuses with the reason when work is in flight or when
   runs spent money; `force` records the written-off amount in the audit row.
+- **Restart recovery.** A card whose driver died with the process is re-driven at
+  startup. Found the hard way: a deploy restart left a live CatsWalker card at
+  `in_progress` for half an hour with nothing behind it, and no button in the
+  product would touch it (the project runner only resumes projects with
+  undispatched plan tasks; `retry` only accepts blocked jobs).
+- **Large tool output.** asyncio's 64 KiB per-line limit was killing runs with
+  `Separator is found, but chunk is longer than limit` — one big file read or test
+  log and a stage that had worked for minutes was gone. All five CLI executors now
+  read with a 32 MiB limit and survive an over-limit line.
 
 ## Open items
 
