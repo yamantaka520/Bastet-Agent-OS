@@ -10,6 +10,14 @@ follows the same number and the WebUI prints it beside the title.
 
 ## [0.18.3] - 2026-07-31
 
+### Fixed — the event registry had drifted by eight types
+`EVENT_TYPES` is a registry, not a filter — an unlisted type is still delivered,
+because dropping it would silently disable whatever depended on it — but it logs
+`unknown event type` every time. Eight types the engine emits were missing,
+including `job.rework` and `project.status`, so a healthy rework loop wrote a
+warning to the log on every hand-back. `tests/test_events.py` now fails if the
+code emits a literal type that is not registered.
+
 ### Fixed — a job whose driver died on restart was stuck forever
 Restarting the service (to deploy, in this case) kills whatever stage is running.
 Startup marked those runs `orphaned` but left the **job** at `in_progress` with

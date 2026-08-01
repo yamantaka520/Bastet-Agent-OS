@@ -14,10 +14,24 @@ from datetime import UTC, datetime
 
 log = logging.getLogger("bastet.events")
 
+# Every type the engine may publish. This is a registry, not a filter: an
+# unlisted type is still delivered, with a warning — dropping it would silently
+# disable whatever depended on it, which is worse than a noisy log. The list had
+# gone stale by eight types (including `job.rework`), so every rework logged
+# `unknown event type` on a healthy system. tests/test_events.py fails if the code
+# emits a literal type that is not listed here.
 EVENT_TYPES = {
+    # jobs
     "job.created", "job.stage_changed", "job.done", "job.blocked", "job.cancelled",
+    "job.rework", "job.resumed", "job.retried", "job.archived", "job.deleted",
+    # runs
     "run.queued", "run.started", "run.waiting_input", "run.finished",
+    # gates (emitted as gate.<verdict>)
     "gate.pending", "gate.passed", "gate.failed",
+    # projects
+    "project.status", "project.deleted",
+    # everything else
+    "chat.message",
     "budget.warning", "budget.exceeded",
     "resource.health_changed",
     "channel.paired",
