@@ -27,6 +27,14 @@ the recovery behaviour the guard depends on.
 Found on the validation host: this is what `job_264bc8d2524a` was actually dying
 of, on both attempts.
 
+The first attempt at this fix put the comment at the end of the `limit=` line,
+which swallowed `cwd=task.workdir` (and `env=`) into it in three executors — every
+run would have executed in the *server's* directory with none of its injected
+credentials. The agy and grok tests caught it; codex had no test that would, so
+there is now one, and it parses the call's keywords instead of grepping for them:
+the swallowed text is still in the file, and only the AST knows it is no longer an
+argument.
+
 ## [0.18.3] - 2026-07-31
 
 ### Fixed — the event registry had drifted by eight types

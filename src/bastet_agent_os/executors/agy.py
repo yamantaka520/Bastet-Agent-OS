@@ -96,7 +96,9 @@ class AgyExecutor:
 
         handle.process = await asyncio.create_subprocess_exec(
             *cmd,
-            limit=STREAM_LIMIT,     # a big tool result must not kill the run cwd=task.workdir,
+            # a big tool result must not kill the run
+            limit=STREAM_LIMIT,
+            cwd=task.workdir,
             env={**os.environ, **task.extra_env, "AGY_CLI_DISABLE_AUTO_UPDATE": "1"},
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=(sys.platform != "win32"))

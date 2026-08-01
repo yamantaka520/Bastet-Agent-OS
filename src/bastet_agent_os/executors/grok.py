@@ -108,7 +108,9 @@ class GrokExecutor:
 
         handle.process = await asyncio.create_subprocess_exec(
             *cmd,
-            limit=STREAM_LIMIT,     # a big tool result must not kill the run cwd=task.workdir, env=env,
+            # a big tool result must not kill the run
+            limit=STREAM_LIMIT,
+            cwd=task.workdir, env=env,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=(sys.platform != "win32"))
         return handle

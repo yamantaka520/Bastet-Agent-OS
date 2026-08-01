@@ -158,3 +158,39 @@ async def test_asyncio_discards_the_bad_line_and_the_next_one_arrives():
         await reader.readline()
 
     assert await reader.readline() == b'{"type":"result","ok":true}\n'
+
+
+def subprocess_kwargs(module) -> set[str]:
+    """The keyword names actually passed to create_subprocess_exec.
+
+    Parsed, not grepped: the mistake this guards against was a trailing comment
+    swallowing the next kwarg, which leaves the text in the file and only the AST
+    knows it is no longer an argument."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(module))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "create_subprocess_exec"):
+            return {kw.arg for kw in node.keywords if kw.arg}
+    raise AssertionError(f"{module.__name__} has no create_subprocess_exec call")
+
+
+def test_every_cli_executor_runs_in_the_job_workdir_with_its_env():
+    """A regression guard from a real slip: adding the stream limit with a
+    trailing comment swallowed `cwd=task.workdir` (and `env=`) on the same line in
+    three executors. agy and grok had tests that caught it; codex did not, so it
+    would have shipped running every run in the *server's* directory with none of
+    the injected credentials."""
+    from bastet_agent_os.executors import agy, claude_code, codex, grok, hermes
+
+    for module in (claude_code, codex, grok, agy, hermes):
+        passed = subprocess_kwargs(module)
+        assert "cwd" in passed, f"{module.__name__} does not run in the job workdir"
+        assert "env" in passed, (
+            f"{module.__name__} passes no env — injected credentials and executor "
+            f"profiles would be missing")
+        assert "limit" in passed, (
+            f"{module.__name__} still uses asyncio's default 64 KiB line limit")
