@@ -155,9 +155,9 @@ def test_updating_bastet_itself_asks_for_a_restart(db, monkeypatch):
         if "pip show" in text:
             return 0, f"Version: {next(versions)}\n"
         if "install --upgrade" in text:
-            assert "git+https://github.com" in text   # installs from the source
+            assert "bastet-agent-os" in text          # the released package
             return 0, "Successfully installed bastet-agent-os-0.17.0\n"
-        return 1, "no index"
+        return 0, "LATEST: 0.17.0\n"
 
     monkeypatch.setattr(maintenance, "_run", run)
 

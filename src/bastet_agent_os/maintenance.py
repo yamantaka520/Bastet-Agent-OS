@@ -31,9 +31,11 @@ UPDATE_TIMEOUT_S = 900
 # imports it, so a new version only takes effect after a restart — pytest is
 # spawned as a subprocess by gate commands, so it takes effect immediately.
 PIP_COMPONENTS = [
+    # released on PyPI since 0.19.0 — so the index comparison is real and the
+    # state stops being `unknown`; updates install the released version, not
+    # whatever main happens to be
     {"id": "bastet-agent-os", "label": "Bastet Agent OS", "kind": "pip",
-     "package": "bastet-agent-os", "in_process": True,
-     "source": "git+https://github.com/yamantaka520/Bastet-Agent-OS.git"},
+     "package": "bastet-agent-os", "in_process": True},
     {"id": "agent-memory-os", "label": "Agent Memory OS", "kind": "pip",
      "package": "agent-memory-os", "extras": "[full]", "in_process": True},
     {"id": "claude-agent-sdk", "label": "Claude Agent SDK", "kind": "pip",

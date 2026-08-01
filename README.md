@@ -83,6 +83,20 @@ SDK + pytest, installs the executor CLIs with their vendors' own installers, run
 `bastet init`, and finishes with `bastet doctor`. Details, flags and the
 per-executor login steps: [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
+From PyPI (the wheel carries the built WebUI — no Node needed), or Docker:
+
+```bash
+pip install bastet-agent-os "agent-memory-os[full]" && bastet init && bastet serve
+```
+
+```bash
+docker run -d -p 8890:8890 -v bastet-home:/data yamantaka520/bastet-agent-os
+```
+
+The container holds the control plane, gateway, WebUI and `bastet-lite`; the
+vendor executor CLIs stay on a host because their logins are interactive and
+their credentials are yours — [docs/INSTALLATION.md](docs/INSTALLATION.md#docker).
+
 From a clone, for development:
 
 ```bash
@@ -348,7 +362,7 @@ running). Every user-visible change bumps it and adds a `CHANGELOG.md` entry —
 
 ```bash
 pip install -e '.[dev]'
-pytest -q                     # 340 tests
+pytest -q                     # 349 tests
 ruff check .
 cd web && npm install && npm run build   # output lands in src/bastet_agent_os/ui_dist
 ```

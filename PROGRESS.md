@@ -1,17 +1,19 @@
 # Bastet Agent OS Progress
 
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
 ## Current project status
 
-- Released: **v0.18.4**. Version arc v0.1.0 → v0.18.4 in five days
-  (2026-07-28 → 2026-08-01), 89 commits. See [CHANGELOG.md](CHANGELOG.md) for the
+- Released: **v0.19.0** — on [PyPI](https://pypi.org/project/bastet-agent-os/)
+  and [Docker Hub](https://hub.docker.com/r/yamantaka520/bastet-agent-os)
+  (amd64 + arm64). Version arc v0.1.0 → v0.19.0 in six days (2026-07-28 →
+  2026-08-02), 90 commits. See [CHANGELOG.md](CHANGELOG.md) for the
   full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision went the
   way it did.
 - Milestones M0–M6 complete: control plane, gateway, workflow engine, Kanban,
   multi-project concurrency, multi-user auth, Telegram channel, federation, and
   the self-healing rework loop.
-- Test suite: **340 passing**, `ruff` clean. 39 test modules.
+- Test suite: **349 passing**, `ruff` clean. 40 test modules.
 - Executors implemented: `claude-code`, `claude-sdk`, `codex`, `grok`, `agy`,
   `hermes`, `bastet-lite`.
 - WebUI in five languages, typed against a canonical dictionary so a missing
@@ -72,8 +74,6 @@ every feature is confirmed against real agents rather than fakes:
   them yet.
 - **CatsWalker's remaining PM tasks** are mid-flight; one card sits at
   `in_progress`.
-- **No PyPI release yet.** Installation is from GitHub source (`pip install
-  git+https://…`), which is what `install.sh` and the maintenance card use.
 - **`bastet doctor` on a fresh shell** can report `claude` as missing when the
   installer has not been re-sourced onto PATH. Harmless, but it reads as a
   failure.

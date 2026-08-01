@@ -17,7 +17,8 @@
 #   BASTET_REPO          override the pip source (default: GitHub main)
 set -euo pipefail
 
-REPO="${BASTET_REPO:-git+https://github.com/yamantaka520/Bastet-Agent-OS.git}"
+# released on PyPI; BASTET_REPO overrides (e.g. git+https://… for main)
+REPO="${BASTET_REPO:-bastet-agent-os}"
 BASTET_HOME="${BASTET_HOME:-$HOME/.bastet}"
 VENV="$BASTET_HOME/venv"
 BIN_DIR="$HOME/.local/bin"
