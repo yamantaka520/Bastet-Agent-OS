@@ -270,3 +270,75 @@ async def test_a_job_that_changed_nothing_makes_no_commit(orch, seeded, repo):
     tip = subprocess.run(["git", "-C", str(repo), "rev-parse", f"bastet/{job_id}"],
                          capture_output=True, text=True).stdout.strip()
     assert tip == before
+
+
+async def test_a_job_whose_driver_died_on_restart_resumes_itself(orch, seeded):
+    """Found live: restarting the service to deploy killed a running stage, and
+    the card sat at `in_progress` for half an hour with no process behind it.
+    Startup orphaned the runs but left the job, the project runner only resumes
+    projects with undispatched plan tasks, and retry refuses anything that is not
+    blocked — so no button in the product would touch it."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "auto"},
+        {"name": "ship", "gate": "auto"},
+    ])
+    # the state a restart leaves behind: job in_progress, its run orphaned
+    seeded.write("INSERT INTO jobs(id, project_id, template_id, stages_snapshot_json, "
+                 "title, spec_md, stage, status, default_agent_id, created_at, "
+                 "updated_at) VALUES('jobkilled','proj1','dev',?,'中斷的任務','spec',"
+                 "'implement','in_progress','fakebot',datetime('now'),datetime('now'))",
+                 (json.dumps([{"name": "implement", "gate": "auto"},
+                              {"name": "ship", "gate": "auto"}]),))
+    seeded.write("INSERT INTO runs(id, job_id, stage, attempt, agent_id, "
+                 "executor_type, status) VALUES('runkilled','jobkilled','implement',"
+                 "1,'fakebot','fake','orphaned')")
+    SCRIPT.append(RunResult(status="succeeded", summary="picked it up again"))
+    SCRIPT.append(RunResult(status="succeeded", summary="shipped"))
+
+    out = orch.resume_interrupted_jobs()
+    await orch.wait_idle()
+
+    assert "jobkilled" in out["resumed"]
+    job = seeded.one("SELECT * FROM jobs WHERE id='jobkilled'")
+    assert job["status"] == "done"                    # it finished on its own
+    assert audit(seeded, "job.resumed")[0]["stage"] == "implement"
+
+
+async def test_an_interrupted_job_on_a_paused_project_is_not_restarted(orch, seeded):
+    """Pause means the human asked for it to stop. But the card must stop
+    claiming it is running, so it is blocked with the real reason."""
+    seeded.write("UPDATE projects SET status='paused' WHERE id='proj1'")
+    seeded.write("INSERT INTO jobs(id, project_id, template_id, stages_snapshot_json, "
+                 "title, spec_md, stage, status, default_agent_id, created_at, "
+                 "updated_at) VALUES('jobpaused','proj1','dev',?,'暫停中','spec',"
+                 "'implement','in_progress','fakebot',datetime('now'),datetime('now'))",
+                 (json.dumps([{"name": "implement", "gate": "auto"}]),))
+
+    out = orch.resume_interrupted_jobs()
+
+    assert out["resumed"] == [] and "jobpaused" in out["parked"]
+    job = seeded.one("SELECT status FROM jobs WHERE id='jobpaused'")
+    assert job["status"] == "blocked"
+    reason = audit(seeded, "job.blocked")[-1]["reason"]
+    assert "服務重啟時中斷" in reason and "paused" in reason
+
+
+async def test_resume_leaves_a_live_job_alone(orch, seeded):
+    """A driver that is genuinely running must not be duplicated — two drivers on
+    one job is the failure mode this whole path is trying to avoid."""
+    add_template(seeded, "dev", [{"name": "implement", "gate": "auto"}])
+    seeded.write("INSERT INTO jobs(id, project_id, template_id, stages_snapshot_json, "
+                 "title, spec_md, stage, status, default_agent_id, created_at, "
+                 "updated_at) VALUES('joblive','proj1','dev',?,'跑著的','spec',"
+                 "'implement','in_progress','fakebot',datetime('now'),datetime('now'))",
+                 (json.dumps([{"name": "implement", "gate": "auto"}]),))
+    seeded.write("INSERT INTO runs(id, job_id, stage, attempt, agent_id, "
+                 "executor_type, status) VALUES('runlive','joblive','implement',"
+                 "1,'fakebot','fake','running')")
+    orch._live["runlive"] = ("executor", "handle")     # as a real driver would
+
+    out = orch.resume_interrupted_jobs()
+
+    assert "joblive" not in out["resumed"] and "joblive" not in out["parked"]
+    assert seeded.one("SELECT status FROM jobs WHERE id='joblive'")["status"] \
+        == "in_progress"

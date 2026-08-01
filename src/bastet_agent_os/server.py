@@ -366,6 +366,14 @@ def create_app(home: Home) -> FastAPI:
         for project_id in outcome["parked"]:
             log.warning("project %s parked: nothing to continue", project_id)
         tasks.append(asyncio.get_running_loop().create_task(runner.watch(bus)))
+        # a job whose driver died with the process is nobody's responsibility
+        # otherwise: the runner only resumes projects with undispatched tasks,
+        # and retry refuses anything that is not blocked
+        jobs = orch.resume_interrupted_jobs()
+        for job_id in jobs["resumed"]:
+            log.info("job %s: resumed after restart", job_id)
+        for job_id in jobs["parked"]:
+            log.warning("job %s left blocked: project is not running", job_id)
         for row in db.query("SELECT * FROM channels WHERE enabled=1 AND kind='telegram'"):
             try:
                 bot_token = secrets_store.resolve(row["secret_ref"])

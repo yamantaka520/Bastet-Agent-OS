@@ -8,6 +8,30 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.18.3] - 2026-07-31
+
+### Fixed — a job whose driver died on restart was stuck forever
+Restarting the service (to deploy, in this case) kills whatever stage is running.
+Startup marked those runs `orphaned` but left the **job** at `in_progress` with
+nobody driving it: the project runner only resumes projects that still have
+undispatched plan tasks, and `retry` refuses anything that is not blocked. The
+card sat on the board looking alive, with no process behind it, and no button in
+the product would touch it. Found on the validation host — a live CatsWalker card
+had been stuck for half an hour after a deploy restart.
+
+Startup now re-drives interrupted jobs from their current stage, audited as
+`job.resumed`. Exceptions, both honest rather than optimistic:
+
+- a **paused or closed** project is not restarted (pause means a human asked for
+  it to stop), but its card is blocked with the real reason so the board stops
+  claiming work is happening;
+- a job whose workflow snapshot cannot be parsed is blocked saying exactly that,
+  instead of being fed to a driver that crashes and reports `driver_crashed`.
+
+The project states are read once up front: blocking the first job runs a lifecycle
+sync that could move its project out of `paused`, and the next job of the same
+project would then be judged against a status this very loop had just changed.
+
 ## [0.18.2] - 2026-07-31
 
 ### Added — the documentation set

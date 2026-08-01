@@ -259,6 +259,74 @@ class Orchestrator:
         self._sync_project(job["project_id"])
         return {"deleted": job_id, "runs": len(runs), "plan": unlinked}
 
+    def resume_interrupted_jobs(self, actor: str = "server") -> dict:
+        """Re-drive jobs whose driver died with the process.
+
+        Startup marks runs left non-terminal as `orphaned`, but the *job* was
+        being left at `in_progress` with nobody driving it: the project runner
+        only resumes projects that still have undispatched plan tasks, and
+        `retry` refuses anything that is not blocked. A card interrupted by a
+        service restart therefore sat on the board looking alive, forever, and
+        there was no button that would touch it.
+
+        Found on the validation host: restarting the service to deploy killed a
+        live CatsWalker run mid-stage; the card stayed `in_progress` for half an
+        hour with no process behind it.
+
+        Called from the lifespan, where a fresh process means `self._live` is
+        empty by definition — anything still `in_progress` has no driver. A
+        paused or closed project is not restarted; its card is blocked with the
+        real reason instead, so the board stops claiming work is happening."""
+        resumed, parked = [], []
+        # read the project states ONCE: blocking the first job runs a lifecycle
+        # sync that can move its project out of `paused`, and then the second job
+        # of the same project would be judged against a status this loop itself
+        # just changed
+        states = {r["id"]: r["status"] for r in
+                  self.db.query("SELECT id, status FROM projects")}
+        for job in self.db.query(
+                "SELECT * FROM jobs WHERE status='in_progress' AND archived=0"):
+            live_runs = [r["id"] for r in self.db.query(
+                "SELECT id FROM runs WHERE job_id=?", (job["id"],))
+                if r["id"] in self._live]
+            if live_runs:
+                continue                       # a driver in this process owns it
+            state = states.get(job["project_id"], "")
+            if state in ("paused", "closed"):
+                self._block(job["id"],
+                            f"服務重啟時中斷；專案目前是 {state}，沒有自動接手。"
+                            f"要繼續請先恢復專案，或用重試。",
+                            stage=job["stage"])
+                parked.append(job["id"])
+                continue
+            try:
+                stages = parse_stages(json.loads(job["stages_snapshot_json"]))
+                names = [s.name for s in stages]
+                if job["stage"] not in names:
+                    raise ValueError(f"stage {job['stage']!r} is not in the snapshot")
+            except Exception as exc:
+                # a job we cannot drive must say why, rather than being fed to a
+                # driver that will crash on it and report `driver_crashed`
+                self._block(job["id"],
+                            f"服務重啟時中斷，但這張卡的工作流快照無法接續"
+                            f"（{type(exc).__name__}: {exc}）。請重新派工。",
+                            stage=job["stage"])
+                parked.append(job["id"])
+                continue
+            self.db.audit(actor, "job.resumed", "job", job["id"],
+                          {"stage": job["stage"], "reason": "driver lost on restart"})
+            self._emit("job.resumed", job["project_id"], job_id=job["id"],
+                       title=job["title"], stage=job["stage"])
+            req = DispatchRequest(
+                project_id=job["project_id"], prompt=job["spec_md"],
+                title=job["title"], agent_id=job["default_agent_id"],
+                resource_id=job["resource_id"], template_id=job["template_id"])
+            self._spawn(self._drive_job(job["id"], req))
+            resumed.append(job["id"])
+            log.info("job %s: driver lost on restart, resuming at stage %s",
+                     job["id"], job["stage"])
+        return {"resumed": resumed, "parked": parked}
+
     def purge_project_jobs(self, project_id: str, actor: str = "user") -> dict:
         """Delete every job of a project, including ones that spent money.
 
