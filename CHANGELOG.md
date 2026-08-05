@@ -8,6 +8,27 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.22.0] - 2026-08-04
+
+### Added — quota failures wait themselves out
+The live case: every attempt on a card died in seconds with `You've hit your
+session limit · resets 1:30am (Asia/Taipei)` — and the card just blocked. The
+vendor's message states the deadline, but a human still had to notice, wait for
+someone else's clock, and press retry at the right moment.
+
+The orchestrator now reads the clock. An execution failure that is a quota /
+rate limit (session limit, usage limit, 429, overloaded, low credit) parks the
+job with a `resume_at`: the stated reset time when the message names one —
+am/pm and the vendor's timezone parsed, next-occurrence semantics, a safety
+margin, capped at 26h — or a 30-minute backoff when it does not. A background
+sweep retries due jobs (audited as `server:quota-reset`); a manual retry beats
+the clock and clears the timer. The Telegram notification says it plainly:
+⏳ 額度用盡，會自己續跑 —— 不需要你做什麼，預計 HH:MM 自動重試.
+
+Unparseable inputs stay safe: an unknown timezone falls back to UTC, a nonsense
+time falls back to the default backoff, and an ordinary failure is never
+mistaken for a timer.
+
 ## [0.21.4] - 2026-08-02
 
 ### Fixed — "No module named PIL", but only inside runs

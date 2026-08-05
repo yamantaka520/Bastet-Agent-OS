@@ -24,7 +24,7 @@ EVENT_TYPES = {
     # jobs
     "job.created", "job.stage_changed", "job.done", "job.blocked", "job.cancelled",
     "job.rework", "job.resumed", "job.retried", "job.archived", "job.deleted",
-    "job.supplied", "job.pushed", "job.push_failed",
+    "job.supplied", "job.pushed", "job.push_failed", "job.quota_wait",
     # runs
     "run.queued", "run.started", "run.waiting_input", "run.finished",
     "run.progress",

@@ -387,6 +387,13 @@ class TelegramChannel:
                 {"text": "❌ Deny",
                  "callback_data": f"itx:{event.get('run_id')}:{event.get('request_id')}:no"},
             ]]}
+        elif etype == "job.quota_wait":
+            reset = (event.get("resume_at") or "")[11:16]
+            text = (f"⏳ 額度用盡，會自己續跑 —— 不需要你做什麼\n"
+                    f"{self._job_line(event)}\n"
+                    f"階段：{event.get('stage')}\n"
+                    f"供應商訊息：{(event.get('detail') or '')[:160]}\n"
+                    f"預計 {reset} (UTC) 自動重試。等不及可以直接按重試。")
         elif etype == "job.rework":
             text = self._rework_text(event)
         elif etype == "job.blocked":

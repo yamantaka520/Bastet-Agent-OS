@@ -382,6 +382,7 @@ def create_app(home: Home) -> FastAPI:
         for project_id in outcome["parked"]:
             log.warning("project %s parked: nothing to continue", project_id)
         tasks.append(asyncio.get_running_loop().create_task(runner.watch(bus)))
+        tasks.append(asyncio.get_running_loop().create_task(orch.quota_resume_loop()))
         # a job whose driver died with the process is nobody's responsibility
         # otherwise: the runner only resumes projects with undispatched tasks,
         # and retry refuses anything that is not blocked

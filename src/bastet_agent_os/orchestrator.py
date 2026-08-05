@@ -327,6 +327,28 @@ class Orchestrator:
                      job["id"], job["stage"])
         return {"resumed": resumed, "parked": parked}
 
+    async def quota_resume_loop(self) -> None:
+        """Retry quota-parked jobs when their timer passes. Runs for the life of
+        the server; each pass is cheap (one indexed-ish query a minute), and a
+        retry failure parks the job again rather than killing the loop."""
+        while True:
+            try:
+                due = [r["id"] for r in self.db.query(
+                    "SELECT id FROM jobs WHERE status='blocked' AND resume_at "
+                    "IS NOT NULL AND resume_at <= ?", (now(),))]
+                for job_id in due:
+                    try:
+                        self.retry(job_id, user="server:quota-reset")
+                        log.info("job %s: quota window passed, resumed", job_id)
+                    except Exception as exc:
+                        # e.g. someone retried it manually a moment ago
+                        log.warning("quota resume of %s failed: %r", job_id, exc)
+                        self.db.write("UPDATE jobs SET resume_at=NULL WHERE id=?",
+                                      (job_id,))
+            except Exception:
+                log.exception("quota resume sweep failed")
+            await asyncio.sleep(60)
+
     def purge_project_jobs(self, project_id: str, actor: str = "user") -> dict:
         """Delete every job of a project, including ones that spent money.
 
@@ -390,7 +412,24 @@ class Orchestrator:
 
             result, run_id = await self._run_stage_with_retries(job, stage, req)
             if result.status in EXEC_FAILURES:
-                self._block(job_id, f"stage {stage.name}: execution {result.status}")
+                # a quota failure is a timer, not an error: the vendor's message
+                # usually states when it lifts (live case: "resets 1:30am
+                # (Asia/Taipei)" blocked a card for hours until a human noticed)
+                from . import quota_wait
+                resume_at = quota_wait.parse_reset(result.summary or "")
+                if resume_at:
+                    self.db.write("UPDATE jobs SET resume_at=? WHERE id=?",
+                                  (resume_at, job_id))
+                    self.db.audit("orchestrator", "job.quota_wait", "job", job_id,
+                                  {"stage": stage.name, "resume_at": resume_at,
+                                   "detail": (result.summary or "")[:200]})
+                    self._emit("job.quota_wait", job["project_id"], job_id=job_id,
+                               title=job["title"], stage=stage.name,
+                               resume_at=resume_at,
+                               detail=(result.summary or "")[:200])
+                self._block(job_id, f"stage {stage.name}: execution {result.status}"
+                            + (f"（額度用盡，{resume_at} 自動續跑）" if resume_at
+                               else ""))
                 return
 
             # re-read: the run may have just CREATED the worktree, and the row in
@@ -660,8 +699,8 @@ class Orchestrator:
         # REVIEWER kept rejecting the same diff and the spent budget meant the
         # card could never travel back to the writing stage that would actually
         # regenerate the work.
-        self.db.write("UPDATE jobs SET rework_count=0, rework_note=NULL WHERE id=?",
-                      (job_id,))
+        self.db.write("UPDATE jobs SET rework_count=0, rework_note=NULL, "
+                      "resume_at=NULL WHERE id=?", (job_id,))
         agent = agent_id or job["default_agent_id"]
         if agent_id:
             self.db.write("UPDATE jobs SET default_agent_id=? WHERE id=?",

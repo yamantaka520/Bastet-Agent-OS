@@ -335,6 +335,9 @@ class Db:
                                    "INTEGER NOT NULL DEFAULT 0")
             if "rework_note" not in existing:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN rework_note TEXT")
+            # when a quota-blocked job should retry itself (UTC ISO)
+            if "resume_at" not in existing:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN resume_at TEXT")
             if "archived" not in existing:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN archived INTEGER "
                                    "NOT NULL DEFAULT 0")
