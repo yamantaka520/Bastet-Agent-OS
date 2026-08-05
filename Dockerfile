@@ -24,7 +24,8 @@ ENV BASTET_HOME=/data \
 WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
-RUN pip install --no-cache-dir . 'agent-memory-os[full]' pytest pillow
+RUN pip install --no-cache-dir . 'agent-memory-os[full]' pytest pillow playwright \
+ && playwright install --with-deps chromium
 
 # non-root: the container has no business as uid 0, and worktrees/secrets are
 # all under /data anyway. /data is created and chowned BEFORE the VOLUME line —

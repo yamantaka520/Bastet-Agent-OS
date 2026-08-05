@@ -946,7 +946,11 @@ class Orchestrator:
                 "這個階段完成後會停下來等人核准。請把能幫助人判斷的證據放進 "
                 f"`{self.PREVIEW_RELPATH}/` 目錄（自行建立）：介面截圖（PNG）、"
                 "可直接開啟的 HTML 快照、或一頁 Markdown 摘要。有畫面就給畫面 —— "
-                "沒有預覽的核准請求，等於要求對方盲簽。")
+                "沒有預覽的核准請求，等於要求對方盲簽。\n"
+                "網頁類專案主機上備有 Playwright（含 chromium）可直接截圖："
+                "`playwright screenshot --viewport-size=1280,800 "
+                "'http://localhost:PORT' 檔名.png`，或在測試裡用 "
+                "page.screenshot()。啟動本地伺服器截完記得收掉。")
         if stage.gate == "agent-review":
             parts.append(REVIEW_INSTRUCTIONS)
             diff = self._job_diff(job)

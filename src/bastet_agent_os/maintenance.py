@@ -56,6 +56,11 @@ PIP_COMPONENTS = [
     # system python3 had Pillow all along)
     {"id": "pillow", "label": "Pillow（媒體資產處理）", "kind": "pip",
      "package": "pillow"},
+    # browser automation: E2E gates and the screenshots that human-approve
+    # previews want. The chromium binary itself is fetched by
+    # `playwright install chromium` (install.sh does it; updates via pip here)
+    {"id": "playwright", "label": "Playwright（瀏覽器 E2E 與截圖）", "kind": "pip",
+     "package": "playwright"},
 ]
 
 # executor CLIs, each with the vendor's own installer

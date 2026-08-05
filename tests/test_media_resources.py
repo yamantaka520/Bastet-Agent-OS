@@ -200,3 +200,26 @@ async def test_media_stages_are_told_to_persist_assets(orch, seeded, monkeypatch
     # the pipeline and waited for a notification that can never arrive
     assert "不要把生成丟到背景" in seen[0]
     assert "前景等待" in seen[0]
+
+
+@pytest.mark.asyncio
+async def test_human_approve_brief_offers_playwright_for_screenshots(orch, seeded):
+    """The approver asked for pictures; the brief must name the tool that takes
+    them, or 'provide a screenshot' is an instruction without a means."""
+    from fake_executor import SCRIPT, add_template, req
+
+    from bastet_agent_os.executors.base import RunResult
+
+    seen: list[str] = []
+
+    def capture(task):
+        seen.append(task.prompt)
+        return RunResult(status="succeeded", summary="ok")
+
+    add_template(seeded, "dev", [{"name": "上線核准", "gate": "human-approve"}])
+    SCRIPT.append(capture)
+    orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    assert "playwright screenshot" in seen[0]
+    assert "._bastet/preview" in seen[0]

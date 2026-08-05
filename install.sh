@@ -81,7 +81,12 @@ mkdir -p "$BASTET_HOME" "$BIN_DIR"
 # test gates; without it a project reaches that stage and fails on a missing
 # runner after burning a whole agent run.
 if "$VENV/bin/pip" install -q --upgrade "$REPO" 'agent-memory-os[full]' \
-     claude-agent-sdk keyring pytest pillow; then
+     claude-agent-sdk keyring pytest pillow playwright; then
+  # Playwright needs a browser, not just the package — without one, the first
+  # E2E run dies with "Executable doesn't exist". Chromium only; failures warn
+  # instead of aborting the install (air-gapped hosts can add it later).
+  "$VENV/bin/playwright" install chromium >/dev/null 2>&1 \
+    || echo "  ⚠ playwright chromium download failed — run: $VENV/bin/playwright install chromium"
   ln -sf "$VENV/bin/bastet" "$BIN_DIR/bastet"
   ln -sf "$VENV/bin/agent-memory" "$BIN_DIR/agent-memory" 2>/dev/null || true
   case ":$PATH:" in

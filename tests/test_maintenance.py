@@ -185,3 +185,12 @@ def test_amos_web_reports_the_command_when_it_is_not_installed(monkeypatch):
     assert info["installed"] is False
     assert "agent-memory-web" in info["command"]
     assert info["url"] == ""              # no dead link offered
+
+
+def test_standard_tooling_is_tracked():
+    """pytest (gates), pillow (media), playwright (browser E2E + previews):
+    the tools the shipped workflows assume must be visible to check/update —
+    an invisible dependency is the one that rots."""
+    ids = [c["id"] for c in maintenance.PIP_COMPONENTS]
+    for tool in ("pytest", "pillow", "playwright"):
+        assert tool in ids, tool

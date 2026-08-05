@@ -8,6 +8,20 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.22.1] - 2026-08-04
+
+### Added — Playwright as standard tooling
+Browser automation joins pytest and Pillow as a tool the shipped workflows can
+assume: `install.sh` and the Docker image install the `playwright` package and
+the chromium browser (the package without a browser dies with "Executable
+doesn't exist" on first use, so both go in — a failed browser download warns
+with the exact command instead of aborting the install). The maintenance card
+tracks it for check/update.
+
+The human-approve preview brief now names the tool: a web project's approval
+evidence can be a real `playwright screenshot` of the running page, not just a
+prose summary — "provide a screenshot" was an instruction without a means.
+
 ## [0.22.0] - 2026-08-04
 
 ### Added — quota failures wait themselves out
