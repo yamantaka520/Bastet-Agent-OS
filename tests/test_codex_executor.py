@@ -122,3 +122,28 @@ async def test_gateway_path_needs_openai_flavor(tmp_path):
         await CodexExecutor().start(spec(tmp_path, gateway_url="http://gw",
                                          run_token="brt_x",
                                          llm={"flavor": "anthropic", "model": "x"}))
+
+
+def test_verdict_schema_satisfies_strict_structured_outputs():
+    """Live failure: OpenAI rejected every codex review with
+    `invalid_json_schema` — strict mode requires `required` to list EVERY key in
+    `properties` at every object level. The card died before the model saw a
+    token. This walks the whole schema so a future field addition cannot
+    reintroduce it."""
+    from bastet_agent_os.executors.codex import VERDICT_SCHEMA
+
+    def check(node, path="$"):
+        if isinstance(node, dict):
+            if node.get("type") == "object" and "properties" in node:
+                keys = sorted(node["properties"].keys())
+                assert sorted(node.get("required", [])) == keys, (
+                    f"{path}: strict mode needs required == all property keys; "
+                    f"got {node.get('required')} vs {keys}")
+                assert node.get("additionalProperties") is False, path
+            for key, value in node.items():
+                check(value, f"{path}.{key}")
+        elif isinstance(node, list):
+            for i, value in enumerate(node):
+                check(value, f"{path}[{i}]")
+
+    check(VERDICT_SCHEMA)

@@ -8,6 +8,24 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.22.2] - 2026-08-05
+
+### Fixed — every codex review died on `invalid_json_schema`
+OpenAI's strict structured-output validation requires `required` to list every
+key in `properties` at every object level; our codex verdict schema listed only
+`verdict`, so the vendor rejected the request outright and the review run
+failed before the model saw a single token. The schema is strict-compliant now,
+and a test walks every object level so adding a field cannot quietly
+reintroduce the rejection.
+
+### Fixed — retrying with a different agent silently used the same one
+Role assignment outranks the job's default agent — correct for dispatch, wrong
+for a human explicitly picking who runs a retry: the live card was retried with
+Claude1 and the role mapping handed it straight back to the failing Codex1. An
+explicit choice on retry is now a one-shot override that outranks the mapping
+for the retried stage and clears on the next stage transition, so the role
+mapping resumes where the human's intervention ends.
+
 ## [0.22.1] - 2026-08-04
 
 ### Added — Playwright as standard tooling

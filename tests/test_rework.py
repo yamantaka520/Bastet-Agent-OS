@@ -382,3 +382,69 @@ async def test_a_human_retry_refills_the_rework_budget(orch, seeded):
     assert job["status"] == "done", (
         "with a refilled budget, the failed review hands back to implement "
         "instead of instantly re-blocking")
+
+
+async def test_retry_with_an_explicit_agent_actually_uses_it(orch, seeded):
+    """Live case: the review stage's role mapping kept selecting the agent whose
+    runs were failing on a vendor bug; the operator retried with a different
+    agent and the role mapping silently won — same agent, same failure. An
+    explicit choice on retry must outrank the mapping, once."""
+    seeded.write("INSERT INTO agents(id, amos_agent_id, name, executor_type, "
+                 "created_at, updated_at) VALUES('fakebot2','fakebot2','Fake2',"
+                 "'fake',datetime('now'),datetime('now'))")
+    seeded.write("INSERT INTO project_agent_roles(project_id, agent_id, role, "
+                 "preference) VALUES('proj1','fakebot','reviewer',1)")
+    add_template(seeded, "dev", [
+        {"name": "review", "gate": "agent-review", "on_fail": "block"},
+    ])
+    SCRIPT.append(RunResult(status="failed", summary="vendor 400: bad schema"))
+
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] \
+        == "blocked"
+    assert seeded.one("SELECT agent_id FROM runs WHERE job_id=? "
+                      "ORDER BY rowid DESC LIMIT 1", (job_id,))["agent_id"] \
+        == "fakebot"                                # the role mapping's pick
+
+    SCRIPT.append(RunResult(status="succeeded", summary="ok",
+                            structured_verdict={"verdict": "approve"}))
+    orch.retry(job_id, agent_id="fakebot2", user="manfred")
+    await orch.wait_idle()
+
+    last = seeded.one("SELECT agent_id FROM runs WHERE job_id=? "
+                      "ORDER BY rowid DESC LIMIT 1", (job_id,))
+    assert last["agent_id"] == "fakebot2", (
+        "the explicit retry choice lost to the role mapping again")
+    job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+    assert job["status"] == "done"
+
+
+async def test_the_override_is_one_shot(orch, seeded):
+    """The override is for the stage the human was looking at; the next stage
+    goes back to the role mapping."""
+    seeded.write("INSERT INTO agents(id, amos_agent_id, name, executor_type, "
+                 "created_at, updated_at) VALUES('fakebot2','fakebot2','Fake2',"
+                 "'fake',datetime('now'),datetime('now'))")
+    seeded.write("INSERT INTO project_agent_roles(project_id, agent_id, role, "
+                 "preference) VALUES('proj1','fakebot','engineer',1)")
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "auto", "role": "engineer",
+         "on_fail": "block"},
+        {"name": "ship", "gate": "auto", "role": "engineer"},
+    ])
+    SCRIPT.append(RunResult(status="failed", summary="boom"))
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    SCRIPT.append(RunResult(status="succeeded", summary="fixed by 2"))
+    SCRIPT.append(RunResult(status="succeeded", summary="shipped"))
+    orch.retry(job_id, agent_id="fakebot2")
+    await orch.wait_idle()
+
+    agents = [r["agent_id"] for r in seeded.query(
+        "SELECT agent_id FROM runs WHERE job_id=? ORDER BY rowid", (job_id,))]
+    assert agents == ["fakebot", "fakebot2", "fakebot"], (
+        "override applies to the retried stage only; the mapping resumes after")
+    assert seeded.one("SELECT agent_override FROM jobs WHERE id=?",
+                      (job_id,))["agent_override"] is None

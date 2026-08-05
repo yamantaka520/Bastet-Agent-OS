@@ -44,6 +44,12 @@ from .base import (
 
 GRACE_SECONDS = 10
 
+# OpenAI's strict structured-output validation requires `required` to list
+# EVERY key in `properties` at every object level (optionality is expressed by
+# a null-union, not by omission). With only ["verdict"] listed, the vendor
+# started rejecting the request outright — `invalid_json_schema` — which killed
+# every codex review run before the model saw a single token. "Always present,
+# possibly empty" costs the model two tokens and satisfies the validator.
 VERDICT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -51,7 +57,7 @@ VERDICT_SCHEMA = {
         "reasons": {"type": "array", "items": {"type": "string"}},
         "comments": {"type": "string"},
     },
-    "required": ["verdict"],
+    "required": ["verdict", "reasons", "comments"],
     "additionalProperties": False,
 }
 

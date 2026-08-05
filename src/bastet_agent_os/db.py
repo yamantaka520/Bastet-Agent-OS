@@ -338,6 +338,9 @@ class Db:
             # when a quota-blocked job should retry itself (UTC ISO)
             if "resume_at" not in existing:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN resume_at TEXT")
+            # one-shot agent override set by retry; cleared on stage transition
+            if "agent_override" not in existing:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN agent_override TEXT")
             if "archived" not in existing:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN archived INTEGER "
                                    "NOT NULL DEFAULT 0")

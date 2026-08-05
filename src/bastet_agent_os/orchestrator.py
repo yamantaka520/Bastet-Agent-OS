@@ -481,8 +481,9 @@ class Orchestrator:
                     log.warning("job %s: auto-push crashed: %r", job_id, exc)
                 return
             # the note has served its purpose: the gate it described just passed
-            self.db.write("UPDATE jobs SET stage=?, rework_note=NULL, updated_at=? "
-                          "WHERE id=?", (stages[idx + 1].name, now(), job_id))
+            self.db.write("UPDATE jobs SET stage=?, rework_note=NULL, "
+                          "agent_override=NULL, updated_at=? WHERE id=?",
+                          (stages[idx + 1].name, now(), job_id))
             self._emit("job.stage_changed", job["project_id"], job_id=job_id,
                        stage=stages[idx + 1].name)
 
@@ -526,7 +527,7 @@ class Orchestrator:
                             config_error=outcome.config_error)
         self.db.write(
             "UPDATE jobs SET stage=?, status='in_progress', rework_count=?, "
-            "rework_note=?, updated_at=? WHERE id=?",
+            "rework_note=?, agent_override=NULL, updated_at=? WHERE id=?",
             (target.name, cycle, note, now(), job_id))
         self.db.audit("orchestrator", "job.rework", "job", job_id,
                       {"failed_stage": stage.name, "gate": stage.gate,
@@ -703,8 +704,12 @@ class Orchestrator:
                       "resume_at=NULL WHERE id=?", (job_id,))
         agent = agent_id or job["default_agent_id"]
         if agent_id:
-            self.db.write("UPDATE jobs SET default_agent_id=? WHERE id=?",
-                          (agent_id, job_id))
+            # the human picked WHO runs this retry. Role assignment normally
+            # outranks the job default, so without an explicit override the
+            # picked agent silently lost to the role mapping — the live case
+            # retried with Claude1 and watched Codex1 fail again identically.
+            self.db.write("UPDATE jobs SET default_agent_id=?, agent_override=? "
+                          "WHERE id=?", (agent_id, agent_id, job_id))
         self.db.write("UPDATE jobs SET status='in_progress', updated_at=? WHERE id=?",
                       (now(), job_id))
         self.db.audit(f"user:{user}", "job.retry", "job", job_id,
@@ -1023,6 +1028,14 @@ class Orchestrator:
     # -- agents / workdir -----------------------------------------------------------
 
     def _agent_for_stage(self, job, stage: StageDef):
+        override = (job["agent_override"] if "agent_override" in job.keys()
+                    else None)
+        if override:
+            row = self.db.one("SELECT * FROM agents WHERE id=? AND enabled=1",
+                              (override,))
+            if row is not None:
+                return row
+            log.info("agent override %r unavailable; falling back", override)
         if stage.role:
             row = self.db.one(
                 "SELECT a.* FROM project_agent_roles par JOIN agents a ON a.id = par.agent_id "
