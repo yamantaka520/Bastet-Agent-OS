@@ -79,7 +79,10 @@ Project scope puts real state in the prompt: description, repo, workflow, roles,
 recent jobs, and the resources the project may use.
 
 Attach files, documents and screenshots. Text is inlined; images ride along where
-the wire supports it. Every turn is written to AMOS in the session's scope, so the
+the wire supports it. **Media flow back too**: files an agent responder
+generates (via the project's granted image/TTS/video resources) land in its
+`$BASTET_CHAT_OUTBOX` and return as attachments on the reply — images inline,
+audio with a player, video with controls (8 files / 50 MB each). Every turn is written to AMOS in the session's scope, so the
 next run inherits the decisions. Pending human-approve gates are listed here with
 Approve/Reject, and the discussion can be dispatched as a job — the agent never
 dispatches itself.
@@ -199,8 +202,15 @@ that ran.
 - **通知頻道** — Telegram: pair a user, set a responder (agent or pool LLM) and a
   project. Plain messages get answered; gate approvals arrive as inline buttons;
   a blocked job arrives with a retry button.
+- **系統設定** — the display timezone (common list plus any IANA name, one
+  click to adopt the host's zone). Applies to every timestamp in the UI for
+  every user immediately; storage stays UTC so audit trails compare across
+  machines.
 - **維護** — every component with installed vs available version, updatable
-  individually or all at once. See [Keeping it current](../README.md#keeping-it-current).
+  individually or all at once: Bastet, Agent Memory OS, turbovec, the Claude
+  Agent SDK, pytest, **Pillow** (media assets), **Playwright** (browser E2E and
+  approval screenshots; chromium ships with the installer), and each executor
+  CLI. See [Keeping it current](../README.md#keeping-it-current).
 
 ### 稽核 (Audit)
 
@@ -264,6 +274,7 @@ stages:
     gate_config:
       command: pytest -q
     max_cycles: 3            # how many times a failed gate may hand it back
+    timeout_s: 7200          # this stage is heavy; don't kill it at the default hour
 
   - name: 程式審查
     role: reviewer
@@ -288,6 +299,7 @@ stages:
 | `on_fail` | `rework` (default) or `block` |
 | `rework_target` | which stage gets the work back; default is the nearest earlier writable stage |
 | `max_cycles` | rework cap, default 3 |
+| `timeout_s` | per-stage run budget in seconds; 0 (default) inherits the dispatch value (3600). Heavy stages — an hour-long optimisation pass — need this or the kill at the default mark loses the whole run |
 
 ### Gate semantics
 
@@ -310,7 +322,19 @@ stages:
 The card goes back to a stage that can fix it, carrying the gate's output, and
 the pipeline continues. It stops and asks a human only when the stage is
 `on_fail: block`, nothing earlier can write, or the cycles are spent. Full
-explanation: [When a gate says no](../README.md#when-a-gate-says-no).
+explanation: [When a gate says no](../README.md#when-a-gate-says-no) and the
+complete reference in [WORKFLOWS.md](WORKFLOWS.md).
+
+### When the executor fails
+
+A crash or timeout blocks the card after the stage's `max_retries`. A vendor
+**quota / rate limit** does not: the card parks with the reset time parsed from
+the vendor's own message (`resets 1:30am (Asia/Taipei)` included) or a
+30-minute backoff, and retries itself — the Telegram message says 「會自己續跑
+—— 不需要你做什麼」. **Retry semantics**: a manual retry refills the rework
+budget and clears any quota timer; picking a different agent on retry is a
+one-shot override that outranks the role mapping for that stage only; the
+workflow-refresh checkbox picks up in-place template edits.
 
 ## 6. Resources at run time
 

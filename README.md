@@ -33,13 +33,18 @@ audit trail behind every state change.
 - **A workflow engine that continues.** Stage pipelines (plan → implement →
   test → review → merge) with four gate types. A failed gate hands the card
   *back* to a stage that can fix it, with the failure output attached, and the
-  pipeline carries on. It stops for a human only when it genuinely cannot
-  proceed. → [When a gate says no](#when-a-gate-says-no)
+  pipeline carries on. A vendor quota failure parks with the reset time parsed
+  from the vendor's own message and resumes itself. It stops for a human only
+  when it genuinely cannot proceed. → [When a gate says no](#when-a-gate-says-no)
 - **Project lifecycle with a light.** planning → ready → running ⇄ paused →
   maintenance → closed, as a real state machine: only declared transitions, each
   one audited. Run / pause / stop controls on the card.
-- **Kanban board.** Task cards move across stage columns live over WebSocket;
-  each card shows its title, stage, status and how many times it was reworked.
+- **Kanban board with liveness.** Task cards move across stage columns live
+  over WebSocket; an in-progress card shows a stage progress bar and a
+  heartbeat (the run's last output line, 🟠 when silent), so working and stuck
+  are distinguishable. The drawer takes 任務補給 — data handed to a running job
+  mid-flight — and human approvals arrive with real evidence: screenshots and
+  summaries the agent left in `._bastet/preview/`, sent as photos on Telegram.
 - **Resource pool + metering gateway.** LLM / MCP / API / skill / git resources
   with per-resource visibility (global / team / project), a credential picker
   that stores a reference rather than a copy, a real test button per resource,
@@ -48,9 +53,16 @@ audit trail behind every state change.
   every run writes what it did, what a gate rejected and how the job ended,
   attributed to the agent that ran and scoped to the project. Context packs are
   read *as that agent*, so AMOS's ACL applies.
-- **Chat as the input channel.** Plan a project by talking to an agent or a pool
-  LLM, attach files and screenshots, then dispatch from the conversation.
-  Telegram is the second such channel, with inline approvals.
+- **Chat as the input channel — and the output channel.** Plan a project by
+  talking to an agent or a pool LLM, attach files and screenshots, dispatch from
+  the conversation — and configure Bastet itself there: ask for a new media API
+  resource and the agent proposes a `bastet-config` card that *you* apply.
+  Generated media (an image, a TTS clip) come back inline via the run's outbox.
+  Telegram is the second such channel, with inline approvals and previews.
+- **Finished work ships itself.** Every completion commits to the job's own
+  `bastet/<job_id>` branch and pushes it to the project's remote with the
+  project's own credentials — your branches are never written to; merging stays
+  a human act.
 - **Governance you can read.** Three-tier roles, per-user tokens, budgets and
   concurrency caps per grant, worktree or container isolation per run, and a
   hash-chained audit log with search.
@@ -76,6 +88,13 @@ One command on the machine that will run the control plane:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yamantaka520/Bastet-Agent-OS/main/install.sh | bash
+```
+
+Or from [PyPI](https://pypi.org/project/bastet-agent-os/) / [Docker Hub](https://hub.docker.com/r/yamantaka520/bastet-agent-os):
+
+```bash
+pip install bastet-agent-os          # the wheel carries the built WebUI
+docker run -v bastet:/data -p 8890:8890 yamantaka520/bastet-agent-os
 ```
 
 It creates `~/.bastet/venv`, installs Bastet + Agent Memory OS + the Claude Agent
@@ -340,6 +359,8 @@ hard-coded string that skipped `t()`.
 |---|---|
 | [docs/INSTALLATION.md](docs/INSTALLATION.md) | install.sh, requirements, executor logins, running as a service, upgrading |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | every tab and every CLI command, end to end |
+| [docs/WORKFLOWS.md](docs/WORKFLOWS.md) | the workflow operations manual: every stage field, every gate, every stop and what to do about it |
+| [docs/CAUTIONS.md](docs/CAUTIONS.md) | 注意事項 — every operational pitfall hit in production, and the boundary rules |
 | [docs/HISTORY.md](docs/HISTORY.md) | the project journey and why each decision went the way it did |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | what is next, and what is deliberately not |
 | [docs/FEDERATION.md](docs/FEDERATION.md) | the shared org view across hosts |
@@ -381,6 +402,7 @@ without needing Node on the target host.
 | M4 | Telegram channel, media resources, in-run interactions, `claude-sdk`/`codex`/`hermes` executors | ✅ done |
 | M5 | Federation: shared org view over AMOS sync | ✅ done |
 | M6 | Self-healing workflow loop, run memory for every executor, maintenance card | ✅ done |
+| 0.19–0.22 | Supplies, previews, heartbeats, timezone; config-by-chat; auto-push; the media loop; quota self-wait; per-stage time budgets; PyPI + Docker | ✅ done |
 
 Validated on a real deployment (Ubuntu 26.04, Python 3.14, systemd user service)
 driving a live project. See [PROGRESS.md](PROGRESS.md) for what is verified and

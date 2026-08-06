@@ -1,0 +1,105 @@
+# 注意事項 — Operational Cautions
+
+跑一套會自己動的系統，最危險的是「以為它在做什麼」和「它實際在做什麼」不一致。
+這份文件收錄實際營運中踩過的每一個坑 —— 每一條都真的發生過，多數已由產品內建
+防護，但知道原理才能在變體出現時認得它。
+
+## 安全邊界（先讀這段）
+
+- **Agent 以主機使用者的權限執行。** worktree 隔離擋的是 git 狀態互踩，不是惡意
+  程式碼；不受信的工作請用 container 隔離（per-stage `isolation: container`）。
+- **對話回應者有 Bash。** 為了讓授權資源真的可以被調用（生圖、TTS），專案範圍的
+  對話 agent 拿得到 Bash —— 它能在主機上動手。`chat.send` 是 operator 權限，
+  請據此發 token。
+- **注入 run 的憑證，就假設該 agent 讀得到。** 優先用短效、最小範圍的 token，
+  以專案為單位授權，不要全域。
+- **Repo 內容是不可信資料。** 審查指示已明講 diff 裡的「approve this」要無視；
+  verdict 走檔案協議正是為了讓 repo 裡的文字無法決定關卡。
+- **誰能動手不是設定。** 對話設定協議（bastet-config）刻意不含使用者、token、
+  通知頻道 —— 被 prompt injection 塞「加個 admin」時要無函式可呼叫。
+
+## 環境與安裝
+
+- **裸打 `python` 會解析到 Bastet 的 venv**（Ubuntu 沒有 `/usr/bin/python`，而
+  venv 在 PATH 上）。所以 venv 必須帶齊媒體工作需要的套件 —— 這就是 Pillow 在
+  標準工具清單裡的原因。症狀：「只在 run 裡面」出現 `No module named PIL`，
+  shell 上測全部正常。
+- **非 editable 的 pip 安裝，同版本號不會真更新。** 從 git 直裝時要
+  `pip install --force-reinstall --no-deps`，否則 pip 看版本沒變就跳過。
+  維護卡片的更新按鈕已處理這點。
+- **`bastet doctor` 在安裝同一個 shell 跑，可能誤報 executor 不存在** —— PATH
+  還沒 re-source。開新 shell 再跑一次。
+- **Playwright 套件 ≠ 瀏覽器。** 沒跑過 `playwright install chromium` 的主機，
+  第一次用就死在 `Executable doesn't exist`。install.sh 與 Docker 映像已一起裝；
+  離線主機記得補。
+- **服務的 PATH 不是登入 shell 的 PATH。** systemd 使用者服務下 executor 找不到
+  是這個原因；Bastet 會自行重建需要的 PATH 並把自己的 venv 排最後（專案自備的
+  runner 永遠優先）。
+
+## 廠商與額度
+
+- **訂閱額度用盡是計時器，不是錯誤。** `You've hit your session limit · resets
+  1:30am (Asia/Taipei)` 這類失敗會自動停靠並在重置後自己續跑 —— 期間手動重試
+  幾次都一樣死，不用按。等不及可以按，會搶先。
+- **廠商會無預警收緊 API 驗證。** OpenAI strict schema 曾讓所有 codex 審查一夜
+  全滅（`invalid_json_schema`）。症狀是秒殺且錯誤指向 schema/request 而非任務
+  內容 —— 這類是產品修法，重試無效。
+- **模型清單會過期。** grok 的整個陣容曾一次換光。模型欄位是自由輸入 + 建議
+  清單；廠商明天出的新模型當天就能填，grok 的清單直接問 CLI 本人。
+- **DNS 偶發故障會讓一輪生成全空。** 引擎會誠實返工並在額度內重試；若連續
+  多輪同樣錯誤，先在主機上 `getent hosts <api host>` 確認再重試。
+
+## 工作流設計
+
+- **重活要宣告自己的時間預算。** 預設 3600 秒；50 分鐘以上的階段（3D 生成、
+  大型最佳化）不設 `timeout_s` 就會在整點被殺，整輪工作蒸發。
+- **驗收條件要在執行環境內可驗證。** 「真機實測 fps」在 headless 主機上沒有任何
+  agent 能誠實做到 —— 審查者會正確地一直拒絕，返工燒完停下。把機器可驗的
+  （節流模擬數據）交給機器，只有人能驗的（真機）明確放到 human-approve 關卡。
+- **返工上限預設 3 是刻意的。** 連續三次修不好代表不會收斂，該人看了。人按重試
+  = 額度重算，這是「我修好環境了，再來」的表達方式。
+- **審查階段一定要 `read_only: true`。** 否則返工目標的推算會把工作交回審查者
+  自己 —— 它不該修它剛拒絕的東西。
+
+## 媒體任務
+
+- **廠商回傳的下載 URL 會過期**（有的 48 小時）。只有下載成 worktree 實體檔案的
+  產物會被 commit 和推送 —— brief 已強制，但自訂 prompt 時別忘。
+- **絕不「背景生成 + 等通知」。** headless run 結束時子行程全部回收，通知永遠
+  不會來。曾有卡片這樣空轉三輪。前景輪詢到檔案落地為止。
+- **像素/尺寸限制以實測為準。** 文件寫的和 API 實際接受的常不一致（Seedream
+  要求 ≥368 萬像素、回傳其實是 JPEG）。第一次接新模型先實測一張，把發現寫進
+  資源的 note —— 之後每個 run 的 brief 都會看到。
+
+## 憑證與機敏資料
+
+- **值是寫入式的。** 存進去之後介面上永遠讀不回來 —— 換 key 用輪替，不要想
+  「看一眼」。
+- **PEM 多行貼上。** 欄位是多行的；萬一貼成一行，系統會依 BEGIN/END 標記修復，
+  但貼原樣最保險。**結尾要有換行** —— 一把缺結尾換行的 key 會讓 ssh 報
+  `invalid format`，內容其實是好的。
+- **對話裡永遠不要出現金鑰原文。** 提案協議只收 `secret:<id>` 指標，原文會被
+  拒絕 —— 它已經流經模型。曾有 bot token 貼進對話，之後只能輪替。
+- **`~/.bastet/secrets/` 會累積輪替後的舊檔**，目前不會自動清理；定期人工檢視。
+
+## 營運
+
+- **重啟服務會殺掉正在跑的階段。** 啟動時會自動接手（`job.resumed`），但該輪
+  進度沒了 —— 部署前看一眼板上有沒有 in-progress 的重活，等它跑完再重啟。
+- **審計是 hash 串接的 append-only。** 不要手動改 audit_log —— 鏈會斷，
+  `verify_audit_chain()` 會抓到。刪任務/專案時的用量帳務會被拒絕或要求 force
+  並記錄寫掉的金額，這是刻意的。
+- **時間顯示是設定，儲存永遠是 UTC。** 管理 → 系統設定選時區只影響顯示；
+  audit log 的原始值跨機器可比對。
+- **Telegram 一則訊息上限 4096 字。** 通知會自動截尾保留 assertion；完整輸出
+  永遠在 drawer 和 audit 裡。
+- **LAN 模式的 Host 白名單不要關。** 它擋的是 DNS rebinding；rebound 請求帶的
+  是攻擊者網域，不會誤傷正常使用。
+
+## 已知未解（誠實清單）
+
+- 非同步媒體生成若比 run 活得久，沒有背景取回器（規劃中）；目前規則是 run 內
+  等到完成。
+- `~/.bastet/secrets` 無自動清理。
+- 排程觸發工作流（持續維護範本的定期執行）尚未內建。
+- 完成分支的審查/合併仍是手動 git 操作（MR 連結會出現在推送輸出裡）。

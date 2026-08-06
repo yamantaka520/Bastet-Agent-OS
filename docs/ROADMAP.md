@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-07-31 · current version 0.18.1
+Last updated: 2026-08-07 · current version 0.22.x
 
 M0–M6 are done ([PROGRESS.md](../PROGRESS.md) says what was verified where). What
 follows is ordered by how much it would change daily use, not by how interesting
@@ -24,6 +24,13 @@ it is to build.
   generation to completion within their own run. A background fetcher that
   claims the result later (before the URL expires) and files it into the
   project would lift that limit.
+
+## Shipped since this file was first written
+
+PyPI + Docker Hub distribution (0.19), config-by-conversation and auto-push
+(0.20), the media loop and honest retry semantics (0.21), quota self-wait,
+Playwright tooling and per-stage time budgets (0.22). Details in
+[CHANGELOG.md](../CHANGELOG.md).
 
 ## Under consideration
 

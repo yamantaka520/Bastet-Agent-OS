@@ -1,6 +1,6 @@
 # Bastet Agent OS — Project History and Design Log
 
-Last updated: 2026-08-01
+Last updated: 2026-08-07
 
 ## Purpose
 
@@ -183,6 +183,70 @@ moved into the orchestrator, so every executor contributes, and context packs ar
 read *as the running agent*, which turns on the ACL that had been keeping nothing
 apart.
 
+### 2026-08-02 — the media loop, closed
+
+One day, one theme: things agents generate must land somewhere real.
+
+- **0.19.0** — the operator's missing handles, all found by running a real
+  project: a display timezone (storage stays UTC), a heartbeat on in-progress
+  cards (`updated_at` cannot tell working from stuck), 任務補給 (handing a
+  running job the Firebase project id its spec never contained), previews for
+  human approval (an approval without evidence is a blind signature), and the
+  first PyPI + Docker Hub releases.
+- **0.20.x** — models stay current (grok's whole lineup had turned over; the CLI
+  is now asked live, every model field is free-entry), Bastet configures Bastet
+  from the conversation (the `bastet-config` skill and the propose-then-apply
+  protocol — the model proposes, the human's click is the authority), and
+  finished work pushes itself to the project's remote. A same-day review pass
+  found four defects in the new code, including a credential that could travel
+  to the wrong host and `file:`/`env:` refs in chat proposals that could
+  exfiltrate host files. Both closed the same day, stricter than the admin UI.
+- **0.21.x** — generated media return to the chat (`$BASTET_CHAT_OUTBOX`,
+  rendered inline) and media stages must persist real files (vendor URLs
+  expire). Then three fixes from one live art card: a human retry refills the
+  rework budget (three manual retries had produced three instant re-blocks),
+  never background the generation and end the turn (a headless run's children
+  are reaped; the "completion notification" can never arrive), and a job
+  approved into done pushes like any other (the approve path skipped delivery
+  entirely — 52 fresh PNGs stayed local with no audit row).
+
+**The live proof of the whole loop**: a chat agent read the Novita docs it had
+just been permitted to fetch, proposed a conforming image resource, the human
+applied it, the agent called `seedream-5.0-lite` through the granted env,
+self-corrected on the real pixel-minimum constraint, downloaded the expiring S3
+result, and the orange cat rendered inline in the conversation. Credential never
+printed.
+
+### 2026-08-04 → 08-06 — the T3D saga: three cards, five lessons
+
+CatsWalker's Three.js tasks were heavy enough to find every remaining weak
+seam, one per day:
+
+- **Quota failures wait themselves out (0.22.0).** `You've hit your session
+  limit · resets 1:30am (Asia/Taipei)` blocked a card for hours — the deadline
+  was in the message, and only a human could act on it. The orchestrator now
+  parses the vendor's own reset time (timezone and all) and retries itself;
+  Telegram says 「會自己續跑 —— 不需要你做什麼」.
+- **Playwright became standard tooling (0.22.1)** — E2E gates want a real
+  browser and approval previews want real screenshots; "provide a screenshot"
+  had been an instruction without a means. The next card's approval carried six
+  viewport screenshots.
+- **Vendors tighten validation without notice (0.22.2).** OpenAI's strict
+  structured-output rules started rejecting the codex verdict schema outright
+  (`required` must list every key), killing every codex review before the model
+  saw a token. And the operator's retry-with-another-agent silently lost to the
+  role mapping — an explicit choice on retry is now a one-shot override.
+- **A stage can declare its own time budget (0.22.3).** A 50–70 minute
+  optimisation stage was killed four times at the fixed 3600s mark — an hour of
+  work lost each time. Templates carry `timeout_s` per stage now.
+- **Acceptance criteria must be verifiable where the work runs.** A reviewer
+  kept demanding real-device fps evidence no headless agent can produce; the
+  agent honestly logged "no real-device reports", the reviewer honestly
+  rejected, and the loop correctly refused to converge. The resolution was
+  human: a supply ruling split the criterion — machine-verifiable throttled
+  emulation for the review gate, the real device reserved for the human at
+  上線核准. Nobody faked anything, which is the point of the whole design.
+
 ## Design decisions, in one place
 
 | Decision | Why |
@@ -204,6 +268,12 @@ apart.
 | Context packs are read as the running agent | an unscoped pack recalls every project into every run |
 | One canonical i18n dictionary, others typed against it | a missing translation should fail the build, not ship blank |
 | A single `__version__`, four places checked by a test | the UI must show the version actually running |
+| The model proposes, the human applies (bastet-config) | configuration by conversation without giving the model write access to configuration |
+| Quota failures park with the vendor's own reset time | the deadline is in the message; waiting for a human to read it is waste |
+| A human retry refills the rework budget | pressing retry means "I fixed the world"; a spent budget made the button a no-op |
+| Retry's agent choice is a one-shot override | the role mapping is right for dispatch and wrong for explicit human intervention |
+| Per-stage `timeout_s` | one global timeout cannot serve both a lint pass and an hour-long optimisation |
+| Machine-verifiable criteria for machine gates, human criteria for human gates | a reviewer demanding evidence agents cannot produce loops honestly and forever |
 
 ## Mistakes kept on the record
 
@@ -222,6 +292,10 @@ Listed because each one changed how the code is written now.
 | A restart left a live card `in_progress` forever, untouchable by any button | anything that can die must have something that notices and resumes it |
 | asyncio's 64 KiB line limit killed runs after minutes of work | a limit you did not choose is still a limit you own |
 | Fixing that, a trailing comment swallowed `cwd=`/`env=` in three executors | guards that matter parse the code; grep cannot see a kwarg that moved into a comment |
+| The approve path skipped push, memory, and the done event | when two paths reach the same state, a test must walk both |
+| Agents backgrounded generation and waited for a notification that cannot arrive | one-shot runs must be told they are one-shot, with the incident in the brief |
+| A credential fallback could send a GitLab token to github.com | credentials travel only to the exact host they were configured for |
+| The event registry drifted eight types behind the code | a registry that nothing enforces is documentation, and stale documentation at that |
 
 ## Collaboration model
 

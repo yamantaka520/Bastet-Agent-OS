@@ -28,11 +28,14 @@ append-only 的稽核紀錄。
 
 - **會繼續跑的工作流引擎。** 多階段流程（規劃 → 實作 → 測試 → 審查 → 合併）搭配
   四種關卡。關卡沒過時，卡片會**退回**能修的階段，把失敗輸出一起帶過去，然後流程
-  自己往下走。只有真的走不下去才停下來問人。→ [關卡沒過的時候](#關卡沒過的時候)
+  自己往下走。廠商額度用盡會解析錯誤訊息裡的重置時間、自己等自己續跑。只有真的
+  走不下去才停下來問人。→ [關卡沒過的時候](#關卡沒過的時候)
 - **有燈號的專案生命週期。** 規劃中 → 待執行 → 執行中 ⇄ 暫停 → 維護中 → 已結案，
   是真正的狀態機：只允許宣告過的轉換，每次轉換都有稽核。卡片上有執行/暫停/停止。
-- **看板。** 任務卡透過 WebSocket 即時在階段欄位間移動；每張卡顯示標題、階段、
-  狀態，以及被自動返工過幾次。
+- **有生命跡象的看板。** 任務卡即時移動之外，執行中的卡片有階段進度條和心跳
+  （run 最後一行輸出 + 沉默多久，三分鐘沒動標 🟠）—— 分得出「在做事」和「卡住」。
+  Drawer 可以做**任務補給**（把執行中才知道的資料交給任務），人工核准附上 agent
+  留在 `._bastet/preview/` 的實際證據（截圖、摘要），Telegram 上以照片送達。
 - **資源池 + 計量 gateway。** LLM / MCP / API / SKILL / git 資源，各自有可見範圍
   （全域 / TEAM / 專案）、憑證用選單指向而不是複製一份、每個資源都有真的測試按鈕，
   並提供 OpenAI / Claude 相容 gateway 計量每次執行的花費。
@@ -40,8 +43,12 @@ append-only 的稽核紀錄。
   上：每次執行都會寫下做了什麼、關卡退了什麼、任務怎麼結束，歸屬到實際執行的
   agent 並限定在該專案範圍。Context pack 以**執行中的 agent 身分**讀取，AMOS 的
   ACL 才會生效。
-- **對話作為輸入通道。** 跟 agent 或資源池的 LLM 討論規劃、附上檔案與截圖，然後
-  直接從對話派工。Telegram 是第二個這樣的通道，支援 inline 核准。
+- **對話既是輸入也是輸出通道。** 跟 agent 或資源池的 LLM 討論規劃、附檔派工之外，
+  還能**在對話裡設定 Bastet 自己**：說「幫我接上某家的圖片 API」，agent 會提出一張
+  `bastet-config` 設定卡，由你按套用生效。生成的媒體（圖片、語音）經由 outbox
+  直接附回對話內嵌顯示。Telegram 是第二個通道，含 inline 核准與預覽照片。
+- **完工自動交付。** 每張完成的卡片 commit 到自己的 `bastet/<job_id>` 分支並用
+  專案自己的憑證推上遠端 —— 你的分支永遠不被寫入，合併仍是人的決定。
 - **看得懂的治理。** 三級角色、個別使用者 token、每個授權的預算與併發上限、每次
   執行的 worktree 或容器隔離，以及可搜尋的 hash 串接稽核紀錄。
 - **五語 WebUI。** 繁體中文 · 简体中文 · English · 日本語 · 한국어。
@@ -52,6 +59,13 @@ append-only 的稽核紀錄。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yamantaka520/Bastet-Agent-OS/main/install.sh | bash
+```
+
+或從 [PyPI](https://pypi.org/project/bastet-agent-os/) / [Docker Hub](https://hub.docker.com/r/yamantaka520/bastet-agent-os)：
+
+```bash
+pip install bastet-agent-os          # wheel 內含編譯好的 WebUI，主機不需要 Node
+docker run -v bastet:/data -p 8890:8890 yamantaka520/bastet-agent-os
 ```
 
 它會建立 `~/.bastet/venv`，安裝 Bastet + Agent Memory OS + Claude Agent SDK +
@@ -222,6 +236,8 @@ OS、turbovec、Claude Agent SDK、pytest，以及 `claude` / `codex` / `grok` /
 |---|---|
 | [docs/INSTALLATION.md](docs/INSTALLATION.md) | install.sh、系統需求、executor 登入、跑成服務、升級 |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 每個頁籤與每個 CLI 指令，從頭到尾 |
+| [docs/WORKFLOWS.md](docs/WORKFLOWS.md) | 工作流操作手冊：每個階段欄位、每種關卡、每種停下的狀況與處理方式 |
+| [docs/CAUTIONS.md](docs/CAUTIONS.md) | 注意事項 —— 實際營運踩過的每個坑與安全邊界 |
 | [docs/HISTORY.md](docs/HISTORY.md) | 專案歷程，以及每個決策為什麼這樣定 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 接下來要做什麼，以及刻意不做什麼 |
 | [docs/FEDERATION.md](docs/FEDERATION.md) | 跨主機的共同組織視圖 |

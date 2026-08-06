@@ -8,6 +8,24 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.22.4] - 2026-08-07
+
+### Added — the documentation caught up with the product
+Fourteen versions had shipped since the docs were written. Everything brought
+current (READMEs in both languages, USER_GUIDE, INSTALLATION, HISTORY, PROGRESS,
+ROADMAP), plus two new documents:
+
+- **docs/WORKFLOWS.md** — the workflow operations manual: every stage field
+  (including `timeout_s`), every gate, the rework loop, quota self-wait, retry
+  semantics (budget refill, one-shot agent override, workflow refresh),
+  supplies, previews, delivery, and a table of every way a card stops with what
+  to do about each.
+- **docs/CAUTIONS.md（注意事項）** — every operational pitfall hit in
+  production, with the boundary rules: the venv-on-PATH `python` trap, vendor
+  quota and validation surprises, unverifiable acceptance criteria, media URL
+  expiry, credential handling, restart effects, and the honest list of what is
+  still open.
+
 ## [0.22.3] - 2026-08-06
 
 ### Added — a stage can declare its own time budget

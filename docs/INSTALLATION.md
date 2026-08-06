@@ -28,8 +28,9 @@ What it does:
 
 1. creates `~/.bastet/venv`
 2. installs Bastet, `agent-memory-os[full]` (which brings turbovec for semantic
-   recall), `claude-agent-sdk`, and `pytest` (the shipped workflow presets use it
-   as a gate command)
+   recall), `claude-agent-sdk`, `pytest` (the shipped presets use it as a gate
+   command), `pillow` (media asset processing), and `playwright` **plus its
+   chromium browser** — the package without a browser dies at first use
 3. installs the executor CLIs using **each vendor's own official installer** —
    Claude Code, OpenAI Codex, xAI Grok Build, Google Antigravity (`agy`),
    NousResearch Hermes
