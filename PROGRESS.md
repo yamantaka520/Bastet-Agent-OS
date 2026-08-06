@@ -68,7 +68,8 @@ feature is confirmed against real vendor CLIs before release:
   configured — releases are published manually. The workflow no longer goes red
   over it: the tag/version check and the wheel build still run, and publishing
   is gated on `vars.PUBLISH_TO_PYPI` / the Docker Hub secrets, reporting a
-  skip notice instead of a failure.
+  skip notice instead of a failure — and the `pypi` environment job only exists
+  when the switch is on, so no failed deployment record appears either.
 - **The Windows CI leg is red by declaration** (`continue-on-error`): ~35 tests
   assume POSIX fake-executor scripts, forward-slash paths and 0600 bits. Real
   Windows support needs its own pass.

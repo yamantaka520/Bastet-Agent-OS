@@ -1,10 +1,10 @@
 # Release: PyPI (Trusted Publishing) + Docker Hub, on every v* tag.
 #
 # Publishing is OFF until the maintainer completes the one-time setup in their
-# own accounts (nothing here can do it for them). Until then the tag still gets
-# checked — version match, wheel builds — and the publish steps report as
-# skipped instead of failing, because a job that is red for a missing
-# credential says nothing about the release.
+# own accounts (nothing here can do it for them). Until then the tag is still
+# checked — version match, wheel builds, artifact uploaded — and no publish job
+# runs at all, so nothing goes red and no `pypi` deployment record is created
+# over a credential nobody configured.
 #
 #   PyPI  → project bastet-agent-os → Publishing → add GitHub publisher:
 #           owner yamantaka520, repo Bastet-Agent-OS,
@@ -21,11 +21,8 @@ on:
     tags: ["v*"]
 
 jobs:
-  pypi:
+  build:
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write        # Trusted Publishing: OIDC, no stored token
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -37,10 +34,28 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           test "$PKG" = "$TAG" || { echo "tag v$TAG != __version__ $PKG"; exit 1; }
       - run: pip install build && python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
       - if: vars.PUBLISH_TO_PYPI != 'true'
-        run: echo "::notice::PUBLISH_TO_PYPI is not set — built and verified, not published. See this workflow's header for the one-time Trusted Publishing setup."
-      - if: vars.PUBLISH_TO_PYPI == 'true'
-        uses: pypa/gh-action-pypi-publish@release/v1
+        run: echo "::notice::PUBLISH_TO_PYPI is not set — the wheel was built and verified, not published. See this workflow's header for the one-time Trusted Publishing setup."
+
+  # a separate job so the `pypi` environment — and the deployment record that
+  # comes with it — only exists once publishing is actually switched on
+  pypi:
+    needs: build
+    if: vars.PUBLISH_TO_PYPI == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # Trusted Publishing: OIDC, no stored token
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
 
   docker:
     runs-on: ubuntu-latest

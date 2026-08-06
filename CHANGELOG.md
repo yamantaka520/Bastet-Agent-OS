@@ -27,6 +27,12 @@ follows the same number and the WebUI prints it beside the title.
   on its two secrets — and reports a skip notice instead of failing. A job that
   is red for a credential nobody configured says nothing about the release.
 - CI/Release actions moved to `checkout@v5` / `setup-python@v6` (Node 20 EOL).
+- Release workflow split into `build` + `pypi`, so the `pypi` environment — and
+  the GitHub deployment record it creates — only exists once publishing is
+  switched on. Five stale failed `pypi` deployments were retired to `inactive`.
+- Docker Hub repository overview (`docs/dockerhub-overview.md`) written and
+  published: what is and is not in the image, the `/data` volume, uid 1000, and
+  the security note. Every claim verified by running the published image.
 
 ## [0.23.1] - 2026-08-07
 
