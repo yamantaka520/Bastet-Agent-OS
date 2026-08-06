@@ -235,7 +235,8 @@ OS、turbovec、Claude Agent SDK、pytest，以及 `claude` / `codex` / `grok` /
 | 文件 | 內容 |
 |---|---|
 | [docs/INSTALLATION.md](docs/INSTALLATION.md) | install.sh、系統需求、executor 登入、跑成服務、升級 |
-| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 每個頁籤與每個 CLI 指令，從頭到尾 |
+| [docs/USER_GUIDE.zh-Hant.md](docs/USER_GUIDE.zh-Hant.md) | 操作手冊（繁中）：上手、日常操作、卡住速查、維運 |
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | 每個頁籤與每個 CLI 指令（英文完整版） |
 | [docs/WORKFLOWS.md](docs/WORKFLOWS.md) | 工作流操作手冊：每個階段欄位、每種關卡、每種停下的狀況與處理方式 |
 | [docs/CAUTIONS.md](docs/CAUTIONS.md) | 注意事項 —— 實際營運踩過的每個坑與安全邊界 |
 | [docs/HISTORY.md](docs/HISTORY.md) | 專案歷程，以及每個決策為什麼這樣定 |

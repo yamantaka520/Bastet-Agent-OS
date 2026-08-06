@@ -623,7 +623,14 @@ def _collect_outbox(home_root, session_id: str, outbox: Path) -> list[dict[str, 
     try:
         if not outbox.is_dir():
             return items
+        root = outbox.resolve()
         for path in sorted(outbox.iterdir()):
+            # the outbox is agent-written: a symlink here would attach an
+            # arbitrary host file (the api token, a key) to the conversation
+            if path.is_symlink() or not path.resolve().is_relative_to(root):
+                log.warning("chat outbox: %s is a symlink/escape, refused",
+                            path.name)
+                continue
             if not path.is_file():
                 continue
             if len(items) >= OUTBOX_MAX_FILES:

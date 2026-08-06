@@ -357,6 +357,11 @@ def _apply_one(db: Db, home_root, action: dict[str, Any], actor: str) -> dict:
         # rewriting a credential row's ref through a model proposal would let a
         # poisoned conversation redirect every resource that points at it
         raise ValueError("憑證不能經由對話修改 —— 請用 管理→憑證。")
+    if row["name"] == SKILL_NAME:
+        # the guide every agent reads must not be redirectable by a proposal —
+        # pointing skill_source at attacker-chosen text would poison the next
+        # conversation's instructions
+        raise ValueError("內建的 bastet-config skill 不能經由對話修改。")
     merged = json.loads(row["config_json"] or "{}")
     merged.update(config)
     db.write("UPDATE resources SET endpoint=COALESCE(?, endpoint), "

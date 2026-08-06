@@ -8,6 +8,40 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.23.0] - 2026-08-07
+
+### Security — findings from a dedicated review, each with a pinned test
+The common shape: a directory the agent writes and the system collects, where a
+symlink is an instruction to exfiltrate whatever it points at.
+
+- **Preview collection refuses symlinks and escapes.** `._bastet/preview/` is
+  agent-written (and repo content is untrusted): a symlink named `x.png`
+  pointing at `~/.bastet/api_token` would have been copied into artifacts and
+  sent to Telegram as a "photo".
+- **The chat outbox refuses symlinks and escapes** — it has no extension filter
+  at all, so a symlink would have attached any host file to the conversation.
+- **Preview endpoints use resolved-path containment, not name sanitisation.**
+  The first fix used `Path(job_id).name` — which is `".."` for `".."`, a no-op —
+  and its own test disproved it. The property actually wanted (resolves inside
+  the artifacts dir) is now what is checked.
+- **The built-in `bastet-config` skill is not editable from chat** — redirecting
+  its `skill_source` would poison the guide every future conversation reads.
+
+### Fixed — the automatic quota-reset retry no longer refills the rework budget
+That refill is the human's "I fixed the world". A vendor limit interleaving
+with a rework loop would otherwise have disabled the cycles cap entirely.
+
+### Changed — install.sh defaults to PyPI
+Versioned, cache-friendly, and what the maintenance card compares against;
+`BASTET_REPO` still overrides for source installs.
+
+### Added — documentation
+`docs/USER_GUIDE.zh-Hant.md`（繁中操作手冊）: onboarding, daily operation per
+tab, a stuck-card quick table, and ops routines. SECURITY.md rewritten around
+the actual boundaries: where agent-written content crosses into system
+behaviour and the rule at each crossing, including everything this review
+added.
+
 ## [0.22.4] - 2026-08-07
 
 ### Added — the documentation caught up with the product

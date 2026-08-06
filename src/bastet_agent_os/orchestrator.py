@@ -694,14 +694,17 @@ class Orchestrator:
             job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if job["stage"] not in [s.name for s in stages]:
             raise ValueError(f"job {job_id} is at unknown stage {job['stage']!r}")
-        # a human retry is a fresh lease for the rework loop. Live case: a card
-        # exhausted its 3 cycles on a transient DNS failure; the operator pressed
-        # retry three times and got three instant re-blocks, because the retried
-        # REVIEWER kept rejecting the same diff and the spent budget meant the
-        # card could never travel back to the writing stage that would actually
-        # regenerate the work.
-        self.db.write("UPDATE jobs SET rework_count=0, rework_note=NULL, "
-                      "resume_at=NULL WHERE id=?", (job_id,))
+        # a HUMAN retry is a fresh lease for the rework loop (the live case: a
+        # card spent its cycles on a transient DNS failure and three manual
+        # retries produced three instant re-blocks). The automatic quota-reset
+        # retry is not a human judgement, so it must NOT refill the budget — a
+        # vendor limit interleaving with a rework loop would otherwise disable
+        # the cycles cap entirely.
+        if user.startswith("server:"):
+            self.db.write("UPDATE jobs SET resume_at=NULL WHERE id=?", (job_id,))
+        else:
+            self.db.write("UPDATE jobs SET rework_count=0, rework_note=NULL, "
+                          "resume_at=NULL WHERE id=?", (job_id,))
         agent = agent_id or job["default_agent_id"]
         if agent_id:
             # the human picked WHO runs this retry. Role assignment normally
@@ -989,7 +992,15 @@ class Orchestrator:
         target = self.home.artifacts_dir / job["id"] / "preview"
         target.mkdir(parents=True, exist_ok=True)
         kept: list[str] = []
+        root = source.resolve()
         for path in sorted(source.iterdir()):
+            # the preview dir is agent-written (and repo content is untrusted):
+            # a symlink named x.png pointing at ~/.bastet/api_token would copy
+            # the token into artifacts and send it to Telegram as a "photo"
+            if path.is_symlink() or not path.resolve().is_relative_to(root):
+                log.warning("job %s: preview %s is a symlink/escape, refused",
+                            job["id"], path.name)
+                continue
             if not path.is_file() or path.suffix.lower() not in self.PREVIEW_EXTENSIONS:
                 continue
             if len(kept) >= self.PREVIEW_LIMIT:

@@ -359,6 +359,7 @@ hard-coded string that skipped `t()`.
 |---|---|
 | [docs/INSTALLATION.md](docs/INSTALLATION.md) | install.sh, requirements, executor logins, running as a service, upgrading |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | every tab and every CLI command, end to end |
+| [docs/USER_GUIDE.zh-Hant.md](docs/USER_GUIDE.zh-Hant.md) | 操作手冊 — the operating manual in Traditional Chinese |
 | [docs/WORKFLOWS.md](docs/WORKFLOWS.md) | the workflow operations manual: every stage field, every gate, every stop and what to do about it |
 | [docs/CAUTIONS.md](docs/CAUTIONS.md) | 注意事項 — every operational pitfall hit in production, and the boundary rules |
 | [docs/HISTORY.md](docs/HISTORY.md) | the project journey and why each decision went the way it did |

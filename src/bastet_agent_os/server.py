@@ -1943,7 +1943,11 @@ def create_app(home: Home) -> FastAPI:
     @app.get("/api/jobs/{job_id}/previews",
              dependencies=[Depends(require_role("viewer"))])
     def list_previews(job_id: str):
-        folder = home.artifacts_dir / job_id / "preview"
+        # containment, not sanitisation: Path("..").name is ".." (only slashes
+        # strip), which the first attempt at this fix learned from its own test
+        folder = (home.artifacts_dir / job_id / "preview").resolve()
+        if not folder.is_relative_to(home.artifacts_dir.resolve()):
+            raise HTTPException(status_code=404, detail="preview not found")
         if not folder.is_dir():
             return []
         return sorted(p.name for p in folder.iterdir() if p.is_file())
@@ -1952,11 +1956,11 @@ def create_app(home: Home) -> FastAPI:
              dependencies=[Depends(require_role("viewer"))])
     def get_preview(job_id: str, name: str):
         from fastapi.responses import FileResponse
-        safe = Path(name).name                     # no traversal
-        path = home.artifacts_dir / job_id / "preview" / safe
-        if not path.is_file():
+        path = (home.artifacts_dir / job_id / "preview" / name).resolve()
+        if not path.is_relative_to(home.artifacts_dir.resolve()) \
+                or not path.is_file():
             raise HTTPException(status_code=404, detail="preview not found")
-        return FileResponse(str(path), filename=safe)
+        return FileResponse(str(path), filename=path.name)
 
     @app.post("/api/jobs/{job_id}/retry")
     async def retry_job(job_id: str, body: RetryIn,
