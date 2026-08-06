@@ -8,6 +8,26 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.23.2] - 2026-08-07
+
+### Fixed
+
+- `augment_path()` no longer prepends the interpreter's own bin directory when
+  it happens to be one of the well-known `TOOL_DIRS`. In the shipped Docker
+  image the interpreter lives in `/usr/local/bin`, so a service started with a
+  minimal PATH put Bastet's own `pytest` **ahead** of the project's — the exact
+  opposite of the documented rule. Found by running the suite inside the image;
+  GitHub's runners hide the interpreter in `hostedtoolcache`, so no CI leg could
+  have caught it. The test now asserts the directory appears exactly once, last.
+
+### Changed
+
+- Release workflow: the tag/version check and the wheel build still run on every
+  `v*` tag, but publishing is gated — PyPI on `vars.PUBLISH_TO_PYPI`, Docker Hub
+  on its two secrets — and reports a skip notice instead of failing. A job that
+  is red for a credential nobody configured says nothing about the release.
+- CI/Release actions moved to `checkout@v5` / `setup-python@v6` (Node 20 EOL).
+
 ## [0.23.1] - 2026-08-07
 
 ### Added

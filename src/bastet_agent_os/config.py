@@ -69,8 +69,12 @@ def augment_path() -> None:
     import sys
 
     current = os.environ.get("PATH", "").split(os.pathsep)
-    missing = [d for d in TOOL_DIRS if d not in current and Path(d).is_dir()]
     own_bin = str(Path(sys.executable).parent)
+    # in our own Docker image the interpreter lives in /usr/local/bin, which is
+    # also a TOOL_DIR — prepending it there would put Bastet's pytest ahead of
+    # the project's own, the exact opposite of the rule above
+    missing = [d for d in TOOL_DIRS
+               if d not in current and d != own_bin and Path(d).is_dir()]
     tail = [own_bin] if own_bin not in current and Path(own_bin).is_dir() else []
     if missing or tail:
         os.environ["PATH"] = os.pathsep.join(missing + current + tail)

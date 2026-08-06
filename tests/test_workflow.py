@@ -370,8 +370,12 @@ def test_the_venv_bin_is_on_path_for_gate_commands():
         entry for entry in os.environ["PATH"].split(os.pathsep) if entry != own)
     augment_path()
     entries = os.environ["PATH"].split(os.pathsep)
-    assert own in entries
-    assert entries.index(own) == len(entries) - 1
+    # last, and ONLY last: in our Docker image the interpreter sits in
+    # /usr/local/bin, which is also a TOOL_DIR, and prepending it there put
+    # Bastet's own pytest ahead of the project's (found by running the suite
+    # inside the shipped image — GitHub's runners hide it in hostedtoolcache)
+    assert entries.count(own) == 1
+    assert entries[-1] == own
 
 
 def test_doctor_sees_the_same_path_a_gate_will_see():

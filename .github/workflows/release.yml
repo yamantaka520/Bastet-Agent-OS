@@ -1,11 +1,17 @@
 # Release: PyPI (Trusted Publishing) + Docker Hub, on every v* tag.
 #
-# One-time setup, in the maintainer's accounts (nothing here can do it for you):
+# Publishing is OFF until the maintainer completes the one-time setup in their
+# own accounts (nothing here can do it for them). Until then the tag still gets
+# checked — version match, wheel builds — and the publish steps report as
+# skipped instead of failing, because a job that is red for a missing
+# credential says nothing about the release.
+#
 #   PyPI  → project bastet-agent-os → Publishing → add GitHub publisher:
 #           owner yamantaka520, repo Bastet-Agent-OS,
 #           workflow release.yml, environment pypi
 #           (no token ends up in GitHub — that is the point of Trusted Publishing)
 #   GitHub → repo Settings → Environments → create "pypi"
+#           → repo Settings → Variables → PUBLISH_TO_PYPI = true (the switch)
 #   Docker Hub → Account Settings → Personal access tokens → new token, then
 #   GitHub → repo Settings → Secrets → DOCKERHUB_USERNAME + DOCKERHUB_TOKEN
 name: Release
@@ -21,8 +27,8 @@ jobs:
     permissions:
       id-token: write        # Trusted Publishing: OIDC, no stored token
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Tag must match the package version
@@ -31,20 +37,33 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           test "$PKG" = "$TAG" || { echo "tag v$TAG != __version__ $PKG"; exit 1; }
       - run: pip install build && python -m build
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - if: vars.PUBLISH_TO_PYPI != 'true'
+        run: echo "::notice::PUBLISH_TO_PYPI is not set — built and verified, not published. See this workflow's header for the one-time Trusted Publishing setup."
+      - if: vars.PUBLISH_TO_PYPI == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
 
   docker:
     runs-on: ubuntu-latest
+    env:
+      # secrets cannot be read in a job-level `if`, so the gate lives in env
+      CONFIGURED: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - if: env.CONFIGURED != 'true'
+        run: echo "::notice::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN are not set — skipping the image build and push. See this workflow's header."
+      - if: env.CONFIGURED == 'true'
+        uses: actions/checkout@v5
+      - if: env.CONFIGURED == 'true'
+        uses: docker/setup-buildx-action@v3
+      - if: env.CONFIGURED == 'true'
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - id: version
+        if: env.CONFIGURED == 'true'
         run: echo "v=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      - if: env.CONFIGURED == 'true'
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64

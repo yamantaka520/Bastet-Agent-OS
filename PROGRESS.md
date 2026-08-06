@@ -65,7 +65,16 @@ feature is confirmed against real vendor CLIs before release:
 - **`~/.bastet/secrets` accumulates** rotated credential files.
 - **Telegram bot token** from an early session should still be rotated.
 - **Release workflow secrets** (PyPI Trusted Publisher + Docker Hub) not yet
-  configured — releases are published manually; CI itself is green.
+  configured — releases are published manually. The workflow no longer goes red
+  over it: the tag/version check and the wheel build still run, and publishing
+  is gated on `vars.PUBLISH_TO_PYPI` / the Docker Hub secrets, reporting a
+  skip notice instead of a failure.
+- **The Windows CI leg is red by declaration** (`continue-on-error`): ~35 tests
+  assume POSIX fake-executor scripts, forward-slash paths and 0600 bits. Real
+  Windows support needs its own pass.
+- **GitHub's hosted runners occasionally never pick up a job** ("not acquired by
+  Runner of type hosted"), which cancels it at ~15 min and reddens the run. Not
+  a repository failure — re-run the job.
 
 ## Ground rules this project holds itself to
 
