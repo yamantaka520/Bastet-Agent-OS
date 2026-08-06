@@ -33,6 +33,13 @@ follows the same number and the WebUI prints it beside the title.
 - Docker Hub repository overview (`docs/dockerhub-overview.md`) written and
   published: what is and is not in the image, the `/data` volume, uid 1000, and
   the security note. Every claim verified by running the published image.
+- New CI leg `image-base`: the suite also runs inside `python:3.12-slim`, the
+  base of the published image, where the interpreter sits in `/usr/local/bin`.
+  That is the environment the PATH bug above lived in and the six existing legs
+  could not see.
+- CI gained `workflow_dispatch`. During GitHub's 2026-08-06 Actions incident
+  webhooks were throttled to ~15% and commits landed with no run at all; a run
+  should be something you can ask for.
 
 ## [0.23.1] - 2026-08-07
 
