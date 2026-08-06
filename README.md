@@ -1,5 +1,11 @@
 # 🐈 Bastet Agent OS
 
+[![PyPI](https://img.shields.io/pypi/v/bastet-agent-os?label=pypi)](https://pypi.org/project/bastet-agent-os/)
+[![Python](https://img.shields.io/pypi/pyversions/bastet-agent-os?label=python)](https://pypi.org/project/bastet-agent-os/)
+[![CI](https://img.shields.io/github/actions/workflow/status/yamantaka520/Bastet-Agent-OS/ci.yml?branch=main&label=CI)](https://github.com/yamantaka520/Bastet-Agent-OS/actions/workflows/ci.yml)
+[![Docker pulls](https://img.shields.io/docker/pulls/yamantaka520/bastet-agent-os?logo=docker&label=docker%20pulls)](https://hub.docker.com/r/yamantaka520/bastet-agent-os)
+[![License](https://img.shields.io/github/license/yamantaka520/Bastet-Agent-OS?label=license)](https://github.com/yamantaka520/Bastet-Agent-OS/blob/main/LICENSE)
+
 **A local-first operating system for AI-agent teams.** Bastet organizes the
 agents you already use — Claude Code (CLI or Agent SDK), Codex CLI, Grok Build,
 Google Antigravity (`agy`), Hermes, or any OpenAI/Claude-compatible endpoint —
@@ -10,8 +16,31 @@ Bastet is a **control plane, not another agent framework**. Execution comes from
 orchestrating agents that already exist; what Bastet adds is governance, a
 workflow engine that keeps going when things fail, and team memory.
 
-Linux · macOS · Windows · WebUI + CLI · Apache-2.0 ·
+Linux · macOS · Windows · WebUI + CLI ·
 [繁體中文說明](README.zh-Hant.md)
+
+## Screenshots
+
+Live captures from the validation deployment — a real Three.js game project
+(CatsWalker) driven end-to-end by the workflow engine.
+
+**A project card, expanded** — the workflow's five stages, which role runs each,
+and the actual agents assigned (Codex, Claude Code, agy); PM decomposition
+confirmed, 30/30 tasks delivered:
+
+![Project card with workflow, role assignments and task plan](https://raw.githubusercontent.com/yamantaka520/Bastet-Agent-OS/main/assets/screenshot-project.png)
+
+**A finished card's drawer** — the spec, the 🔧 rework note, and the run
+history: three implement↔review cycles the loop resolved by itself, per-stage
+agents and cost:
+
+<img src="https://raw.githubusercontent.com/yamantaka520/Bastet-Agent-OS/main/assets/screenshot-drawer.png" alt="Job drawer: rework history, per-stage runs with agents and cost" width="55%">
+
+**The maintenance card** — every component's installed vs available version;
+the honest states are the point (a yellow 有新版 for the Claude Agent SDK, and
+`unknown` rather than a guessed "current" for tools that cannot say):
+
+![System settings and the maintenance card with component versions](https://raw.githubusercontent.com/yamantaka520/Bastet-Agent-OS/main/assets/screenshot-admin.png)
 
 ## Why
 

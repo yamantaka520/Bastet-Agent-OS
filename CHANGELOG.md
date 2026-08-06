@@ -8,6 +8,16 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.23.1] - 2026-08-07
+
+### Added
+
+- README (both languages): badge row (PyPI version, Python versions, CI,
+  Docker pulls, license) and a Screenshots section with three live captures
+  from the validation deployment — the expanded project card, a finished
+  card's drawer with its rework history, and the maintenance card. Image
+  URLs are absolute so the PyPI project page renders them too.
+
 ## [0.23.0] - 2026-08-07
 
 ### Security — findings from a dedicated review, each with a pinned test

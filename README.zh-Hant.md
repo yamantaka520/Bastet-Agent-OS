@@ -1,5 +1,11 @@
 # 🐈 Bastet Agent OS
 
+[![PyPI](https://img.shields.io/pypi/v/bastet-agent-os?label=pypi)](https://pypi.org/project/bastet-agent-os/)
+[![Python](https://img.shields.io/pypi/pyversions/bastet-agent-os?label=python)](https://pypi.org/project/bastet-agent-os/)
+[![CI](https://img.shields.io/github/actions/workflow/status/yamantaka520/Bastet-Agent-OS/ci.yml?branch=main&label=CI)](https://github.com/yamantaka520/Bastet-Agent-OS/actions/workflows/ci.yml)
+[![Docker pulls](https://img.shields.io/docker/pulls/yamantaka520/bastet-agent-os?logo=docker&label=docker%20pulls)](https://hub.docker.com/r/yamantaka520/bastet-agent-os)
+[![License](https://img.shields.io/github/license/yamantaka520/Bastet-Agent-OS?label=license)](https://github.com/yamantaka520/Bastet-Agent-OS/blob/main/LICENSE)
+
 **給 AI agent 團隊的 local-first 作業系統。** Bastet 把你已經在用的 agent —— Claude
 Code（CLI 或 Agent SDK）、Codex CLI、Grok Build、Google Antigravity（`agy`）、
 Hermes，或任何 OpenAI / Claude 相容端點 —— 組織成有角色、有工作流、有資源治理的
@@ -8,8 +14,28 @@ Hermes，或任何 OpenAI / Claude 相容端點 —— 組織成有角色、有�
 Bastet 是**控制平面，不是另一個 agent 框架**。執行力來自調度既有的 agent；Bastet
 補上的是治理、一個遇到失敗還會繼續跑的工作流引擎，以及團隊記憶。
 
-Linux · macOS · Windows · WebUI + CLI · Apache-2.0 ·
+Linux · macOS · Windows · WebUI + CLI ·
 [English](README.md)
+
+## 畫面展示
+
+驗證主機上的實機截圖 —— 一個真實的 Three.js 遊戲專案（CatsWalker），由工作流
+引擎從頭到尾驅動。
+
+**展開的專案卡** —— 工作流五階段、各階段的角色、實際指派的 agent（Codex、
+Claude Code、agy）；PM 拆解已確認，30/30 任務交付：
+
+![專案卡：工作流、角色指派與任務計畫](https://raw.githubusercontent.com/yamantaka520/Bastet-Agent-OS/main/assets/screenshot-project.png)
+
+**完成卡片的 drawer** —— 規格、🔧 返工註記、執行紀錄：三輪 實作↔審查 由迴圈
+自行收斂，各階段的 agent 與成本一目了然：
+
+<img src="https://raw.githubusercontent.com/yamantaka520/Bastet-Agent-OS/main/assets/screenshot-drawer.png" alt="任務 drawer：返工歷史、各階段執行與成本" width="55%">
+
+**維護卡片** —— 每個元件的已安裝/可用版本；重點是誠實的狀態（Claude Agent SDK
+的黃燈「有新版」，查不到版本的工具標「無法比對」而不是假裝最新）：
+
+![系統設定與維護卡片](https://raw.githubusercontent.com/yamantaka520/Bastet-Agent-OS/main/assets/screenshot-admin.png)
 
 ## 為什麼需要它
 
