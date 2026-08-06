@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # a push does not always produce a run: during GitHub's 2026-08-06 Actions
+  # incident webhooks were throttled to ~15%, so commits landed with no CI at
+  # all. This makes a run something you can ask for.
+  workflow_dispatch:
 
 jobs:
   test:
