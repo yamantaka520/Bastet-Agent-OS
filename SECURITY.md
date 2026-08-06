@@ -3,7 +3,7 @@
 ## Reporting
 
 Do not open a public issue for a vulnerability. Email the maintainer
-(ai1@t9online.com) with what you found, how to reproduce it, and what it lets an
+(manfred.mobile@gmail.com) with what you found, how to reproduce it, and what it lets an
 attacker do. You will get an acknowledgement, and a fix or an explanation of why
 it is not exploitable.
 
