@@ -67,6 +67,10 @@ class StageDef:
     # which stage gets it back; empty means "nearest earlier writable stage"
     rework_target: str = ""
     max_cycles: int = DEFAULT_MAX_CYCLES
+    # per-stage run budget in seconds; 0 inherits the dispatch default. Exists
+    # because a heavy stage (a 50-70 min Three.js optimisation pass, live) kept
+    # hitting the fixed 3600s and losing an hour of work to the kill.
+    timeout_s: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -74,7 +78,7 @@ class StageDef:
             "gate_config": self.gate_config, "read_only": self.read_only,
             "isolation": self.isolation, "max_retries": self.max_retries,
             "on_fail": self.on_fail, "rework_target": self.rework_target,
-            "max_cycles": self.max_cycles,
+            "max_cycles": self.max_cycles, "timeout_s": self.timeout_s,
         }
 
 
@@ -108,6 +112,7 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
             on_fail=on_fail,
             rework_target=item.get("rework_target") or "",
             max_cycles=int(item.get("max_cycles", DEFAULT_MAX_CYCLES)),
+            timeout_s=max(0, int(item.get("timeout_s", 0) or 0)),
         ))
     names = {s.name for s in stages}
     for stage in stages:

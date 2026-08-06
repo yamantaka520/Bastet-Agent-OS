@@ -763,7 +763,9 @@ class Orchestrator:
             run_memory.ensure_org(self.db, job["project_id"], agent["id"])
             workdir = self._ensure_workdir(job, req.use_worktree)
             clear_verdict(workdir)
-            token = run_tokens.issue(self.db, run_id, ttl_seconds=req.timeout_s + 300)
+            token = run_tokens.issue(
+                self.db, run_id,
+                ttl_seconds=(stage.timeout_s or req.timeout_s) + 300)
             self.db.write("UPDATE runs SET status='running', workdir=?, started_at=? WHERE id=?",
                           (workdir, now(), run_id))
             self._emit("run.started", job["project_id"], job_id=job["id"], run_id=run_id,
@@ -804,7 +806,9 @@ class Orchestrator:
                 run_id=run_id,
                 prompt=self._stage_prompt(job, stage, access.notes),
                 workdir=workdir,
-                timeout_s=req.timeout_s,
+                # a stage that declares its own budget wins over the dispatch
+                # default — heavy stages were losing an hour of work to 3600s
+                timeout_s=stage.timeout_s or req.timeout_s,
                 # WebFetch/WebSearch included by default: an agent implementing
                 # against a vendor API needs the vendor's docs, and "no
                 # permission" was the live complaint

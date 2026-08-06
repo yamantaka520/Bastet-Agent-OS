@@ -8,6 +8,16 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.22.3] - 2026-08-06
+
+### Added — a stage can declare its own time budget
+The dispatch default (3600s) was the only timeout, and a heavy stage — a
+50-70 minute Three.js optimisation pass, live — kept being killed at the hour
+mark, losing the whole run's work each time (four times on one card, including a
+run that had worked for 59 minutes). Templates can now set `timeout_s` per
+stage; the run token's TTL follows the effective budget. 0 (the default)
+inherits the dispatch value, nonsense clamps to inherit.
+
 ## [0.22.2] - 2026-08-05
 
 ### Fixed — every codex review died on `invalid_json_schema`

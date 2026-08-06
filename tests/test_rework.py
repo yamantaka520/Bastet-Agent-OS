@@ -448,3 +448,22 @@ async def test_the_override_is_one_shot(orch, seeded):
         "override applies to the retried stage only; the mapping resumes after")
     assert seeded.one("SELECT agent_override FROM jobs WHERE id=?",
                       (job_id,))["agent_override"] is None
+
+
+async def test_the_stage_timeout_reaches_the_executor(orch, seeded):
+    seen: list[int] = []
+
+    def capture(task):
+        seen.append(task.timeout_s)
+        return RunResult(status="succeeded", summary="ok")
+
+    add_template(seeded, "dev", [
+        {"name": "heavy", "gate": "auto", "timeout_s": 7200},
+        {"name": "light", "gate": "auto"},
+    ])
+    SCRIPT.append(capture)
+    SCRIPT.append(capture)
+    orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    assert seen == [7200, 3600]      # declared budget, then the dispatch default

@@ -390,3 +390,18 @@ def test_doctor_sees_the_same_path_a_gate_will_see():
                           capture_output=True, text=True,
                           env={**__import__("os").environ, "PYTHONPATH": "src"})
     assert proc.stdout.strip() == "True", proc.stderr
+
+
+def test_a_stage_can_declare_its_own_time_budget():
+    """Live case: a heavy optimisation stage ran 50-70 minutes and kept being
+    killed by the fixed dispatch default — four timeouts, an hour of work lost
+    each time. A template that knows its stage is heavy can now say so."""
+    stages = parse_stages([
+        {"name": "heavy", "gate": "auto", "timeout_s": 7200},
+        {"name": "light", "gate": "auto"},
+    ])
+    assert stages[0].timeout_s == 7200
+    assert stages[1].timeout_s == 0                # inherits the dispatch default
+    assert stages[0].to_dict()["timeout_s"] == 7200
+    assert parse_stages([{"name": "x", "gate": "auto", "timeout_s": -5}])[0] \
+        .timeout_s == 0                            # nonsense clamps to inherit
