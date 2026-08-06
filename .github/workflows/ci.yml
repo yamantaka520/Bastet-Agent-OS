@@ -34,3 +34,26 @@ jobs:
         run: ruff check src/ tests/
       - name: Test
         run: pytest -q
+
+  # The leg that would have caught 0.23.2: inside a python:3.12-slim container —
+  # the base of the image we publish — the interpreter lives in /usr/local/bin,
+  # which is also one of Bastet's TOOL_DIRS. Hosted runners keep python in
+  # hostedtoolcache, so PATH-order behaviour there says nothing about what the
+  # shipped artefact does.
+  image-base:
+    runs-on: ubuntu-latest
+    container: python:3.12-slim
+    steps:
+      - name: git (worktrees are the unit of work, and checkout wants it)
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git
+      - uses: actions/checkout@v5
+      - name: Identity for the worktree tests
+        run: |
+          git config --global user.email ci@bastet.invalid
+          git config --global user.name CI
+          git config --global init.defaultBranch main
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: pip install -e '.[dev]'
+      - run: pytest -q

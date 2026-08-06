@@ -247,6 +247,36 @@ seam, one per day:
   emulation for the review gate, the real device reserved for the human at
   上線核准. Nobody faked anything, which is the point of the whole design.
 
+### 2026-08-07 — the release day, and what the image was hiding
+
+The doc set, screenshots and badges went out (0.22.4 → 0.23.1), and then two
+days' worth of "CI is red" turned out to be three unrelated things wearing the
+same colour:
+
+- **A real bug, invisible to CI.** Running the suite inside our own published
+  image failed one test. `augment_path()` prepends the well-known `TOOL_DIRS`
+  and appends Bastet's own `bin` last, so a project shipping its own `pytest`
+  wins the gate. In the image the interpreter lives in `/usr/local/bin` — itself
+  a `TOOL_DIR` — so a minimal-PATH start prepended it and Bastet's runner won
+  instead: the documented rule, inverted, in the artefact we ship. GitHub's
+  runners keep Python in `hostedtoolcache`, so no CI leg could ever have seen
+  it. Fixed in 0.23.2; the test now pins "exactly once, last".
+- **A workflow red for a credential nobody configured.** Every `v*` tag failed
+  at `gh-action-pypi-publish` because Trusted Publishing was never set up, and
+  each attempt left a failed `pypi` deployment in the Deployments tab. The tag
+  check and the wheel build are worth running on every tag; the publish is not
+  worth failing over. Release split into `build` + a gated `pypi` job, so the
+  environment — and its deployment record — only exists once the switch is on.
+- **A platform outage.** GitHub Actions was in a major incident with webhooks
+  throttled to ~15%: jobs cancelled at 15 minutes with "not acquired by Runner
+  of type hosted", and pushes that produced no run at all. Nothing to fix in the
+  repository — but it did expose that CI could only be *pushed*, never *asked
+  for*, so `workflow_dispatch` was added.
+
+The Windows leg stayed red by declaration, as it has been: ~35 tests assume
+POSIX fake-executor scripts, forward-slash paths and 0600 bits. It reports and
+does not block, and real Windows support is still its own pass.
+
 ## Design decisions, in one place
 
 | Decision | Why |
@@ -274,6 +304,8 @@ seam, one per day:
 | Retry's agent choice is a one-shot override | the role mapping is right for dispatch and wrong for explicit human intervention |
 | Per-stage `timeout_s` | one global timeout cannot serve both a lint pass and an hour-long optimisation |
 | Machine-verifiable criteria for machine gates, human criteria for human gates | a reviewer demanding evidence agents cannot produce loops honestly and forever |
+| A publish step is gated, not attempted-and-failed | a job red for a missing credential says nothing about the release |
+| CI is dispatchable, not only push-triggered | during an Actions incident a push produces no run at all |
 
 ## Mistakes kept on the record
 
@@ -296,6 +328,7 @@ Listed because each one changed how the code is written now.
 | Agents backgrounded generation and waited for a notification that cannot arrive | one-shot runs must be told they are one-shot, with the incident in the brief |
 | A credential fallback could send a GitLab token to github.com | credentials travel only to the exact host they were configured for |
 | The event registry drifted eight types behind the code | a registry that nothing enforces is documentation, and stale documentation at that |
+| Our own image inverted the PATH rule, and no CI leg could see it | the suite runs inside the artefact we ship, not only on runners that look nothing like it |
 
 ## Collaboration model
 
