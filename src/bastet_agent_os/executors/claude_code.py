@@ -28,6 +28,7 @@ from .base import (
     TaskSpec,
     parse_event,
     register_builtin,
+    run_env,
 )
 
 log = logging.getLogger("bastet.executor")
@@ -81,7 +82,7 @@ class ClaudeCodeExecutor:
         if task.mcp_config:
             # pool MCP resources, granted to this project (SPEC §5.1)
             cmd += ["--mcp-config", task.mcp_config]
-        env = {**os.environ, **task.extra_env}
+        env = run_env(task)
         gateway_url = task.gateway_url
         if task.isolation == "container":
             from .. import container
@@ -108,6 +109,7 @@ class ClaudeCodeExecutor:
             limit=STREAM_LIMIT,     # a big tool result must not kill the run
             cwd=task.workdir,
             env=env,
+            stdin=asyncio.subprocess.DEVNULL,   # nothing may wait on a prompt
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=(sys.platform != "win32"),  # own process group for clean kill

@@ -78,6 +78,7 @@ const zhHans: Dict = {
   "sys.hint": "数据库与审计记录一律以 UTC 存储（跨机器才对得上）；这里只改变界面上时间的呈现。",
   "board.starting": "启动中…",
   "board.maybeStuck": "超过 3 分钟没有输出，可能卡住了 —— 点开查看",
+  "board.silentFor": "还活着，但已沉默",
   "board.noPreview": "这一关没有附预览 —— 判断依据只有下方 diff。（工作流已要求 agent 附上截图，新任务会有）",
   "board.answerPh": "补充说明或数据（随允许/拒绝一起发给 agent，选填）",
   "board.supplies": "任务补给（执行中提供数据）",

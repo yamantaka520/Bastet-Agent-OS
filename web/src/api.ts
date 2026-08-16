@@ -11,6 +11,7 @@ export type Job = {
   run_status?: string;
   heartbeat_at?: string | null;
   progress_text?: string | null;
+  progress_at?: string | null;
   updated_at: string;
 };
 

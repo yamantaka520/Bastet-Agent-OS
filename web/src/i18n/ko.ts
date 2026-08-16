@@ -75,6 +75,7 @@ const ko: Dict = {
   "sys.hint": "데이터베이스와 감사 기록은 항상 UTC 로 저장됩니다（머신 간 비교를 위해）. 이 설정은 화면 표시만 바꿉니다.",
   "board.starting": "시작 중…",
   "board.maybeStuck": "3분 넘게 출력이 없습니다 —— 멈췄을 수 있으니 열어서 확인",
+  "board.silentFor": "살아 있지만 침묵한 지",
   "board.noPreview": "이 게이트에는 미리보기가 없습니다 —— 판단 근거는 아래 diff 뿐입니다.（워크플로가 스크린샷을 요구하므로 새 작업에는 붙습니다）",
   "board.answerPh": "허용/거부와 함께 보낼 보충 설명이나 데이터（선택）",
   "board.supplies": "작업 보급（실행 중 데이터 전달）",

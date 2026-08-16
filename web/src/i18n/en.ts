@@ -75,6 +75,7 @@ const en: Dict = {
   "sys.hint": "The database and audit trail store UTC — that is what makes them comparable across machines. This setting only changes how times are rendered.",
   "board.starting": "starting…",
   "board.maybeStuck": "no output for 3+ minutes — possibly stuck, open to inspect",
+  "board.silentFor": "alive but silent for",
   "board.noPreview": "No preview came with this gate — the diff below is all there is. (The workflow asks agents for screenshots; new jobs will have them.)",
   "board.answerPh": "Extra context or data to send with allow/deny (optional)",
   "board.supplies": "Supplies (hand data to a running job)",

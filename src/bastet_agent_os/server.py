@@ -1845,11 +1845,16 @@ def create_app(home: Home) -> FastAPI:
             if row["status"] != "in_progress":
                 continue
             beat = db.one(
-                "SELECT status, heartbeat_at, progress_text, started_at FROM runs "
-                "WHERE job_id=? ORDER BY rowid DESC LIMIT 1", (row["id"],))
+                "SELECT status, heartbeat_at, progress_at, progress_text, "
+                "started_at FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 1",
+                (row["id"],))
             if beat is not None:
                 row["run_status"] = beat["status"]
                 row["heartbeat_at"] = beat["heartbeat_at"] or beat["started_at"]
+                # silence is the diagnostic: a card can be alive (heartbeat) and
+                # yet not have said a word for an hour, which is what being stuck
+                # behind a blocked child process actually looks like
+                row["progress_at"] = beat["progress_at"] or beat["started_at"]
                 row["progress_text"] = beat["progress_text"]
         return rows
 
@@ -2016,7 +2021,8 @@ def create_app(home: Home) -> FastAPI:
     def list_runs(limit: int = 50):
         return [dict(r) for r in db.query(
             "SELECT id, job_id, stage, agent_id, executor_type, status, cost_usd, "
-            "accounting_precision, started_at, finished_at FROM runs "
+            "accounting_precision, started_at, finished_at, heartbeat_at, "
+            "progress_at, progress_text FROM runs "
             "ORDER BY started_at DESC LIMIT ?", (limit,))]
 
     @app.get("/api/usage", dependencies=[Depends(require_role("viewer"))])

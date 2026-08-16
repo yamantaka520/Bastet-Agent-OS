@@ -33,7 +33,9 @@ from .base import (
     RunResult,
     TaskSpec,
     last_json_object,
+    parse_event,
     register_builtin,
+    run_env,
 )
 
 GRACE_SECONDS = 10
@@ -51,6 +53,40 @@ VERDICT_SCHEMA = {
 
 
 log = logging.getLogger("bastet.executor")
+
+
+def unwrap_envelope(obj: dict | None) -> dict:
+    """The final envelope, whichever output format produced it.
+
+    `--output-format json` ends with the envelope itself; `stream-json` ends
+    with `{"event": "result", "result": {...}}`. Reading the wrapper as the
+    envelope makes `status` None, which reads downstream as "every agy run
+    failed" — so both shapes are accepted here, once."""
+    if not isinstance(obj, dict):
+        return {}
+    if obj.get("event") == "result" and isinstance(obj.get("result"), dict):
+        return obj["result"]
+    return obj
+
+
+def _progress_text(event: dict | None) -> str:
+    """One streamed line → what to show a human waiting on this run.
+
+    The agent's own words when it is talking (`text_delta`), otherwise the step
+    it is working on — an empty string means "nothing worth a heartbeat", which
+    keeps the board from beating on protocol noise."""
+    if not event:
+        return ""
+    step = event.get("step_update")
+    if not isinstance(step, dict):
+        return ""
+    delta = str(step.get("text_delta") or "").strip()
+    if delta:
+        return delta
+    kind = str(step.get("step_type") or "").strip()
+    if kind and kind != "unknown" and step.get("state") == "ACTIVE":
+        return f"[{kind}]"
+    return ""
 
 
 @dataclass
@@ -82,7 +118,11 @@ class AgyExecutor:
         prompt = task.prompt
         if task.context_text:
             prompt = f"<context>\n{task.context_text}\n</context>\n\n{prompt}"
-        cmd = ["agy", "--output-format", "json",
+        # stream-json, not json: `json` prints nothing until the process exits,
+        # so a long stage looked dead on the board for its whole life (a live PM
+        # stage ran 53 minutes with no sign of life). The schema still binds the
+        # final result — `--json-schema` documents exactly that for stream mode.
+        cmd = ["agy", "--output-format", "stream-json",
                "--print-timeout", f"{task.timeout_s}s"]
         if task.read_only:
             # headless without skip-permissions soft-denies tools (de-facto
@@ -99,7 +139,8 @@ class AgyExecutor:
             # a big tool result must not kill the run
             limit=STREAM_LIMIT,
             cwd=task.workdir,
-            env={**os.environ, **task.extra_env, "AGY_CLI_DISABLE_AUTO_UPDATE": "1"},
+            env=run_env(task, AGY_CLI_DISABLE_AUTO_UPDATE="1"),
+            stdin=asyncio.subprocess.DEVNULL,   # nothing may wait on a prompt
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=(sys.platform != "win32"))
         return handle
@@ -130,8 +171,11 @@ class AgyExecutor:
                     continue
                 if not raw:
                     return
-                handle.raw_stdout += raw.decode(errors="replace")
-                yield RunEvent("progress", {"text": "…"})  # json mode: envelope at end
+                line = raw.decode(errors="replace")
+                handle.raw_stdout += line
+                text = _progress_text(parse_event(line))
+                if text:
+                    yield RunEvent("progress", {"text": text[:500]})
         finally:
             stderr_task.cancel()
 
@@ -169,7 +213,7 @@ class AgyExecutor:
         if process and process.returncode is None:
             await process.wait()
 
-        envelope = last_json_object(handle.raw_stdout) or {}
+        envelope = unwrap_envelope(last_json_object(handle.raw_stdout))
         usage = envelope.get("usage") or {}
         ok = (process is not None and process.returncode == 0
               and envelope.get("status") == "SUCCESS")

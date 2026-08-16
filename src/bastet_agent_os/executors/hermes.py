@@ -25,7 +25,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..workflow import read_verdict
-from .base import STREAM_LIMIT, SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
+from .base import (
+    STREAM_LIMIT,
+    SUMMARY_LIMIT,
+    RunEvent,
+    RunResult,
+    TaskSpec,
+    register_builtin,
+    run_env,
+)
 
 GRACE_SECONDS = 10
 DEFAULT_TOOLSETS = "terminal"
@@ -91,13 +99,13 @@ class HermesExecutor:
         cmd = ["hermes", "-z", prompt,
                "--provider", "bastet", "-m", task.llm["model"],
                "-t", toolsets]
-        env = {**os.environ, **task.extra_env,
-               "HERMES_HOME": str(profile_dir),
-               "BASTET_RUN_TOKEN": task.run_token}
+        env = run_env(task, HERMES_HOME=str(profile_dir),
+                      BASTET_RUN_TOKEN=task.run_token)
         handle.process = await asyncio.create_subprocess_exec(
             *cmd,
             limit=STREAM_LIMIT,     # a big tool result must not kill the run
             cwd=task.workdir, env=env,
+            stdin=asyncio.subprocess.DEVNULL,   # nothing may wait on a prompt
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=(sys.platform != "win32"))
         return handle

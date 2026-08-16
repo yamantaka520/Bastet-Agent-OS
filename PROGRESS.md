@@ -1,17 +1,20 @@
 # Bastet Agent OS Progress
 
-Last updated: 2026-08-07
+Last updated: 2026-08-17
 
 ## Current project status
 
-- Released: **v0.22.3** (v0.22.4 pending: documentation set). Version arc
-  v0.1.0 → v0.22.x in ten days (2026-07-28 → 2026-08-06), ~100 commits. See
-  [CHANGELOG.md](CHANGELOG.md) for the full trail and
-  [docs/HISTORY.md](docs/HISTORY.md) for why each decision went the way it did.
-- Milestones M0–M6 complete, plus the 08-02 → 08-06 hardening arc: the media
+- Released: **v0.24.0**. Version arc v0.1.0 → v0.24.0 in three weeks
+  (2026-07-28 → 2026-08-17), ~110 commits. See [CHANGELOG.md](CHANGELOG.md) for
+  the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
+  went the way it did.
+- Milestones M0–M6 complete, plus two hardening arcs: 08-02 → 08-06 (the media
   loop, quota self-wait, per-stage time budgets, retry semantics that respect
-  human intent.
-- Test suite: **389 passing**, `ruff` clean, Linux/macOS CI green.
+  human intent) and 08-16 → 08-17 (headless runs cannot be prompted — stdin is
+  closed and the env says CI; every run heartbeats even when its executor is
+  silent, and the board separates "alive" from "talking").
+- Test suite: **414 passing**, `ruff` clean; CI green on Linux/macOS and
+  inside the shipped Docker base image (Windows legs are declarative).
 - Distribution: [PyPI](https://pypi.org/project/bastet-agent-os/) (wheel carries
   the built WebUI — no Node on the host) and
   [Docker Hub](https://hub.docker.com/r/yamantaka520/bastet-agent-os)

@@ -37,6 +37,7 @@ from .base import (
     last_json_object,
     parse_event,
     register_builtin,
+    run_env,
 )
 
 GRACE_SECONDS = 10
@@ -101,7 +102,7 @@ class GrokExecutor:
         if task.llm and task.llm.get("model"):
             cmd += ["-m", task.llm["model"]]
 
-        env = {**os.environ, **task.extra_env, "GROK_DISABLE_AUTOUPDATER": "1"}
+        env = run_env(task, GROK_DISABLE_AUTOUPDATER="1")
         if task.gateway_url:
             env["GROK_MODELS_BASE_URL"] = f"{task.gateway_url}/v1"
             env["XAI_API_KEY"] = task.run_token or ""
@@ -111,6 +112,7 @@ class GrokExecutor:
             # a big tool result must not kill the run
             limit=STREAM_LIMIT,
             cwd=task.workdir, env=env,
+            stdin=asyncio.subprocess.DEVNULL,   # nothing may wait on a prompt
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=(sys.platform != "win32"))
         return handle

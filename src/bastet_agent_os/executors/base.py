@@ -8,6 +8,7 @@ plane can persist it (runs.executor_handle_json) and re-attach after restart.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
@@ -69,6 +70,21 @@ def last_json_object(text: str) -> dict[str, Any] | None:
             return whole
     except json.JSONDecodeError:
         pass
+    # line-delimited output (every `stream-json` mode): the last complete line
+    # IS the envelope. The character scan below cannot be used for this — it
+    # keeps the last object to *start*, which inside `{"result":{...,"usage":
+    # {...}}}` is the nested usage dict, so a successful run read as "no status
+    # => failed". Caught by replaying a real agy transcript.
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
     decoder = json.JSONDecoder()
     found: dict[str, Any] | None = None
     for index, char in enumerate(text):
@@ -98,6 +114,35 @@ SUMMARY_LIMIT = 200_000
 # The reader has to hold the largest single line an agent can emit, which is
 # bounded by the tool output it decides to print, not by anything we control.
 STREAM_LIMIT = 32 * 1024 * 1024
+
+
+# A headless run has nobody to answer a prompt, so nothing it spawns may ask.
+# Live incident: a PM stage ran `npm exec playwright --version`; npx wanted to
+# install the package first and asked "Ok to proceed? (y)". Its stdin was a tty,
+# so it waited — 52 minutes, 2 seconds of CPU, the agent blocked on its own
+# child, the whole card frozen behind a question no human would ever see.
+#
+# Two halves, both needed: the env vars stop the well-behaved tools from asking,
+# and stdin=DEVNULL (below) means anything that asks anyway reads EOF and fails
+# fast instead of hanging. Both are inherited by grandchildren, which is the
+# point — we do not control what the agent decides to run.
+NONINTERACTIVE_ENV = {
+    "CI": "1",                      # near-universal "nobody is watching" signal
+    "npm_config_yes": "true",       # npx: install without asking
+    "NPM_CONFIG_YES": "true",
+    "GIT_TERMINAL_PROMPT": "0",     # git: fail instead of asking for credentials
+    "DEBIAN_FRONTEND": "noninteractive",
+    "PIP_NO_INPUT": "1",
+    "PYTHONUNBUFFERED": "1",        # progress lines arrive while they still matter
+}
+
+
+def run_env(task: TaskSpec, **extra: str) -> dict[str, str]:
+    """The environment every CLI executor spawns with.
+
+    `extra_env` (pool credentials) wins over our defaults; the non-interactive
+    block is applied first so a resource can still override it deliberately."""
+    return {**os.environ, **NONINTERACTIVE_ENV, **task.extra_env, **extra}
 
 
 @dataclass

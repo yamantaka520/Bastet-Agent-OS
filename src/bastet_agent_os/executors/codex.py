@@ -40,6 +40,7 @@ from .base import (
     last_json_object,
     parse_event,
     register_builtin,
+    run_env,
 )
 
 GRACE_SECONDS = 10
@@ -113,7 +114,7 @@ class CodexExecutor:
             schema_path = meta_dir / "verdict-schema.json"
             schema_path.write_text(json.dumps(VERDICT_SCHEMA))
             cmd += ["--output-schema", str(schema_path)]
-        env = {**os.environ, **task.extra_env}
+        env = run_env(task)
         if task.gateway_url:
             # route inference through the gateway: Responses wire, token via env
             cmd += [
@@ -132,6 +133,7 @@ class CodexExecutor:
             # a big tool result must not kill the run
             limit=STREAM_LIMIT,
             cwd=task.workdir, env=env,
+            stdin=asyncio.subprocess.DEVNULL,   # nothing may wait on a prompt
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=(sys.platform != "win32"))
         return handle

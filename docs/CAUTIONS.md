@@ -60,6 +60,13 @@
   = 額度重算，這是「我修好環境了，再來」的表達方式。
 - **審查階段一定要 `read_only: true`。** 否則返工目標的推算會把工作交回審查者
   自己 —— 它不該修它剛拒絕的東西。
+- **會發問的指令＝無限期卡住。** headless 執行沒有人可以回答。實際事故：某階段
+  跑 `npm exec playwright --version`，npx 想先安裝、停在「Ok to proceed? (y)」，
+  卡了 52 分鐘（只用掉 2 秒 CPU），agent 等自己的子行程，整張卡動不了。系統這端
+  已經把每個 executor 的 stdin 接到 `/dev/null` 並設好 `CI`／`npm_config_yes`／
+  `GIT_TERMINAL_PROMPT=0`（子孫行程一併繼承），所以現在會**立刻失敗**而不是等；
+  但寫工作流時仍要避開會互動的指令，並優先用主機上裝好的工具（Playwright 是
+  已安裝的 CLI，不要 `npx`）。
 
 ## 媒體任務
 

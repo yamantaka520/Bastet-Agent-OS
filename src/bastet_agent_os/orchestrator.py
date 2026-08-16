@@ -555,6 +555,28 @@ class Orchestrator:
 
     # -- in-run interactions (SPEC §5.1.1 interaction_request) ---------------------
 
+    LIVENESS_PERIOD_S = 20
+
+    async def _liveness_beat(self, run_id: str, handle) -> None:
+        """Beat while the run is alive, even when it says nothing.
+
+        A one-shot executor (agy's `json` mode, every read-only reviewer) prints
+        nothing until it exits, so a stream-only heartbeat left those cards
+        looking dead for their entire life. This beat claims only what it can
+        check — the process has not exited — and never touches progress_text,
+        so "alive" and "said something" stay separable on the board."""
+        process = getattr(handle, "process", None)
+        while True:
+            await asyncio.sleep(self.LIVENESS_PERIOD_S)
+            if process is not None and process.returncode is not None:
+                return                      # exited: result() owns it from here
+            try:
+                self.db.write("UPDATE runs SET heartbeat_at=? WHERE id=? "
+                              "AND status='running'", (now(), run_id))
+            except Exception:               # a beat must never break a run
+                log.warning("run %s: liveness beat failed", run_id, exc_info=True)
+                return
+
     def _record_interaction(self, job, run_id: str, data: dict) -> None:
         request_id = str(data.get("request_id") or new_id("itx"))
         self.db.write(
@@ -836,6 +858,7 @@ class Orchestrator:
                           (json.dumps(handle.state()), run_id))
             self._live[run_id] = (executor, handle)
             last_beat = 0.0
+            watchdog = asyncio.create_task(self._liveness_beat(run_id, handle))
             try:
                 async for event in executor.stream(handle):
                     if event.type == "progress":
@@ -847,15 +870,18 @@ class Orchestrator:
                         clock = asyncio.get_event_loop().time()
                         if clock - last_beat >= 2.0:
                             last_beat = clock
+                            stamp = now()
                             self.db.write(
-                                "UPDATE runs SET heartbeat_at=?, progress_text=? "
-                                "WHERE id=?", (now(), text[:300], run_id))
+                                "UPDATE runs SET heartbeat_at=?, progress_at=?, "
+                                "progress_text=? WHERE id=?",
+                                (stamp, stamp, text[:300], run_id))
                             self._emit("run.progress", job["project_id"],
                                        job_id=job["id"], run_id=run_id,
                                        stage=stage.name, text=text[:200])
                     elif event.type == "interaction_request":
                         self._record_interaction(job, run_id, event.data)
             finally:
+                watchdog.cancel()
                 self._live.pop(run_id, None)
             result = await executor.result(handle)
             self._finalize_run(job["id"], run_id, workdir, result)
@@ -962,7 +988,11 @@ class Orchestrator:
                 "網頁類專案主機上備有 Playwright（含 chromium）可直接截圖："
                 "`playwright screenshot --viewport-size=1280,800 "
                 "'http://localhost:PORT' 檔名.png`，或在測試裡用 "
-                "page.screenshot()。啟動本地伺服器截完記得收掉。")
+                "page.screenshot()。啟動本地伺服器截完記得收掉。\n"
+                "這個 Playwright 是已安裝好的 CLI，**不要**用 `npx playwright` 或 "
+                "`npm exec playwright` 去裝它 —— 真實事故：一張卡在 "
+                "`npm exec playwright --version` 上卡了 52 分鐘，因為 npx 想先安裝"
+                "並在等人回答 y。任何會問問題的指令都不會有人回答。")
         if stage.gate == "agent-review":
             parts.append(REVIEW_INSTRUCTIONS)
             diff = self._job_diff(job)

@@ -77,6 +77,7 @@ const zhHant = {
   "sys.hint": "資料庫與稽核紀錄一律以 UTC 儲存（跨機器才對得起來）；這裡只改變畫面上時間的呈現。",
   "board.starting": "啟動中…",
   "board.maybeStuck": "超過 3 分鐘沒有輸出，可能卡住了 —— 點開查看",
+  "board.silentFor": "還活著，但已沉默",
   "board.noPreview": "這一關沒有附預覽 —— 判斷依據只有下方 diff。（工作流已要求 agent 附上截圖，新任務會有）",
   "board.answerPh": "補充說明或資料（隨允許/拒絕一起送給 agent，選填）",
   "board.supplies": "任務補給（執行中提供資料）",

@@ -123,13 +123,21 @@ function Heartbeat({ job, t }: { job: Job; t: T }) {
   }, []);
   const at = job.heartbeat_at;
   if (!at) return <div className="card-meta pulse">⏳ {t("board.starting")}</div>;
-  const seconds = Math.round((Date.now() - new Date(at.match(/[+Z]/i) ? at : at + "Z").getTime()) / 1000);
-  const stale = seconds > 180;
+  const ago = (s: string) =>
+    Math.round((Date.now() - new Date(s.match(/[+Z]/i) ? s : s + "Z").getTime()) / 1000);
+  // alive and talking are different questions. A run blocked on a child process
+  // that is waiting for input stays alive indefinitely while saying nothing —
+  // that is what a stuck card actually looks like, so silence gets its own clock.
+  const dead = ago(at) > 180;
+  const silent = job.progress_at ? ago(job.progress_at) > 600 : false;
+  const worry = dead || silent;
   return (
-    <div className={`card-meta ${stale ? "stale" : "pulse"}`}>
-      {stale ? "🟠" : "🟢"} {fmtAgo(at, t)}
+    <div className={`card-meta ${worry ? "stale" : "pulse"}`}>
+      {worry ? "🟠" : "🟢"} {fmtAgo(at, t)}
       {job.progress_text ? ` · ${job.progress_text.slice(0, 60)}` : ""}
-      {stale ? ` · ${t("board.maybeStuck")}` : ""}
+      {dead ? ` · ${t("board.maybeStuck")}`
+            : silent ? ` · ${t("board.silentFor")} ${fmtAgo(job.progress_at!, t)}`
+            : ""}
     </div>
   );
 }

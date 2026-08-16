@@ -355,6 +355,13 @@ class Db:
                 self._conn.execute("ALTER TABLE runs ADD COLUMN heartbeat_at TEXT")
             if "progress_text" not in run_cols:
                 self._conn.execute("ALTER TABLE runs ADD COLUMN progress_text TEXT")
+            if "progress_at" not in run_cols:
+                # when the run last SAID something, as opposed to heartbeat_at =
+                # when it was last confirmed alive. Conflating the two hid a real
+                # incident: a stage sat alive-but-silent for 52 minutes (blocked
+                # on an interactive prompt inside a child process) and the board
+                # had no way to show the difference.
+                self._conn.execute("ALTER TABLE runs ADD COLUMN progress_at TEXT")
             channel_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(channels)")}
             if "name" not in channel_cols:
                 self._conn.execute("ALTER TABLE channels ADD COLUMN name TEXT")

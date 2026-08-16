@@ -8,6 +8,49 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.24.0] - 2026-08-17
+
+A card sat "in progress" for 52 minutes with nothing happening and no way to
+tell. Both halves of that are fixed here.
+
+### Fixed
+
+- **Nothing a run spawns can wait for a human.** A PM stage ran `npm exec
+  playwright --version`; npx wanted to install the package first and asked "Ok
+  to proceed? (y)". Its stdin was a tty, so it waited — 52 minutes, 2 seconds of
+  CPU, the agent blocked on its own child, the card frozen behind a question
+  nobody would ever see. Every CLI executor now spawns with `stdin=DEVNULL` and
+  a non-interactive environment (`CI`, `npm_config_yes`, `GIT_TERMINAL_PROMPT=0`,
+  `DEBIAN_FRONTEND`, `PIP_NO_INPUT`), both inherited by grandchildren — because
+  what the agent decides to run is not ours to control. The human-approve brief
+  also names the incident and says not to `npx` the Playwright that is already
+  installed.
+- **`last_json_object` returned the wrong object for line-delimited output.**
+  It kept the last object to *start*, which inside `{"result":{…,"usage":{…}}}`
+  is the nested usage dict — so a successful run parsed as "no status", i.e.
+  failed. The last complete line is now preferred; the character scan remains
+  for pretty-printed output. Found by replaying a real agy transcript, not by
+  reasoning about it.
+
+### Changed
+
+- **agy streams.** It ran `--output-format json`, which prints nothing until the
+  process exits: a 53-minute stage showed no sign of life for its entire run,
+  and all 23 of its heartbeats were a literal `…`. Now `--output-format
+  stream-json`, with the agent's own words as progress text. The schema still
+  binds the final result, and `result()` accepts both envelope shapes — the
+  streamed one wraps it, and reading the wrapper would have marked every agy run
+  failed.
+- **A run reports alive even when it says nothing.** A 20-second beat, running
+  alongside the stream, claims only what it can check: the process has not
+  exited. One-shot executors (every read-only reviewer) no longer look dead for
+  their whole life. A failing beat can never break a run.
+- **The board separates "alive" from "talking".** New `runs.progress_at` records
+  when a run last *said* something, next to `heartbeat_at` for when it was last
+  confirmed alive; the card turns amber after 10 minutes of silence even while
+  the process is healthy. That distinction is exactly what the 52-minute hang
+  looked like from outside. `/api/runs` now exposes all three.
+
 ## [0.23.2] - 2026-08-07
 
 ### Fixed

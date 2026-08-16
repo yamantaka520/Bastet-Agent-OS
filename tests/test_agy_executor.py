@@ -58,7 +58,10 @@ async def test_success_with_usage(fake_agy, tmp_path):
     assert (result.tokens_in, result.tokens_out, result.cache_read) == (100, 35, 60)
     args = log.read_text()
     assert "--dangerously-skip-permissions" in args
-    assert "--output-format json" in args
+    # stream-json, not json: one-shot mode prints nothing until the process
+    # exits, which left long stages looking dead on the board for their whole
+    # life (see tests/test_liveness.py)
+    assert "--output-format stream-json" in args
     assert f"CWD:{tmp_path}" in args or "CWD:/private" in args  # workdir = process cwd
 
 
