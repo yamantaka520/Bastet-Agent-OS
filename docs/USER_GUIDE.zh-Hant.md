@@ -114,6 +114,16 @@ hash 串接、append-only。搜尋：關鍵字（含 detail 內容）、類別�
 診斷順序：drawer 的失敗輸出 → `bastet audit` → 心跳最後一行 →
 `journalctl --user -u bastet`。
 
+### 專案監督與自動解卡
+
+Project runner 不再只等待卡片。背景 supervisor 會監督整個專案：heartbeat 只代表
+程序存活，`progress_at` 才代表有實質進度。若 live run 連續 15 分鐘沒有語意進度，
+引擎會保留 worktree 後中斷；遇到 max-turns、executor 無輸出或 driver 遺失，會做
+最多兩次受控恢復並優先換同角色代理。驗收失敗與人工核准不會被自動跳過。
+
+human-approve 前的 `._bastet/preview/` 會整理成核准附件清單；Telegram 直接傳送
+圖片、影片與文件，WebUI 卡片保留同一份附件，不再只顯示檔名。
+
 ## 5. CLI 速查
 
 ```bash

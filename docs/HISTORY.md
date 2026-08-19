@@ -168,6 +168,24 @@ script: "test:e2e"` used to stop the card dead as a "configuration problem". It
 to add the real script or dependency, and to report a genuinely wrong command
 rather than fake a green exit.
 
+### 2026-08-19 — CatsWalker exposed the missing project supervisor
+
+The rework loop governs a gate failure; it did not own a project when an
+executor reached max turns, a live process stopped making semantic progress, or
+the stage driver disappeared between a successful run and its gate. CatsWalker
+hit those boundaries and needed manual SSH intervention. That is a control-plane
+defect, not a difficult card.
+
+Added a bounded project supervisor that separates heartbeat from semantic
+progress, interrupts a fifteen-minute fake-live run, retries only classified
+engine/executor failures (at most twice, preferring an alternate role agent),
+and resumes a truly missing driver without duplicating a gate still running.
+Every intervention is audited and written to project-scoped AMOS memory.
+
+Approval evidence is now a review package: Bastet generates a manifest and
+Telegram sends photos, playable videos, and documents instead of naming files
+that only exist in WebUI. See `docs/INCIDENT-2026-08-CATSWALKER-SUPERVISION.md`.
+
 **Then validation found the thing that made all of it pointless.** The loop ran
 on the host, a real Claude Code agent changed `a - b` to `a + b`, the gate went
 green, the job finished — and cleanup deleted the fix. `git worktree remove

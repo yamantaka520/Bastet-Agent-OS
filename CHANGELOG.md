@@ -8,6 +8,32 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.24.1] - 2026-08-19
+
+### Added
+
+- **A bounded project supervisor.** It distinguishes process heartbeat from
+  semantic progress, interrupts a live run after fifteen minutes without
+  progress, and automatically recovers classified engine/executor failures
+  (`max turns`, no output, lost/orphaned driver) at most twice. Recovery prefers
+  another enabled agent and writes both the audit trail and project AMOS memory.
+- **Complete approval packages.** Bastet generates `_review-manifest.md`; Telegram
+  sends images as photos, videos as playable video, and PDF/HTML/Markdown/text as
+  documents instead of listing filenames that approvers cannot inspect.
+
+### Fixed
+
+- Successful runs missing a gate because their driver disappeared are resumed,
+  while `_driving_jobs` prevents the supervisor from duplicating a legitimate
+  long-running `tests-pass` gate.
+- New job worktrees use project `base_ref`, then `main`/`master`, rather than the
+  host repository's ambient checkout.
+- The whole test suite now points `AGENT_MEMORY_HOME` at a per-test temporary
+  store. Tests no longer write the operator's real AMOS on an unrestricted host
+  or fail read-only inside a sandbox.
+- Human approval and acceptance failures remain human decisions; the supervisor
+  never approves or weakens a gate.
+
 ## [0.24.0] - 2026-08-17
 
 A card sat "in progress" for 52 minutes with nothing happening and no way to

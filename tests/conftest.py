@@ -7,6 +7,17 @@ from bastet_agent_os.orchestrator import Orchestrator
 from bastet_agent_os.pricing import PriceBook
 
 
+@pytest.fixture(autouse=True)
+def isolated_amos(tmp_path, monkeypatch):
+    """A test must never read or write the operator's real Agent Memory OS.
+
+    Without this default, TestClient cases that create teams instantiate
+    MemoryClient at ~/.agent-memory. In a sandbox that path is read-only; on an
+    unrestricted workstation the same bug silently pollutes production memory.
+    """
+    monkeypatch.setenv("AGENT_MEMORY_HOME", str(tmp_path / "amos"))
+
+
 @pytest.fixture
 def db(tmp_path):
     d = Db(tmp_path / "test.db")
@@ -64,4 +75,3 @@ def orch(seeded, tmp_path):
                  "updated_at) VALUES('fakebot','fakebot','Fake','fake',datetime('now'),"
                  "datetime('now'))")
     return Orchestrator(seeded, home, PriceBook(), "http://127.0.0.1:0")
-

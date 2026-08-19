@@ -159,7 +159,10 @@ async def test_previews_left_by_the_stage_survive_to_the_approval(orch, seeded):
 
     kept = sorted(p.name for p in
                   (orch.home.artifacts_dir / job_id / "preview").iterdir())
-    assert kept == ["screen.png", "summary.md"]
+    assert kept == ["_review-manifest.md", "screen.png", "summary.md"]
+    manifest = (orch.home.artifacts_dir / job_id / "preview" /
+                "_review-manifest.md").read_text()
+    assert "screen.png" in manifest and "直接檢視畫面" in manifest
     detail = seeded.one("SELECT detail_json FROM audit_log WHERE action='job.previews'")
     assert "screen.png" in detail["detail_json"]
 

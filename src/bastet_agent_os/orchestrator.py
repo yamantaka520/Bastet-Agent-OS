@@ -21,6 +21,7 @@ import json
 import logging
 import subprocess
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import run_memory, run_tokens
@@ -84,6 +85,7 @@ class Orchestrator:
         self._grant_slots: dict[str, asyncio.Semaphore] = {}
         self._tasks: set[asyncio.Task] = set()
         self._live: dict[str, tuple] = {}  # run_id -> (executor, handle) while streaming
+        self._driving_jobs: set[str] = set()
 
     def _emit(self, event_type: str, project_id: str | None, **payload) -> None:
         if self.bus is not None:
@@ -386,6 +388,150 @@ class Orchestrator:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
+    SUPERVISOR_PERIOD_S = 30.0
+    STALLED_PROGRESS_S = 15 * 60
+    MAX_SUPERVISOR_RETRIES = 2
+
+    def _supervisor_retry_count(self, job_id: str) -> int:
+        row = self.db.one(
+            "SELECT COUNT(*) AS n FROM audit_log WHERE action='job.supervisor_retry' "
+            "AND target_type='job' AND target_id=?", (job_id,))
+        return int(row["n"] if row else 0)
+
+    def _recoverable_block(self, job) -> tuple[bool, str]:
+        """Classify engine/executor failures, never business or human gates."""
+        latest_gate = self.db.one(
+            "SELECT g.gate_type, g.verdict FROM gate_results g JOIN runs r "
+            "ON r.id=g.run_id WHERE r.job_id=? ORDER BY g.at DESC, g.rowid DESC LIMIT 1",
+            (job["id"],))
+        if latest_gate and latest_gate["gate_type"] == "human-approve" and \
+                latest_gate["verdict"] == "pending":
+            return False, "human approval"
+        run = self.db.one(
+            "SELECT error, status FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 1",
+            (job["id"],))
+        text = " ".join(filter(None, [job["rework_note"] or "",
+                                      run["error"] if run else ""]))
+        needles = ("max turns reached", "executor reported failed with no output",
+                   "driver_crashed", "driver lost", "orphaned")
+        hit = next((n for n in needles if n in text.lower()), "")
+        return bool(hit), hit
+
+    def _alternate_agent(self, job, last_agent: str) -> str:
+        """Prefer another enabled agent for the current stage's role."""
+        try:
+            stages = parse_stages(json.loads(job["stages_snapshot_json"]))
+            role = next(s.role for s in stages if s.name == job["stage"])
+        except Exception:
+            role = None
+        if role:
+            row = self.db.one(
+                "SELECT par.agent_id FROM project_agent_roles par JOIN agents a "
+                "ON a.id=par.agent_id WHERE par.project_id=? AND par.role=? "
+                "AND a.enabled=1 AND par.agent_id<>? ORDER BY par.preference DESC LIMIT 1",
+                (job["project_id"], role, last_agent or ""))
+            if row:
+                return row["agent_id"]
+        row = self.db.one(
+            "SELECT par.agent_id FROM project_agent_roles par JOIN agents a "
+            "ON a.id=par.agent_id WHERE par.project_id=? AND a.enabled=1 "
+            "AND par.agent_id<>? ORDER BY par.preference DESC LIMIT 1",
+            (job["project_id"], last_agent or ""))
+        if row:
+            return row["agent_id"]
+        return ""
+
+    async def supervise_once(self) -> dict[str, list[str]]:
+        """Act on liveness incidents instead of merely painting them orange.
+
+        The supervisor is deliberately conservative: it interrupts only a live
+        run whose *semantic progress* has been silent for fifteen minutes, and
+        automatically retries only infrastructure/executor failures. Human
+        gates and failed acceptance criteria remain human decisions.
+        """
+        interrupted, retried, resumed = [], [], []
+        cutoff = (datetime.now(UTC) -
+                  timedelta(seconds=self.STALLED_PROGRESS_S)).isoformat()
+        for run_id, (executor, handle) in list(self._live.items()):
+            row = self.db.one(
+                "SELECT r.*, j.project_id, j.title FROM runs r JOIN jobs j "
+                "ON j.id=r.job_id WHERE r.id=?", (run_id,))
+            if not row or row["status"] != "running" or not row["started_at"]:
+                continue
+            semantic = row["progress_at"] or row["started_at"]
+            if semantic > cutoff:
+                continue
+            try:
+                await executor.cancel(handle)
+                interrupted.append(run_id)
+                self.db.audit("supervisor", "run.stalled_interrupted", "run", run_id,
+                              {"job_id": row["job_id"], "last_progress": semantic})
+                self._emit("run.stalled_interrupted", row["project_id"],
+                           job_id=row["job_id"], run_id=run_id,
+                           title=row["title"], last_progress=semantic)
+                run_memory.remember(
+                    self.db, row["project_id"],
+                    f"專案監督器中斷假活 run {run_id}（任務「{row['title']}」）："
+                    f"語意進度自 {semantic} 起未更新；保留 worktree，交由受控恢復。",
+                    kind="warning", importance=0.8)
+            except Exception:
+                log.exception("supervisor could not interrupt %s", run_id)
+
+        for job in self.db.query("SELECT * FROM jobs WHERE status='blocked' AND archived=0"):
+            recoverable, reason = self._recoverable_block(job)
+            count = self._supervisor_retry_count(job["id"])
+            if not recoverable or count >= self.MAX_SUPERVISOR_RETRIES:
+                continue
+            latest = self.db.one(
+                "SELECT agent_id FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 1",
+                (job["id"],))
+            alternate = self._alternate_agent(job, latest["agent_id"] if latest else "")
+            self.db.audit("supervisor", "job.supervisor_retry", "job", job["id"],
+                          {"reason": reason, "cycle": count + 1,
+                           "agent": alternate or "role-default"})
+            run_memory.remember(
+                self.db, job["project_id"],
+                f"專案監督器自動恢復任務「{job['title']}」：偵測到 {reason}，"
+                f"第 {count + 1}/{self.MAX_SUPERVISOR_RETRIES} 次受控重試，"
+                f"接手者 {alternate or '角色預設代理'}。",
+                kind="procedure", importance=0.8)
+            self.retry(job["id"], agent_id=alternate, user="supervisor")
+            retried.append(job["id"])
+
+        # Same-process driver loss is possible too; startup recovery alone is
+        # not enough. A succeeded run without a gate is re-driven, not rerun.
+        for job in self.db.query("SELECT * FROM jobs WHERE status='in_progress' AND archived=0"):
+            if job["id"] in self._driving_jobs:
+                continue
+            live = any(self.db.one("SELECT job_id FROM runs WHERE id=?", (rid,))["job_id"]
+                       == job["id"] for rid in self._live)
+            if live:
+                continue
+            latest = self.db.one(
+                "SELECT id,status FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 1",
+                (job["id"],))
+            if not latest or latest["status"] not in ("succeeded", "failed", "orphaned"):
+                continue
+            gated = self.db.one("SELECT 1 AS x FROM gate_results WHERE run_id=?",
+                                (latest["id"],))
+            if latest["status"] == "succeeded" and not gated:
+                req = DispatchRequest(project_id=job["project_id"], prompt=job["spec_md"],
+                                      title=job["title"], agent_id=job["default_agent_id"],
+                                      resource_id=job["resource_id"], template_id=job["template_id"])
+                self._spawn(self._drive_job(job["id"], req))
+                self.db.audit("supervisor", "job.driver_resumed", "job", job["id"],
+                              {"stage": job["stage"], "after_run": latest["id"]})
+                resumed.append(job["id"])
+        return {"interrupted": interrupted, "retried": retried, "resumed": resumed}
+
+    async def supervision_loop(self) -> None:
+        while True:
+            try:
+                await self.supervise_once()
+            except Exception:
+                log.exception("project supervision sweep failed")
+            await asyncio.sleep(self.SUPERVISOR_PERIOD_S)
+
     async def wait_idle(self) -> None:
         """Await all in-flight job drivers (used by tests and shutdown)."""
         while self._tasks:
@@ -394,6 +540,9 @@ class Orchestrator:
     # -- job driver -------------------------------------------------------------
 
     async def _drive_job(self, job_id: str, req: DispatchRequest) -> None:
+        if job_id in self._driving_jobs:
+            return
+        self._driving_jobs.add(job_id)
         try:
             await self._advance_until_blocked(job_id, req)
         except Exception:
@@ -401,6 +550,8 @@ class Orchestrator:
             self.db.write("UPDATE jobs SET status='blocked', updated_at=? WHERE id=?",
                           (now(), job_id))
             self.db.audit("orchestrator", "job.driver_crashed", "job", job_id, {})
+        finally:
+            self._driving_jobs.discard(job_id)
 
     async def _advance_until_blocked(self, job_id: str, req: DispatchRequest) -> None:
         while True:
@@ -1003,7 +1154,7 @@ class Orchestrator:
 
     PREVIEW_RELPATH = "._bastet/preview"
     PREVIEW_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf",
-                          ".html", ".md", ".txt"}
+                          ".html", ".md", ".txt", ".mp4", ".webm", ".mov"}
     PREVIEW_LIMIT = 12
     PREVIEW_MAX_BYTES = 10 * 1024 * 1024   # a "preview" bigger than this is an asset
 
@@ -1045,8 +1196,24 @@ class Orchestrator:
             (target / safe).write_bytes(path.read_bytes())
             kept.append(safe)
         if kept:
+            # A directory of opaque filenames is not a review package. Generate
+            # the index ourselves so WebUI and Telegram always carry the same
+            # concrete checklist, even when the agent forgot to write one.
+            rows = ["# 核准附件清單", "", f"任務：{job['title']}（{job['id']}）", "",
+                    "| 檔案 | 類型 | 大小 | 檢核方式 |", "|---|---|---:|---|"]
+            for name in kept:
+                path = target / name
+                ext = path.suffix.lower().lstrip(".") or "file"
+                size = path.stat().st_size
+                method = ("直接檢視畫面" if ext in {"png", "jpg", "jpeg", "gif", "webp"}
+                          else "播放並檢查動態" if ext in {"mp4", "webm", "mov"}
+                          else "開啟附件核對內容")
+                rows.append(f"| `{name}` | {ext} | {size:,} B | {method} |")
+            manifest = "_review-manifest.md"
+            (target / manifest).write_text("\n".join(rows) + "\n", encoding="utf-8")
+            kept.insert(0, manifest)
             self.db.audit("orchestrator", "job.previews", "job", job["id"],
-                          {"files": kept})
+                          {"files": kept, "manifest": manifest})
         return kept
 
     MEDIA_KINDS = ("image", "video", "music", "tts", "stt")
@@ -1117,6 +1284,30 @@ class Orchestrator:
                 f"（worktree 隔離需要 git；先在該目錄 git init 或改成正確路徑）")
         return repo
 
+    def _worktree_base(self, job, repo: str) -> str | None:
+        """Choose a stable start point for a new job worktree.
+
+        A project's checked-out branch is operator state, not workflow input.
+        Prefer an explicit project ``base_ref``, then the conventional local
+        primary branches.  Returning ``None`` preserves Git's HEAD fallback for
+        repositories that genuinely have neither.
+        """
+        project = self.db.one("SELECT config_json FROM projects WHERE id=?",
+                              (job["project_id"],))
+        config = json.loads(project["config_json"] or "{}") if project else {}
+        candidates = [config.get("base_ref"), "main", "master"]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            exists = subprocess.run(
+                ["git", "-C", repo, "rev-parse", "--verify", "--quiet",
+                 f"{candidate}^{{commit}}"],
+                capture_output=True, text=True,
+            )
+            if exists.returncode == 0:
+                return candidate
+        return None
+
     def _ensure_workdir(self, job, use_worktree: bool) -> str:
         if job["worktree_path"]:
             return job["worktree_path"]
@@ -1126,10 +1317,18 @@ class Orchestrator:
         wt_path = str(self.home.worktrees_dir / job["id"])
         if Path(wt_path).exists():
             return wt_path
-        proc = subprocess.run(
-            ["git", "-C", repo, "worktree", "add", "-b", f"bastet/{job['id']}", wt_path],
-            capture_output=True, text=True,
-        )
+        # an explicit start point, never the ambient HEAD: `worktree add` with
+        # no commit-ish branches from whatever the repo happens to have checked
+        # out. Live case: the host repo sat on an old feature branch, so every
+        # new card started from the 2D prototype while main carried the 3D
+        # work — the implementer and reviewer then disagreed forever about a
+        # baseline neither of them had chosen.
+        base = self._worktree_base(job, repo)
+        cmd = ["git", "-C", repo, "worktree", "add",
+               "-b", f"bastet/{job['id']}", wt_path]
+        if base:
+            cmd.append(base)
+        proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             log.warning("worktree add failed (%s); running in repo directly",
                         proc.stderr.strip()[:200])

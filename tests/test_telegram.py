@@ -144,6 +144,29 @@ async def test_gate_pending_notification_has_buttons(channel):
     assert sent["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "apv:job_z:yes"
 
 
+async def test_review_package_sends_images_video_and_documents(channel, tmp_path):
+    ch, _, _ = channel
+    folder = tmp_path / "artifacts" / "job_z" / "preview"
+    folder.mkdir(parents=True)
+    (folder / "screen.png").write_bytes(b"png")
+    (folder / "walk.mp4").write_bytes(b"video")
+    (folder / "report.pdf").write_bytes(b"pdf")
+    ch.home_root = str(tmp_path)
+    calls = []
+
+    class Capture:
+        async def post(self, endpoint, **kwargs):
+            calls.append((endpoint, kwargs))
+
+    ch._client = Capture()
+    await ch._send_previews(555, "job_z", ["screen.png", "walk.mp4", "report.pdf"])
+
+    assert [endpoint for endpoint, _ in calls] == [
+        "/sendPhoto", "/sendVideo", "/sendDocument"]
+    assert [next(iter(call[1]["files"])) for call in calls] == [
+        "photo", "video", "document"]
+
+
 async def test_one_failed_notification_does_not_kill_the_channel(channel):
     """The live failure: an unguarded await in the notify loop meant a single send
     error ended every future notification, while the channel still reported

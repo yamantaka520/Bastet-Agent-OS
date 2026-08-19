@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from pathlib import Path
 
 import httpx
 import pytest
@@ -49,6 +50,31 @@ async def test_keep_worktrees_opts_out(orch, seeded, git_project):
     job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
     assert job["worktree_path"] is not None
     assert (orch.home.worktrees_dir / job_id).exists()
+
+
+def test_worktree_starts_from_main_not_ambient_feature(orch, seeded, git_project):
+    marker = git_project / "main-only.txt"
+    marker.write_text("main\n")
+    subprocess.run(["git", "-C", str(git_project), "add", "main-only.txt"], check=True)
+    subprocess.run(["git", "-C", str(git_project), "-c", "user.email=t@t",
+                    "-c", "user.name=t", "commit", "-qm", "main baseline"], check=True)
+    subprocess.run(["git", "-C", str(git_project), "switch", "-qc", "old-feature",
+                    "HEAD~1"], check=True)
+
+    job = seeded.one("SELECT * FROM jobs WHERE id='job1'")
+    workdir = orch._ensure_workdir(job, use_worktree=True)
+
+    assert (Path(workdir) / "main-only.txt").read_text() == "main\n"
+
+
+def test_project_can_select_an_explicit_worktree_base(orch, seeded, git_project):
+    subprocess.run(["git", "-C", str(git_project), "branch", "release"], check=True)
+    seeded.write("UPDATE projects SET config_json='{\"base_ref\":\"release\"}' "
+                 "WHERE id='proj1'")
+
+    job = seeded.one("SELECT * FROM jobs WHERE id='job1'")
+
+    assert orch._worktree_base(job, str(git_project)) == "release"
 
 
 async def test_gc_sweeps_leftovers(orch, seeded, git_project):

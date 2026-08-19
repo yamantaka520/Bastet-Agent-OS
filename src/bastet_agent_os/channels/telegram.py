@@ -366,7 +366,7 @@ class TelegramChannel:
             job = self.db.one("SELECT title, project_id FROM jobs WHERE id=?",
                               (event.get("job_id"),))
             previews = event.get("previews") or self._preview_names(event.get("job_id"))
-            listing = (f"\n📎 預覽 {len(previews)} 件（圖片隨後送上，其餘見 WebUI）"
+            listing = (f"\n📎 核准附件 {len(previews)} 件（將逐一傳送，可直接檢視）"
                        if previews else "\n（這一關沒有附預覽 —— 判斷依據只有 diff）")
             text = (f"⏸ 需要你核准：{job['title'] if job else event.get('job_id')}\n"
                     f"專案 {job['project_id'] if job else '?'} · "
@@ -478,25 +478,32 @@ class TelegramChannel:
 
     async def _send_previews(self, chat_id: int, job_id: str | None,
                              names: list[str]) -> None:
-        """Photos with the approval card: an approver on a phone should see the
-        screen they are approving, not a filename. Images go as photos (up to
-        four — a flood is not more informative); everything else is named and
-        left to the WebUI."""
+        """Deliver the review package, not merely filenames.
+
+        Images are photos, videos are playable, and reports/PDFs are documents.
+        Telegram therefore shows the same evidence as the card instead of a
+        promise that the real material exists somewhere in WebUI.
+        """
         if not job_id or not self.home_root:
             return
         folder = Path(self.home_root) / "artifacts" / job_id / "preview"
-        images = [n for n in names
-                  if Path(n).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")]
-        for name in images[:4]:
+        for name in names[:10]:
             path = folder / Path(name).name
             if not path.is_file():
                 continue
+            ext = path.suffix.lower()
+            endpoint = "/sendPhoto"
+            field = "photo"
+            if ext in (".mp4", ".mov"):
+                endpoint, field = "/sendVideo", "video"
+            elif ext not in (".png", ".jpg", ".jpeg", ".webp"):
+                endpoint, field = "/sendDocument", "document"
             try:
                 await self._client.post(
-                    "/sendPhoto", data={"chat_id": str(chat_id), "caption": name},
-                    files={"photo": (name, path.read_bytes())})
+                    endpoint, data={"chat_id": str(chat_id), "caption": name},
+                    files={field: (name, path.read_bytes())})
             except httpx.HTTPError as exc:
-                log.warning("telegram sendPhoto failed for %s: %s", name,
+                log.warning("telegram attachment failed for %s: %s", name,
                             type(exc).__name__)
 
     async def _send(self, chat_id: int, text: str, reply_markup: dict | None = None) -> None:

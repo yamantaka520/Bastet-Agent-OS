@@ -36,7 +36,7 @@ async def test_a_symlink_in_the_preview_dir_is_refused(orch, seeded, tmp_path):
     kept = json.loads(seeded.one(
         "SELECT detail_json FROM audit_log WHERE action='job.previews'")
         ["detail_json"])["files"]
-    assert kept == ["honest.png"]
+    assert kept == ["_review-manifest.md", "honest.png"]
     folder = orch.home.artifacts_dir / job_id / "preview"
     assert not (folder / "sneaky.png").exists()
     assert b"tok_supersecret" not in b"".join(
