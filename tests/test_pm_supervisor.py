@@ -223,10 +223,31 @@ async def test_escalate_latches_until_a_human_retries(orch, seeded):
     await orch.wait_idle()
     assert pm_supervisor.intervention_count(seeded, "job1") == 1
 
-    # a human retry starts a new episode — the PM may look again
+    # a human retry starts a new episode: the latch clears AND the budget
+    # refreshes — the same "a human retry is a fresh lease" rule the rework
+    # budget follows
     seeded.audit("user:root", "job.retry", "job", "job1", {})
+    assert pm_supervisor.intervention_count(seeded, "job1") == 0
     SCRIPT.append(_decision(action="retry", reason="人已補了真機影片"))
-    orch.retry = lambda **kw: {}
+    orch.retry = lambda *a, **kw: {}
     await orch.supervise_once()
     await orch.wait_idle()
-    assert pm_supervisor.intervention_count(seeded, "job1") == 2
+    assert pm_supervisor.intervention_count(seeded, "job1") == 1
+
+
+
+@pytest.mark.asyncio
+async def test_the_pm_cannot_refresh_its_own_budget(orch, seeded):
+    """Automated retries (the PM's own, the infra supervisor's, quota resumes)
+    must not anchor a new episode — or two interventions become infinite."""
+    _make_pm(seeded)
+    _block_business(seeded)
+    for actor in ("user:pm-supervisor:fakebot", "user:supervisor",
+                  "user:server:quota-reset"):
+        seeded.audit("pm-supervisor:fakebot", "job.pm_intervention", "job", "job1",
+                     {"decision": {"action": "retry"}})
+        seeded.audit(actor, "job.retry", "job", "job1", {})
+    assert pm_supervisor.intervention_count(seeded, "job1") == 3, \
+        "an automated retry silently opened a fresh PM budget"
+    seeded.audit("user:root", "job.retry", "job", "job1", {})
+    assert pm_supervisor.intervention_count(seeded, "job1") == 0

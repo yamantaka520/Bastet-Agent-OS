@@ -82,10 +82,31 @@ def parse_decision(text: str) -> dict[str, str] | None:
     return None
 
 
+def _last_human_retry_id(db, job_id: str) -> int:
+    """The audit id of the most recent HUMAN retry — automation excluded.
+
+    The PM's own retries (user:pm-supervisor:*), the infra supervisor's
+    (user:supervisor) and quota auto-resumes (user:server:*) must not anchor
+    the budget window, or the PM would refresh its own allowance by retrying."""
+    row = db.one(
+        "SELECT MAX(id) AS i FROM audit_log WHERE action='job.retry' "
+        "AND target_id=? AND actor NOT LIKE 'user:pm-supervisor:%' "
+        "AND actor NOT LIKE 'user:server:%' AND actor <> 'user:supervisor'",
+        (job_id,))
+    return int(row["i"] or 0) if row else 0
+
+
 def intervention_count(db, job_id: str) -> int:
+    """Interventions spent in the current episode, not over the job's life.
+
+    A human retry is a fresh lease — the same rule the rework budget follows.
+    The person fixed the environment or supplied what was missing; refusing to
+    let the PM help again because it tried twice *before* the fix would leave
+    exactly the stalls this layer exists to absorb."""
     row = db.one("SELECT COUNT(*) AS n FROM audit_log WHERE "
-                 "action='job.pm_intervention' AND target_type='job' AND target_id=?",
-                 (job_id,))
+                 "action='job.pm_intervention' AND target_type='job' AND target_id=? "
+                 "AND id > ?",
+                 (job_id, _last_human_retry_id(db, job_id)))
     return int(row["n"] if row else 0)
 
 

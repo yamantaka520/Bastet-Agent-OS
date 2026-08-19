@@ -8,6 +8,19 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.25.2] - 2026-08-19
+
+### Fixed
+
+- **A human retry refreshes the PM's intervention budget.** The 2-intervention
+  cap was counted over the job's lifetime, so after a person fixed the
+  environment and retried, the PM would never help that card again — while the
+  docs (and the rework budget's own rule, "a human retry is a fresh lease")
+  said otherwise. The budget now counts per human-retry episode; automated
+  retries (the PM's own, the infra supervisor's, quota auto-resumes) do not
+  anchor a new episode, pinned by a test that fails if the PM can refresh its
+  own allowance.
+
 ## [0.25.1] - 2026-08-19
 
 ### Added
