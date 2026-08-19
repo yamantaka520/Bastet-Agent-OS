@@ -8,6 +8,40 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.25.0] - 2026-08-19
+
+Three asks from live operation: the engine should keep its own project moving,
+review evidence must verifiably reach the person, and 3D generation deserves a
+truthful category.
+
+### Added
+
+- **PM-level supervision.** The infrastructure supervisor already handled
+  fake-alive runs and executor crashes; business stalls (rework budget spent,
+  criteria disputes, missing rulings) still just waited for a human — the PM
+  that planned the card had no further duty. Now a card blocked for a business
+  reason is diagnosed by the project's PM agent, which chooses one bounded
+  action: retry, hand the stage to another agent, file a ruling into the job's
+  inbox and retry, or escalate with its reasoning. Hard walls: two
+  interventions per card (audit-counted, restart-proof), an escalation latches
+  until a human retries, human-approve gates and quota waits are never
+  touched, the diagnosis run is read-only, and a secret-shaped "ruling" is
+  refused the same way the human supply endpoint refuses it. Every
+  intervention is an audit row, a team memory, and a Telegram note.
+- **Delivery accounting for notifications.** The route to api.telegram.org is
+  provably flaky, and a one-shot send with no record left "did the approval
+  evidence ever reach Telegram?" unanswerable. Every outbound message and
+  attachment is now retried (3 attempts, backoff) and recorded as
+  `notify.sent` / `notify.failed` in the audit log.
+- **The approval card carries the checklist.** Approval requests (event and
+  /approve command alike) now include the stage's own description and the
+  spec's acceptance section, plus the preview attachments — approving from a
+  phone no longer means approving blind.
+- **`model3d` resource kind.** Meshy-style 3D model/animation generation was
+  filed under "image" for lack of a truer category; it now has its own media
+  kind across validation, the resource browser, grants, media briefs and the
+  bastet-config skill.
+
 ## [0.24.2] - 2026-08-19
 
 ### Fixed

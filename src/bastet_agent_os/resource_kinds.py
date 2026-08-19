@@ -38,6 +38,11 @@ KINDS: list[dict[str, Any]] = [
      "fields": ["endpoint", "default_model", "secret"]},
     {"id": "stt", "group": "media", "auth": "required",
      "fields": ["endpoint", "default_model", "secret"]},
+    # 3D generation (Meshy-style text/image→model, rigging, animation) was being
+    # filed under "image" for lack of anything truer — a category that misleads
+    # both the resource browser and the media brief an agent receives
+    {"id": "model3d", "group": "media", "auth": "required",
+     "fields": ["endpoint", "default_model", "secret"]},
 ]
 
 BY_ID = {k["id"]: k for k in KINDS}
@@ -108,7 +113,7 @@ def validate(kind: str, endpoint: str | None, secret_ref: str | None,
             problems.append("mcp-url-missing")
     if kind == "api" and not endpoint:
         problems.append("endpoint-missing")
-    if kind in ("llm", "image", "video", "music", "tts", "stt"):
+    if kind in ("llm", "image", "video", "music", "tts", "stt", "model3d"):
         if not endpoint:
             problems.append("endpoint-missing")
         elif base_endpoint(endpoint)[1]:

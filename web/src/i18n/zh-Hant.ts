@@ -348,6 +348,7 @@ const zhHant = {
   "res.kind.image": "圖片生成",
   "res.kind.video": "影片生成",
   "res.kind.music": "音樂生成",
+  "res.kind.model3d": "3D 模型／動畫生成",
   "res.kind.tts": "語音合成（TTS）",
   "res.kind.stt": "語音辨識（STT）",
   "res.field.name": "資源名稱",

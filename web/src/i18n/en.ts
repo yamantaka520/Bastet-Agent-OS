@@ -329,6 +329,7 @@ const en: Dict = {
   "res.kind.image": "Image generation",
   "res.kind.video": "Video generation",
   "res.kind.music": "Music generation",
+  "res.kind.model3d": "3D models / animation",
   "res.kind.tts": "Text-to-speech",
   "res.kind.stt": "Speech-to-text",
   "res.field.name": "Resource name",

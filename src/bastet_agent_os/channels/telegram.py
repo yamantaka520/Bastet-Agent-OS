@@ -308,18 +308,50 @@ class TelegramChannel:
                       user=payload["name"])  # WS -> the admin page refreshes live
         await self._send(chat_id, f"✅ Paired as {payload['name']}. {HELP_TEXT}")
 
+    def _review_checklist(self, job_id: str) -> str:
+        """What the approver is being asked to check, in the message itself.
+
+        An approval request that says only "stage X wants approval" forces the
+        person to open the WebUI to learn what the acceptance criteria even
+        were — on a phone, that means approvals happen blind. The card carries
+        the spec's acceptance section (or its head) and the stage's own
+        description, because that IS the checklist."""
+        job = self.db.one("SELECT spec_md, stage, stages_snapshot_json FROM jobs "
+                          "WHERE id=?", (job_id,))
+        if job is None:
+            return ""
+        parts = []
+        try:
+            stages = json.loads(job["stages_snapshot_json"] or "[]")
+            desc = next((s.get("desc") for s in stages
+                         if s.get("name") == job["stage"]), "")
+            if desc:
+                parts.append(f"這一關要確認：{desc}")
+        except (json.JSONDecodeError, TypeError):
+            pass
+        spec = job["spec_md"] or ""
+        marker = spec.find("驗收")
+        excerpt = spec[marker:marker + 700] if marker >= 0 else spec[:500]
+        if excerpt.strip():
+            parts.append(f"── 檢核項目 ──\n{excerpt.strip()}")
+        return "\n".join(parts)
+
     async def _send_approval_card(self, chat_id: int, job_id: str) -> None:
         job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if job is None:
             await self._send(chat_id, f"unknown job {job_id}")
             return
         text = (f"⏸ {job['title']}\n{job_id} · stage {job['stage']} · {job['status']}\n\n"
-                f"{(job['spec_md'] or '')[:400]}")
+                f"{self._review_checklist(job_id)}")
         keyboard = {"inline_keyboard": [[
             {"text": "✅ Approve", "callback_data": f"apv:{job_id}:yes"},
             {"text": "❌ Reject", "callback_data": f"apv:{job_id}:no"},
         ]]}
-        await self._send(chat_id, text, reply_markup=keyboard)
+        await self._send(chat_id, text, reply_markup=keyboard,
+                         purpose=f"approval-card:{job_id}")
+        previews = self._preview_names(job_id)
+        if previews:
+            await self._send_previews(chat_id, job_id, previews)
 
     async def _handle_callback(self, callback: dict) -> None:
         telegram_id = int((callback.get("from") or {}).get("id", 0))
@@ -368,9 +400,11 @@ class TelegramChannel:
             previews = event.get("previews") or self._preview_names(event.get("job_id"))
             listing = (f"\n📎 核准附件 {len(previews)} 件（將逐一傳送，可直接檢視）"
                        if previews else "\n（這一關沒有附預覽 —— 判斷依據只有 diff）")
+            checklist = self._review_checklist(event.get("job_id") or "")
             text = (f"⏸ 需要你核准：{job['title'] if job else event.get('job_id')}\n"
                     f"專案 {job['project_id'] if job else '?'} · "
-                    f"階段 {event.get('stage')}\n{event.get('job_id')}{listing}")
+                    f"階段 {event.get('stage')}\n{event.get('job_id')}{listing}"
+                    + (f"\n\n{checklist}" if checklist else ""))
             keyboard = {"inline_keyboard": [[
                 {"text": "✅ Approve", "callback_data": f"apv:{event.get('job_id')}:yes"},
                 {"text": "❌ Reject", "callback_data": f"apv:{event.get('job_id')}:no"},
@@ -394,6 +428,17 @@ class TelegramChannel:
                     f"階段：{event.get('stage')}\n"
                     f"供應商訊息：{(event.get('detail') or '')[:160]}\n"
                     f"預計 {reset} (UTC) 自動重試。等不及可以直接按重試。")
+        elif etype == "job.pm_intervention":
+            deed = {"retry": "重跑該階段", "retry_other_agent": "換 agent 接手",
+                    "supply_then_retry": "補充裁定後重跑",
+                    "escalate": "研判需要人工，理由如下"}.get(
+                        event.get("action") or "", event.get("action") or "?")
+            text = (f"🤖 PM 監督介入（{event.get('pm')}，第 {event.get('cycle')}/"
+                    f"{event.get('max_cycles')} 次）\n{self._job_line(event)}\n"
+                    f"卡在：{event.get('stage')} → 決定：{deed}\n"
+                    f"理由：{event.get('reason') or '(未說明)'}"
+                    + ("" if event.get("action") == "escalate"
+                       else "\n不需要你做什麼 —— 處理後會自己往前跑。"))
         elif etype == "job.rework":
             text = self._rework_text(event)
         elif etype == "job.blocked":
@@ -410,7 +455,8 @@ class TelegramChannel:
         else:
             return
         for binding in self._config().get("bindings", {}).values():
-            await self._send(binding["chat_id"], text, reply_markup=keyboard)
+            await self._send(binding["chat_id"], text, reply_markup=keyboard,
+                             purpose=etype)
 
     def _job_line(self, event: dict) -> str:
         """Which card, in which project — a job id alone means nothing to a
@@ -498,24 +544,55 @@ class TelegramChannel:
                 endpoint, field = "/sendVideo", "video"
             elif ext not in (".png", ".jpg", ".jpeg", ".webp"):
                 endpoint, field = "/sendDocument", "document"
-            try:
-                await self._client.post(
-                    endpoint, data={"chat_id": str(chat_id), "caption": name},
-                    files={field: (name, path.read_bytes())})
-            except httpx.HTTPError as exc:
-                log.warning("telegram attachment failed for %s: %s", name,
-                            type(exc).__name__)
+            await self._post_delivery(
+                endpoint, purpose=f"preview:{job_id}", target=name,
+                data={"chat_id": str(chat_id), "caption": name},
+                files={field: (name, path.read_bytes())})
 
-    async def _send(self, chat_id: int, text: str, reply_markup: dict | None = None) -> None:
+    SEND_RETRIES = 3
+    SEND_BACKOFF_S = (2, 5)
+
+    async def _post_delivery(self, endpoint: str, *, purpose: str,
+                             target: str = "", **kwargs) -> bool:
+        """One outbound message, retried, and accounted for either way.
+
+        This host's route to api.telegram.org is provably flaky (the poll loop
+        logs ConnectTimeout in bursts), and a one-shot send with no record left
+        "did the approval evidence ever reach Telegram?" unanswerable — the
+        operator said no, the log said nothing. Now every delivery is an audit
+        row: notify.sent or notify.failed, with what and where."""
+        last: Exception | None = None
+        for attempt in range(self.SEND_RETRIES):
+            try:
+                response = await self._client.post(endpoint, **kwargs)
+                response.raise_for_status()
+                self.db.audit("channel:telegram", "notify.sent", "channel",
+                              self.channel_id,
+                              {"purpose": purpose, "endpoint": endpoint,
+                               "target": target, "attempt": attempt + 1})
+                return True
+            except httpx.HTTPError as exc:
+                last = exc
+                if attempt < self.SEND_RETRIES - 1:
+                    await asyncio.sleep(self.SEND_BACKOFF_S[
+                        min(attempt, len(self.SEND_BACKOFF_S) - 1)])
+        log.warning("telegram delivery failed after %d attempts (%s): %s",
+                    self.SEND_RETRIES, purpose, type(last).__name__)
+        self.db.audit("channel:telegram", "notify.failed", "channel",
+                      self.channel_id,
+                      {"purpose": purpose, "endpoint": endpoint, "target": target,
+                       "error": type(last).__name__ if last else "unknown"})
+        return False
+
+    async def _send(self, chat_id: int, text: str, reply_markup: dict | None = None,
+                    purpose: str = "message") -> None:
         # Telegram rejects anything over 4096 chars with a 400, and a rejected
         # notification is a notification nobody gets
         payload: dict = {"chat_id": chat_id, "text": text[:MAX_TELEGRAM_TEXT]}
         if reply_markup:
             payload["reply_markup"] = reply_markup
-        try:
-            await self._client.post("/sendMessage", json=payload)
-        except httpx.HTTPError as exc:
-            log.warning("telegram send failed: %s", type(exc).__name__)
+        await self._post_delivery("/sendMessage", purpose=purpose,
+                                  target=text[:60], json=payload)
 
     # -- summaries --------------------------------------------------------------------
 

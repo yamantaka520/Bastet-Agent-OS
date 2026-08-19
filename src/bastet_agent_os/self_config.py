@@ -180,7 +180,7 @@ PROMPT_NOTE = (
     ']}\n'
     '```\n'
     "op 只有四種：resource.create / resource.update / grant.create / "
-    "settings.timezone。kind ∈ llm|mcp|api|skill|git|image|video|music|tts|stt。"
+    "settings.timezone。kind ∈ llm|mcp|api|skill|git|image|video|music|tts|stt|model3d。"
     "config 常用鍵：default_model、mcp_transport、mcp_command、mcp_url、"
     "auth_header、skill_source、git_provider、note。\n"
     "規則：(1) 你只能提出，套用由人按按鈕完成，不要宣稱已設定；(2) secret_ref "

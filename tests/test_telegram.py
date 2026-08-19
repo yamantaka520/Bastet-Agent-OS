@@ -157,6 +157,8 @@ async def test_review_package_sends_images_video_and_documents(channel, tmp_path
     class Capture:
         async def post(self, endpoint, **kwargs):
             calls.append((endpoint, kwargs))
+            return httpx.Response(200, json={"ok": True},
+                                  request=httpx.Request("POST", endpoint))
 
     ch._client = Capture()
     await ch._send_previews(555, "job_z", ["screen.png", "walk.mp4", "report.pdf"])
@@ -175,7 +177,7 @@ async def test_one_failed_notification_does_not_kill_the_channel(channel):
     delivered: list[str] = []
     attempts = {"n": 0}
 
-    async def flaky(chat_id, text, reply_markup=None):
+    async def flaky(chat_id, text, reply_markup=None, **kwargs):
         attempts["n"] += 1
         if attempts["n"] == 1:
             raise RuntimeError("telegram 502")
@@ -293,3 +295,66 @@ async def test_long_output_is_trimmed_to_what_telegram_accepts(channel):
     assert len(text) <= 3800
     assert "（前面省略）" in text                  # the tail is what was kept
     assert text.rstrip().endswith("x")
+
+
+# ---- delivery accounting (the "did it actually reach Telegram?" question) --------
+
+class FlakyTelegram(FakeTelegram):
+    """Fails the first N posts the way this host's network actually does."""
+
+    def __init__(self, fail_first: int):
+        super().__init__()
+        self.fail_first = fail_first
+        self.attempts = 0
+
+    def transport(self) -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.attempts += 1
+            if self.attempts <= self.fail_first:
+                raise httpx.ConnectTimeout("boom")
+            body = json.loads(request.content) if request.content else {}
+            self.sent.append({"method": request.url.path.rsplit("/", 1)[-1], **body})
+            return httpx.Response(200, json={"ok": True, "result": []})
+        return httpx.MockTransport(handler)
+
+
+def _flaky_channel(orch, seeded, fail_first):
+    seeded.write("INSERT INTO channels(id, kind, config_json, secret_ref, enabled) "
+                 "VALUES('chn2','telegram','{}','env:X',1)")
+    fake = FlakyTelegram(fail_first)
+    ch = TelegramChannel(seeded, orch, EventBus(), "chn2", "TOKEN",
+                         transport=fake.transport())
+    ch.SEND_BACKOFF_S = (0, 0)          # no real sleeps in tests
+    return ch, fake
+
+
+async def test_a_flaky_network_is_retried_and_the_delivery_is_on_record(orch, seeded):
+    ch, fake = _flaky_channel(orch, seeded, fail_first=2)
+    await ch._send(555, "approval evidence", purpose="gate.pending")
+    assert fake.texts() == ["approval evidence"], "third attempt must succeed"
+    audit = seeded.one("SELECT detail_json FROM audit_log WHERE action='notify.sent'")
+    detail = json.loads(audit["detail_json"])
+    assert detail["purpose"] == "gate.pending" and detail["attempt"] == 3
+
+
+async def test_delivery_failure_is_a_fact_not_a_log_line(orch, seeded):
+    ch, fake = _flaky_channel(orch, seeded, fail_first=99)
+    await ch._send(555, "never arrives", purpose="gate.pending")
+    audit = seeded.one("SELECT detail_json FROM audit_log WHERE action='notify.failed'")
+    detail = json.loads(audit["detail_json"])
+    assert detail["error"] == "ConnectTimeout"
+    assert seeded.one("SELECT 1 AS x FROM audit_log WHERE action='notify.sent'") is None
+
+
+async def test_approval_card_carries_the_checklist(channel):
+    """The approver must see WHAT to check without opening the WebUI."""
+    ch, fake, db = channel
+    db.write("UPDATE jobs SET spec_md=? WHERE id='job1'",
+             ("範圍：實作登入頁。\n驗收條件：\n1. 手機版按鈕可點\n2. 錯誤訊息可讀",))
+    db.write("UPDATE jobs SET stages_snapshot_json=? WHERE id='job1'",
+             (json.dumps([{"name": "work", "role": "pm", "gate": "human-approve",
+                           "desc": "確認頁面結構與視覺方向"}]),))
+    await ch._send_approval_card(555, "job1")
+    text = fake.texts()[-1]
+    assert "確認頁面結構與視覺方向" in text     # the stage's own description
+    assert "驗收條件" in text and "手機版按鈕可點" in text

@@ -329,6 +329,7 @@ const ja: Dict = {
   "res.kind.image": "画像生成",
   "res.kind.video": "動画生成",
   "res.kind.music": "音楽生成",
+  "res.kind.model3d": "3D モデル／アニメ生成",
   "res.kind.tts": "音声合成（TTS）",
   "res.kind.stt": "音声認識（STT）",
   "res.field.name": "リソース名",

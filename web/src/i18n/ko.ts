@@ -329,6 +329,7 @@ const ko: Dict = {
   "res.kind.image": "이미지 생성",
   "res.kind.video": "영상 생성",
   "res.kind.music": "음악 생성",
+  "res.kind.model3d": "3D 모델/애니메이션 생성",
   "res.kind.tts": "음성 합성（TTS）",
   "res.kind.stt": "음성 인식（STT）",
   "res.field.name": "리소스 이름",

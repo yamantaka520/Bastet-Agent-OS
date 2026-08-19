@@ -86,6 +86,7 @@ class Orchestrator:
         self._tasks: set[asyncio.Task] = set()
         self._live: dict[str, tuple] = {}  # run_id -> (executor, handle) while streaming
         self._driving_jobs: set[str] = set()
+        self._pm_diagnosing: set[str] = set()   # jobs with a PM diagnosis in flight
 
     def _emit(self, event_type: str, project_id: str | None, **payload) -> None:
         if self.bus is not None:
@@ -481,6 +482,8 @@ class Orchestrator:
             recoverable, reason = self._recoverable_block(job)
             count = self._supervisor_retry_count(job["id"])
             if not recoverable or count >= self.MAX_SUPERVISOR_RETRIES:
+                if not recoverable:
+                    self._maybe_pm_diagnose(job, reason)
                 continue
             latest = self.db.one(
                 "SELECT agent_id FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 1",
@@ -523,6 +526,51 @@ class Orchestrator:
                               {"stage": job["stage"], "after_run": latest["id"]})
                 resumed.append(job["id"])
         return {"interrupted": interrupted, "retried": retried, "resumed": resumed}
+
+    def _maybe_pm_diagnose(self, job, reason: str) -> None:
+        """Hand a business stall to the project's PM — bounded, non-blocking.
+
+        Infra failures are retried mechanically above. Everything else that
+        blocks (rework budget spent, criteria disputes, missing rulings) used to
+        wait for a human by construction; now the PM that planned the card gets
+        first responsibility. Human-approve gates and quota waits stay out —
+        one is a designed stop, the other resumes itself."""
+        from . import pm_supervisor
+        if reason == "human approval" or job["resume_at"]:
+            return
+        if job["id"] in self._pm_diagnosing:
+            return
+        if pm_supervisor.intervention_count(self.db, job["id"]) >= \
+                pm_supervisor.MAX_INTERVENTIONS:
+            return
+        # an escalation is a terminal PM answer for this stall: "a human must
+        # look". Re-diagnosing the same unchanged card every sweep would burn
+        # tokens restating it — the latch clears when a human retries (their
+        # retry makes a new blocked episode with a fresh audit trail below it).
+        last = self.db.one(
+            "SELECT detail_json FROM audit_log WHERE action='job.pm_intervention' "
+            "AND target_id=? AND id > COALESCE((SELECT MAX(id) FROM audit_log "
+            "WHERE action='job.retry' AND target_id=?), 0) "
+            "ORDER BY id DESC LIMIT 1", (job["id"], job["id"]))
+        if last:
+            try:
+                if json.loads(last["detail_json"] or "{}").get(
+                        "decision", {}).get("action") == "escalate":
+                    return
+            except json.JSONDecodeError:
+                pass
+        self._pm_diagnosing.add(job["id"])
+
+        async def _run() -> None:
+            try:
+                outcome = await pm_supervisor.diagnose(self, job)
+                log.info("pm supervision for %s: %s", job["id"], outcome)
+            except Exception:
+                log.exception("pm supervision failed for %s", job["id"])
+            finally:
+                self._pm_diagnosing.discard(job["id"])
+
+        self._spawn(_run())
 
     async def supervision_loop(self) -> None:
         while True:
@@ -1219,7 +1267,7 @@ class Orchestrator:
                           {"files": kept, "manifest": manifest})
         return kept
 
-    MEDIA_KINDS = ("image", "video", "music", "tts", "stt")
+    MEDIA_KINDS = ("image", "video", "music", "tts", "stt", "model3d")
 
     def _has_media_resources(self, job) -> bool:
         project = self.db.one("SELECT team_id FROM projects WHERE id=?",

@@ -349,6 +349,7 @@ const zhHans: Dict = {
   "res.kind.image": "图片生成",
   "res.kind.video": "视频生成",
   "res.kind.music": "音乐生成",
+  "res.kind.model3d": "3D 模型／动画生成",
   "res.kind.tts": "语音合成（TTS）",
   "res.kind.stt": "语音识别（STT）",
   "res.field.name": "资源名称",
