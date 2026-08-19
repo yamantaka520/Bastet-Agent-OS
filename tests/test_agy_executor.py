@@ -89,3 +89,28 @@ async def test_gateway_path_is_refused(tmp_path):
     with pytest.raises(ValueError, match="gateway"):
         await AgyExecutor().start(spec(tmp_path, gateway_url="http://gw",
                                        run_token="brt_x"))
+
+
+async def test_success_envelope_outranks_a_nonzero_exit(fake_agy, tmp_path, monkeypatch):
+    """agy flushes telemetry AFTER printing its result; on flaky egress that
+    flush fails and the process exits nonzero holding a complete SUCCESS
+    envelope. Live cost: 4/5 approval-prep stages in a day marked 'execution
+    failed' over finished, correct work."""
+    set_envelope, _ = fake_agy
+    set_envelope({"status": "SUCCESS", "response": "核准資料已備妥",
+                  "usage": {"input_tokens": 10, "output_tokens": 5}})
+    monkeypatch.setenv("FAKE_EXIT", "1")            # housekeeping died
+    result = await drive(spec(tmp_path))
+    assert result.status == "succeeded"
+    assert result.summary == "核准資料已備妥"
+
+
+async def test_a_real_failure_records_status_and_exit_code(fake_agy, tmp_path, monkeypatch):
+    """The old failure records held only the response text — the actual cause
+    (envelope status? exit code?) was unrecoverable after the fact."""
+    set_envelope, _ = fake_agy
+    set_envelope({"status": "CANCELED", "response": "做到一半"})
+    monkeypatch.setenv("FAKE_EXIT", "1")
+    result = await drive(spec(tmp_path))
+    assert result.status == "failed"
+    assert result.summary.startswith("[agy status=CANCELED exit=1]")

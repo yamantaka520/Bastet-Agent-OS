@@ -251,3 +251,11 @@ async def test_the_pm_cannot_refresh_its_own_budget(orch, seeded):
         "an automated retry silently opened a fresh PM budget"
     seeded.audit("user:root", "job.retry", "job", "job1", {})
     assert pm_supervisor.intervention_count(seeded, "job1") == 0
+
+
+def test_the_pm_is_told_execution_failed_is_not_an_approval():
+    """Live misdiagnosis: a human-approve stage whose RUN died was escalated as
+    'please approve' — but no gate was pending, so there was nothing to click."""
+    text = pm_supervisor.DIAGNOSIS_INSTRUCTIONS
+    assert "execution failed" in text
+    assert "沒有任何東西在等人核准" in text

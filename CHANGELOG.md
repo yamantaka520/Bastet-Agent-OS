@@ -8,6 +8,31 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.25.3] - 2026-08-20
+
+A human-approve stage looked stuck with "needs approval" and no approve button
+anywhere. Root cause chain, each link now fixed:
+
+### Fixed
+
+- **agy: the envelope outranks the exit code.** agy flushes telemetry to
+  Google AFTER printing its result; on flaky egress that flush fails and the
+  process exits nonzero holding a complete SUCCESS envelope. 4 of 5
+  approval-prep stages in one day were marked "execution failed" over
+  finished, correct work — so the human gate never opened, which is why there
+  was nothing to approve. A SUCCESS envelope now wins (with a logged warning
+  about the exit code); a real failure's record now leads with
+  `[agy status=… exit=…]` instead of burying the cause.
+- **The PM is told what "execution failed" means.** It diagnosed a dead
+  approval-prep run as "needs human approval" — but no gate was pending, so
+  the human found nothing to click. The diagnosis brief now distinguishes
+  "the stage's run died (retry it — nothing awaits approval yet)" from
+  "the gate rejected the work (rule or escalate)".
+- **An escalation notification carries the 🔁 retry button.** The human's
+  lever on an escalated stall is retry (it also unlatches the PM); a message
+  that asks for a human with no control sent someone hunting for an approve
+  button that does not exist.
+
 ## [0.25.2] - 2026-08-19
 
 ### Fixed

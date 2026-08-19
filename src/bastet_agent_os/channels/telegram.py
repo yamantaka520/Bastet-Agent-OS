@@ -439,6 +439,15 @@ class TelegramChannel:
                     f"理由：{event.get('reason') or '(未說明)'}"
                     + ("" if event.get("action") == "escalate"
                        else "\n不需要你做什麼 —— 處理後會自己往前跑。"))
+            if event.get("action") == "escalate":
+                # the human's lever on an escalated stall is RETRY (it also
+                # unlatches the PM); a message that asks for a human with no
+                # button sent someone hunting for an approve control that does
+                # not exist
+                keyboard = {"inline_keyboard": [[
+                    {"text": "🔁 重試這一關",
+                     "callback_data": f"rty:{event.get('job_id')}"},
+                ]]}
         elif etype == "job.rework":
             text = self._rework_text(event)
         elif etype == "job.blocked":

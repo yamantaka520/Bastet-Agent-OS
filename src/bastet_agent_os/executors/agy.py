@@ -215,8 +215,19 @@ class AgyExecutor:
 
         envelope = unwrap_envelope(last_json_object(handle.raw_stdout))
         usage = envelope.get("usage") or {}
-        ok = (process is not None and process.returncode == 0
-              and envelope.get("status") == "SUCCESS")
+        # the envelope outranks the exit code. agy flushes telemetry to Google
+        # AFTER printing its result, and on a host with flaky egress that flush
+        # fails — the process exits nonzero with a complete SUCCESS envelope in
+        # hand. Live cost: 4 of 5 approval-prep stages in one day marked
+        # "execution failed" over work that was finished and correct, each one
+        # blocking a card and burning a PM intervention. The envelope is the
+        # verified fact; the exit code after it is housekeeping.
+        rc = process.returncode if process is not None else None
+        ok = envelope.get("status") == "SUCCESS"
+        if ok and rc != 0:
+            log.warning("run %s: agy exited %s after a SUCCESS envelope "
+                        "(post-response housekeeping failed); trusting the envelope",
+                        handle.task.run_id, rc)
         if handle.timed_out:
             status = "timeout"
         elif handle.cancelled:
@@ -235,10 +246,17 @@ class AgyExecutor:
                 verdict = {"verdict": str(data["verdict"]).lower(),
                            "reasons": data.get("reasons") or []}
 
+        summary = (str(envelope.get("response") or envelope.get("error") or "")
+                   or "\n".join(handle.stderr_tail[-5:]))
+        if status == "failed":
+            # a failed run's record must lead with WHY — the old records held
+            # only the (perfectly good) response text, so the actual failure
+            # (status? exit code?) was unrecoverable after the fact
+            summary = (f"[agy status={envelope.get('status') or 'no-envelope'} "
+                       f"exit={rc}] {summary}")
         return RunResult(
             status=status,
-            summary=(str(envelope.get("response") or envelope.get("error") or "")
-                     or "\n".join(handle.stderr_tail[-5:]))[:SUMMARY_LIMIT],
+            summary=summary[:SUMMARY_LIMIT],
             tokens_in=int(usage.get("input_tokens") or 0),
             # thinking tokens are output-side, like codex's reasoning tokens
             tokens_out=(int(usage.get("output_tokens") or 0)
