@@ -22,7 +22,13 @@ class TaskSpec:
     workdir: str
     timeout_s: int = 3600
     allowed_tools: list[str] = field(default_factory=lambda: ["Read", "Edit", "Write", "Bash"])
-    read_only: bool = False              # reviewer runs: no writes, no arbitrary shell
+    read_only: bool = False              # tool restriction: no writes, no arbitrary shell
+    # a separate fact from read_only, learned the hard way: PM decomposition is
+    # a read-only run whose ANSWER is a task list. Executors that bound their
+    # verdict schema to read_only forced `{verdict, reasons, comments}` onto it,
+    # so the agent could only reject — "no usable tasks in the decomposition",
+    # every time, for any card format. Only agent-review gates expect a verdict.
+    expect_verdict: bool = False
     unattended_policy: str = "deny"      # deny|timeout — default reply to interaction_request
     context_text: str = ""               # assembled context pack (§5.6)
     gateway_url: str | None = None       # None => subscription/direct path ("reported")

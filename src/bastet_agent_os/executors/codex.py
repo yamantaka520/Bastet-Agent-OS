@@ -110,7 +110,10 @@ class CodexExecutor:
             "--json",
             "-o", str(handle.last_message_path),
         ]
-        if task.read_only:
+        if task.expect_verdict:
+            # ONLY for review gates: the schema binds the whole answer, so on a
+            # non-review read-only run (PM decomposition) it would leave the
+            # agent no way to say anything but a verdict
             schema_path = meta_dir / "verdict-schema.json"
             schema_path.write_text(json.dumps(VERDICT_SCHEMA))
             cmd += ["--output-schema", str(schema_path)]
@@ -244,7 +247,7 @@ class CodexExecutor:
             status = "failed"
 
         verdict = None
-        if handle.task.read_only and handle.last_message_path and \
+        if handle.task.expect_verdict and handle.last_message_path and \
                 handle.last_message_path.exists():
             try:  # schema-enforced JSON final message = the structured channel
                 data = last_json_object(handle.last_message_path.read_text())

@@ -78,7 +78,7 @@ async def test_review_soft_denied_tools_and_schema_verdict(fake_agy, tmp_path):
     set_envelope({"status": "SUCCESS",
                   "response": json.dumps({"verdict": "reject", "reasons": ["risky"]}),
                   "usage": {"input_tokens": 5, "output_tokens": 2}})
-    result = await drive(spec(tmp_path, read_only=True))
+    result = await drive(spec(tmp_path, read_only=True, expect_verdict=True))
     assert result.structured_verdict == {"verdict": "reject", "reasons": ["risky"]}
     args = log.read_text()
     assert "--json-schema" in args

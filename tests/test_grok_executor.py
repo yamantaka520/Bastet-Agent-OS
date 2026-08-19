@@ -76,7 +76,7 @@ async def test_review_uses_json_schema_verdict(fake_grok, tmp_path):
     set_output, log = fake_grok
     set_output([{"text": json.dumps({"verdict": "approve", "reasons": ["clean"]}),
                  "stopReason": "EndTurn", "sessionId": "s1"}])
-    result, _ = await drive(spec(tmp_path, read_only=True))
+    result, _ = await drive(spec(tmp_path, read_only=True, expect_verdict=True))
     assert result.structured_verdict == {"verdict": "approve", "reasons": ["clean"]}
     args = log.read_text()
     assert "--tools read_file,grep,list_dir" in args   # real read-only toolset

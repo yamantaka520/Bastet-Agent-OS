@@ -94,7 +94,7 @@ async def test_review_uses_output_schema_verdict(fake_codex, tmp_path, monkeypat
     ])
     monkeypatch.setenv("FAKE_LAST_MESSAGE",
                        json.dumps({"verdict": "reject", "reasons": ["no tests"]}))
-    result = await drive(spec(tmp_path, read_only=True))
+    result = await drive(spec(tmp_path, read_only=True, expect_verdict=True))
     assert result.structured_verdict == {"verdict": "reject", "reasons": ["no tests"]}
     args = log.read_text()
     assert "--sandbox read-only" in args and "--output-schema" in args

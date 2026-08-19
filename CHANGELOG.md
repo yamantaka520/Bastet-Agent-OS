@@ -8,6 +8,22 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.24.2] - 2026-08-19
+
+### Fixed
+
+- **The verdict schema no longer hijacks non-review runs.** PM decomposition is
+  a read-only run whose answer IS a task list — but codex, agy and grok bound
+  their review schema to `read_only`, so a codex PM could answer nothing but
+  `{verdict, reasons, comments}` and honestly rejected every decomposition:
+  "no usable tasks in the decomposition", for any card format. (Undetected for
+  weeks because the PM role happened to be held by agents whose planning path
+  didn't enforce the schema; promoting Codex1 to pm exposed it within three
+  dispatches.) `TaskSpec` now carries `expect_verdict`, set by the orchestrator
+  for agent-review gates only; `read_only` remains purely a tool restriction.
+  Each executor's argv is pinned by tests that fail if the two concepts are
+  ever re-merged.
+
 ## [0.24.1] - 2026-08-19
 
 ### Added

@@ -991,6 +991,9 @@ class Orchestrator:
                 allowed_tools=req.allowed_tools or ["Read", "Edit", "Write", "Bash",
                                                     "WebFetch", "WebSearch"],
                 read_only=stage.read_only,
+                # the verdict schema binds the agent's entire answer — it must
+                # reach review gates only, never other read-only runs
+                expect_verdict=(stage.gate == "agent-review"),
                 context_text=context_text,
                 gateway_url=self.gateway_url if job["resource_id"] else None,
                 run_token=token if job["resource_id"] else None,

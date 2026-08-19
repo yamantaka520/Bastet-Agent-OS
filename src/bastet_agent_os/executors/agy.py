@@ -124,11 +124,11 @@ class AgyExecutor:
         # final result — `--json-schema` documents exactly that for stream mode.
         cmd = ["agy", "--output-format", "stream-json",
                "--print-timeout", f"{task.timeout_s}s"]
-        if task.read_only:
-            # headless without skip-permissions soft-denies tools (de-facto
-            # read-only); the verdict rides the schema-enforced output
+        if task.expect_verdict:
+            # review gates only — binding this schema to every read-only run
+            # once left the PM decomposer able to answer nothing but a verdict
             cmd += ["--json-schema", json.dumps(VERDICT_SCHEMA)]
-        else:
+        if not task.read_only:
             cmd += ["--dangerously-skip-permissions"]
         if task.llm and task.llm.get("model"):
             cmd += ["--model", task.llm["model"]]
@@ -227,7 +227,7 @@ class AgyExecutor:
             status = "failed"
 
         verdict = None
-        if handle.task.read_only and envelope:
+        if handle.task.expect_verdict and envelope:
             data = envelope.get("structured_output")
             if not isinstance(data, dict):
                 data = last_json_object(str(envelope.get("response") or ""))

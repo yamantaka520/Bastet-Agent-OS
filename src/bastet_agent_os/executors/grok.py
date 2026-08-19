@@ -93,12 +93,17 @@ class GrokExecutor:
         cmd = ["grok", "-p", prompt, "--cwd", task.workdir,
                "--max-turns", str(MAX_TURNS), "--no-auto-update"]
         if task.read_only:
-            # real read-only toolset + schema-enforced verdict (one-shot json)
-            cmd += ["--tools", READ_ONLY_TOOLS,
-                    "--json-schema", json.dumps(VERDICT_SCHEMA),
+            cmd += ["--tools", READ_ONLY_TOOLS]     # real read-only toolset
+        else:
+            cmd += ["--always-approve"]
+        if task.expect_verdict:
+            # review gates only: the schema binds the whole answer (one-shot
+            # json) — on a read-only PM decomposition it would forbid the task
+            # list the run exists to produce
+            cmd += ["--json-schema", json.dumps(VERDICT_SCHEMA),
                     "--output-format", "json"]
         else:
-            cmd += ["--always-approve", "--output-format", "streaming-json"]
+            cmd += ["--output-format", "streaming-json"]
         if task.llm and task.llm.get("model"):
             cmd += ["-m", task.llm["model"]]
 
@@ -198,7 +203,7 @@ class GrokExecutor:
         verdict = None
         summary = handle.summary
 
-        if handle.task.read_only:
+        if handle.task.expect_verdict:
             # one-shot json mode: {"text": "<schema-constrained JSON>", ...}
             payload = last_json_object(handle.raw_stdout)
             if payload and payload.get("type") == "error":
