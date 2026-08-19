@@ -395,3 +395,21 @@ def test_row_config_only_exposes_declared_fields(client):
     row = next(r for r in client.get("/api/resources").json() if r["id"] == rid)
     assert set(row["config"]) == {"auth_header"}
     assert row["test"]["status"] in ("ok", "warn", "failed")
+
+
+def test_reclassify_moves_a_misfiled_resource(client):
+    """Categories arrive after the resources do: Meshy 3D generation lived
+    under "image" until model3d existed. Reclassification must validate the
+    target kind's requirements and land in the audit trail."""
+    rid = client.post("/api/resources", json={
+        "name": "meshy-t23d", "kind": "image",
+        "endpoint": "https://api.meshy.ai", "secret_ref": "env:MESHY"}).json()["id"]
+    ok = client.put(f"/api/resources/{rid}", json={"kind": "model3d"})
+    assert ok.status_code == 200 and ok.json()["kind"] == "model3d"
+
+    # nonsense target refused outright
+    assert client.put(f"/api/resources/{rid}",
+                      json={"kind": "hologram"}).status_code == 400
+    # a target whose requirements the resource cannot meet is refused too
+    bad = client.put(f"/api/resources/{rid}", json={"kind": "mcp"})
+    assert bad.status_code == 400 and "mcp-command-missing" in bad.text

@@ -8,6 +8,15 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.25.1] - 2026-08-19
+
+### Added
+
+- Resources can be **reclassified**: `PUT /api/resources/{id}` accepts `kind`,
+  validated against the target kind's requirements and audited. Categories
+  arrive after the resources do — the Meshy 3D endpoints were filed under
+  "image" until `model3d` existed, with no way to move them.
+
 ## [0.25.0] - 2026-08-19
 
 Three asks from live operation: the engine should keep its own project moving,

@@ -131,6 +131,9 @@ class ResourceIn(BaseModel):
 
 class ResourceUpdateIn(BaseModel):
     name: str | None = None
+    # reclassification exists because categories arrive after the resources do:
+    # Meshy 3D generation lived under "image" until model3d existed
+    kind: str | None = None
     endpoint: str | None = None
     api_flavor: str | None = None
     secret_ref: str | None = None
@@ -1612,9 +1615,26 @@ def create_app(home: Home) -> FastAPI:
         if r.secret_ref is not None:
             secret_ref = (secrets_store.ensure_ref(r.secret_ref, home.root, resource_id)
                           or None)
-        db.write("UPDATE resources SET name=?, endpoint=?, api_flavor=?, secret_ref=?, "
-                 "config_json=?, updated_at=? WHERE id=?",
-                 (r.name or row["name"],
+        kind = row["kind"]
+        if r.kind is not None and r.kind != kind:
+            if r.kind not in rk.BY_ID:
+                raise HTTPException(status_code=400,
+                                    detail=f"unknown kind {r.kind!r}")
+            # the new classification must still be a usable resource: kind
+            # decides which fields are load-bearing (an llm without an endpoint
+            # is broken, a skill without one is fine)
+            problems = rk.validate(r.kind,
+                                   r.endpoint if r.endpoint is not None
+                                   else row["endpoint"],
+                                   secret_ref, config)
+            if problems:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"cannot reclassify to {r.kind}: {', '.join(problems)}")
+            kind = r.kind
+        db.write("UPDATE resources SET name=?, kind=?, endpoint=?, api_flavor=?, "
+                 "secret_ref=?, config_json=?, updated_at=? WHERE id=?",
+                 (r.name or row["name"], kind,
                   r.endpoint if r.endpoint is not None else row["endpoint"],
                   r.api_flavor if r.api_flavor is not None else row["api_flavor"],
                   secret_ref, json.dumps(config), now(), resource_id))
