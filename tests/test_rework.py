@@ -528,3 +528,42 @@ async def test_an_explicit_rework_target_is_never_overridden(orch, seeded):
     ])
     for attempt in (0, 1, 5):
         assert rework_target_for(stages, 2, attempt=attempt) == 1
+
+
+async def test_each_stage_commits_its_own_work(orch, seeded, repo):
+    """Leaving a stage's output uncommitted meant every later stage reasoned
+    about a tree matching no commit. Live cost: a reviewer refused test
+    evidence because the scripts that produced it were uncommitted changes on
+    top of HEAD — and it was right, nothing bound the evidence to the content
+    under review."""
+    import subprocess
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "auto"},
+        {"name": "verify", "gate": "auto"},
+    ])
+    SCRIPT.append(fixes("feature.txt"))
+    SCRIPT.append(fixes("evidence.log"))
+
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True))
+    await orch.wait_idle()
+
+    job = seeded.one("SELECT worktree_path FROM jobs WHERE id=?", (job_id,))
+    branch = f"bastet/{job_id}"
+    log = subprocess.run(["git", "-C", str(repo), "log", "--format=%s", branch],
+                         capture_output=True, text=True).stdout.strip().split("\n")
+    subjects = [line for line in log if line.startswith("bastet(")]
+    assert any("implement" in s for s in subjects), f"stage commits missing: {log}"
+    assert any("verify" in s for s in subjects), f"stage commits missing: {log}"
+    # and the tree a later stage sees is clean, which is the whole point
+    status = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
+                            capture_output=True, text=True).stdout
+    assert status.strip() == "" or job["worktree_path"] is None
+
+
+def test_the_review_brief_states_a_satisfiable_freshness_rule():
+    """Demanding that evidence name the commit containing it is a loop with no
+    exit: committing the log changes the tip."""
+    from bastet_agent_os.workflow import REVIEW_INSTRUCTIONS
+    assert "ancestor" in REVIEW_INSTRUCTIONS
+    assert "no product code" in REVIEW_INSTRUCTIONS
+    assert "uncommitted" in REVIEW_INSTRUCTIONS

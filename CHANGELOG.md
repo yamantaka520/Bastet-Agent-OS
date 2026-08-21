@@ -8,6 +8,31 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.29.0] - 2026-08-22
+
+A reviewer refused test evidence because the scripts that produced it were
+uncommitted changes on top of HEAD. It was right, and the cause was ours.
+
+### Changed
+
+- **Every stage commits its own work.** The worktree was committed once, at
+  job completion — so through a whole multi-stage, multi-rework pipeline, every
+  stage's output sat uncommitted and each later stage reasoned about a tree that
+  matched no commit. Nothing could bind test evidence to the content under
+  review, which is exactly what the reviewer said. Each stage boundary now
+  commits to the job branch as `bastet(<stage>): <title>`, so the history reads
+  as the pipeline actually ran, rework included, and every stage starts from a
+  clean tree. (The job row is re-read first: the *first* stage's run is what
+  creates the worktree, so the row in hand still says None.)
+- **The evidence-freshness rule is now satisfiable.** Committing a test log
+  changes the tip, so evidence can never name the commit containing it —
+  demanding that is a loop with no exit, and one card was rejected three times
+  by it. The review brief now accepts evidence that names the commit it ran
+  against when that commit is an ancestor of the reviewed tip and the delta
+  touches no product code, while still rejecting non-ancestors (rebase or
+  force-push), product changes made after the tests ran, and uncommitted
+  modifications to the code or scripts behind the evidence.
+
 ## [0.28.0] - 2026-08-22
 
 The PM escalated a question it could have answered, and the card showed the

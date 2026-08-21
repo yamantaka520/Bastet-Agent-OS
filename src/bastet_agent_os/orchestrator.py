@@ -1184,6 +1184,18 @@ class Orchestrator:
                 self._live.pop(run_id, None)
             result = await executor.result(handle)
             self._finalize_run(job["id"], run_id, workdir, result)
+            # commit at the stage boundary, not only when the card finishes.
+            # Leaving a stage's output uncommitted meant every later stage
+            # reasoned about a tree that matched no commit: a reviewer correctly
+            # refused test evidence because the scripts that produced it were
+            # "uncommitted modifications on top of HEAD", and it was right —
+            # nothing could bind the evidence to the content under review.
+            # re-read: the first stage's run is what CREATES the worktree, so
+            # the row in hand still says None and the commit would be skipped
+            fresh = self.db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
+            if fresh["worktree_path"]:
+                self._commit_worktree(fresh, fresh["worktree_path"],
+                                      label=stage.name)
             # every executor contributes to team memory, not just bastet-lite:
             # this is the write side the memory bucket was missing
             if result.status not in EXEC_FAILURES:
@@ -1541,7 +1553,7 @@ class Orchestrator:
 
     # -- worktree lifecycle (SPEC §5.4.3) ----------------------------------------------
 
-    def _commit_worktree(self, job, workdir: str) -> str | None:
+    def _commit_worktree(self, job, workdir: str, label: str = "") -> str | None:
         """Commit whatever the agents produced onto the job's own branch.
 
         Without this, cleanup threw the work away. `git worktree remove --force`
@@ -1559,7 +1571,10 @@ class Orchestrator:
         if status.returncode != 0 or not status.stdout.strip():
             return None                       # nothing to keep
         title = (job["title"] or job["id"])[:60]
-        message = (f"bastet: {title}\n\njob {job['id']}\n"
+        message = (f"bastet({label}): {title}\n\njob {job['id']}\n"
+                   f"stage {job['stage']} · status {job['status']}"
+                   if label else
+                   f"bastet: {title}\n\njob {job['id']}\n"
                    f"stage {job['stage']} · status {job['status']}")
         for args in (["add", "-A"],
                      ["-c", "user.name=Bastet Agent OS",

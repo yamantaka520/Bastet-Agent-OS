@@ -39,6 +39,20 @@ When you finish, write your verdict as JSON to `{VERDICT_RELPATH}`
   {{"verdict": "approve"}}   or   {{"verdict": "reject", "reasons": ["..."]}}
 A missing or malformed verdict file is treated as a rejection.
 Put any prose comments in your normal output, NOT in the verdict file.
+
+Judging test evidence — the rule that keeps this satisfiable:
+Committing a test log CHANGES the tip, so evidence can never name the commit
+that contains it. Demanding that is a loop with no exit (seen live: a card
+rejected three times for evidence that "does not match HEAD", where matching
+HEAD was impossible by construction). Accept evidence when all three hold:
+  1. it names the commit it was produced against,
+  2. that commit is an ancestor of the tip you are reviewing, and
+  3. the delta between them touches no product code — only the evidence.
+Reject it when the named commit is NOT an ancestor (a rebase or force-push
+happened, so the evidence describes work that is gone), when product code
+changed after the tests ran, or when the tree carries uncommitted
+modifications to the code or scripts that produced the evidence — that last
+one means the evidence cannot have come from what you are reviewing.
 """
 
 
