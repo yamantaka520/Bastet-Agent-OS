@@ -8,6 +8,24 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.26.1] - 2026-08-21
+
+0.26.0 went live and the first real 402 exposed two holes in the handover
+chain it had just built.
+
+### Fixed
+
+- **Only the failing run's own error decides whether a balance is the problem.**
+  The classifier pooled the rework note with the live error, so a card that had
+  ever hit a 402 read every later failure as "balance exhausted". Live cost: an
+  unrelated Agy failure was diagnosed as a balance problem, and the resulting
+  handover dispatched the one agent that genuinely had no balance.
+- **An exhausted supervisor hands over instead of going silent.** The PM was
+  offered only *non-recoverable* stalls, so a card the supervisor had called
+  recoverable but could no longer act on (two retries spent) fell through to
+  nobody at all — which is exactly what a live card did after its 402. Both
+  conditions now reach the PM.
+
 ## [0.26.0] - 2026-08-21
 
 A card looped on a Grok `402 Payment Required` while the PM watched its own

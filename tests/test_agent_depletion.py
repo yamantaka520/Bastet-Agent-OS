@@ -208,3 +208,46 @@ def test_when_every_agent_is_depleted_the_error_says_what_to_do(orch, seeded):
 
     with pytest.raises(ValueError, match="額度都用盡"):
         orch._agent_for_stage(job, stage)
+
+
+def test_only_the_failing_runs_own_error_counts_as_a_balance_problem(orch, seeded):
+    """The rework note quotes earlier failures. Pooling it with the live error
+    made every later failure on that card read as "balance exhausted" — and the
+    handover then dispatched the one agent that really had none."""
+    _two_testers(seeded)
+    seeded.write("UPDATE jobs SET status='blocked', stage='test', "
+                 "rework_note=?, stages_snapshot_json=? WHERE id='job1'",
+                 (f"上一輪的失敗輸出：{GROK_402}",
+                  json.dumps([{"name": "test", "role": "tester", "gate": "auto"}])))
+    seeded.write("UPDATE runs SET status='failed', error='exit 1: assertion failed', "
+                 "agent_id='agy1' WHERE id='run1'")
+
+    recoverable, reason = orch._recoverable_block(
+        seeded.one("SELECT * FROM jobs WHERE id='job1'"))
+    assert not recoverable, f"an unrelated failure was blamed on a balance: {reason}"
+
+
+@pytest.mark.asyncio
+async def test_an_exhausted_supervisor_hands_over_instead_of_going_silent(orch, seeded):
+    """Recoverable + no attempts left used to fall through to nobody: the sweep
+    skipped it and the PM was only offered non-recoverable stalls."""
+    from bastet_agent_os import pm_supervisor
+    _two_testers(seeded)
+    seeded.write("INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+                 "VALUES('proj1','agy1','pm',100)")
+    seeded.write("UPDATE jobs SET status='blocked', stage='test', "
+                 "stages_snapshot_json=? WHERE id='job1'",
+                 (json.dumps([{"name": "test", "role": "tester", "gate": "auto"}]),))
+    seeded.write("UPDATE runs SET status='failed', error=? WHERE id='run1'", (GROK_402,))
+    for _ in range(orch.MAX_SUPERVISOR_RETRIES):        # budget already spent
+        seeded.audit("supervisor", "job.supervisor_retry", "job", "job1", {})
+    SCRIPT.append(RunResult(status="succeeded",
+                            summary='{"action": "escalate", "reason": "需要充值"}'))
+
+    assert orch._recoverable_block(
+        seeded.one("SELECT * FROM jobs WHERE id='job1'"))[0] is True
+    await orch.supervise_once()
+    await orch.wait_idle()
+
+    assert pm_supervisor.intervention_count(seeded, "job1") == 1, \
+        "the card fell through to nobody"

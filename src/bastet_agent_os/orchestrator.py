@@ -422,7 +422,14 @@ class Orchestrator:
             # agent is already out of rotation, so one controlled retry lands on
             # a funded stand-in. Handling it here keeps the PM's intervention
             # budget for problems that actually need judgement.
-            if quota_wait.is_credit_exhausted(text) and \
+            #
+            # Read the failing run's OWN error, never the pooled text: the
+            # rework note quotes earlier failures, so a card that once hit a 402
+            # classified every later failure as a balance problem. Live cost —
+            # an unrelated Agy failure was diagnosed "balance exhausted", and the
+            # handover then dispatched the one agent that really had no balance.
+            own_error = (run["error"] if run else "") or ""
+            if quota_wait.is_credit_exhausted(own_error) and \
                     self._alternate_agent(job, self._last_agent(job["id"])):
                 return True, "agent balance exhausted"
         return bool(hit), hit
@@ -530,8 +537,13 @@ class Orchestrator:
             recoverable, reason = self._recoverable_block(job)
             count = self._supervisor_retry_count(job["id"])
             if not recoverable or count >= self.MAX_SUPERVISOR_RETRIES:
-                if not recoverable:
-                    self._maybe_pm_diagnose(job, reason)
+                # either nobody could fix it mechanically, or the mechanical
+                # fixer is out of attempts — both hand over to the PM. Gating
+                # this on `not recoverable` alone left a hole: a card the
+                # supervisor had classified recoverable but could no longer act
+                # on fell through to nobody at all (seen live: two supervisor
+                # retries spent on a 402, then silence).
+                self._maybe_pm_diagnose(job, reason)
                 continue
             latest = self.db.one(
                 "SELECT agent_id FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 1",
