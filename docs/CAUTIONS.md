@@ -36,6 +36,15 @@
   是這個原因；Bastet 會自行重建需要的 PATH 並把自己的 venv 排最後（專案自備的
   runner 永遠優先）。
 
+- **worktree 裡的 git metadata 不在 worktree 裡面。** 連結式 worktree 的 `.git`
+  是一個檔案，內容是 `gitdir: <主倉庫>/.git/worktrees/<名稱>` —— 所以任何 git
+  **寫入**都落在主倉庫，也就是落在 `--sandbox workspace-write` 的範圍之外。症狀
+  極具誤導性：`cannot lock ref 'ORIG_HEAD': Read-only file system`、
+  `cannot create .git/worktrees/<job>/index.lock`。**去 touch 那個目錄會顯示可寫**
+  （它真的可寫），但 agent 還是寫不進去 —— 因為問題是沙箱不是權限。系統已對
+  可寫入的 codex run 加上 `--add-dir`；若你自訂 executor 或關卡指令要用 git，
+  記得同樣把那個目錄納入可寫範圍。
+
 ## 廠商與額度
 
 - **訂閱額度用盡是計時器，不是錯誤。** `You've hit your session limit · resets

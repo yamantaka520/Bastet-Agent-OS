@@ -232,3 +232,26 @@ def test_a_beat_failure_never_breaks_the_run(orch_with_running_run):
         return task
     task = asyncio.run(beat_briefly())
     assert task.done() and task.exception() is None
+
+
+# --- the worktree's git metadata lives outside the worktree ---------------------
+
+def test_worktree_git_dir_reads_the_gitdir_pointer(tmp_path):
+    """The fact that broke every git write in a sandbox: a linked worktree's
+    `.git` is a FILE pointing into the main repository."""
+    from bastet_agent_os.executors.base import worktree_git_dir
+
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    (wt / ".git").write_text("gitdir: /home/u/repo/.git/worktrees/job_a\n")
+    assert worktree_git_dir(str(wt)) == "/home/u/repo/.git/worktrees/job_a"
+
+    plain = tmp_path / "plain"
+    (plain / ".git").mkdir(parents=True)
+    assert worktree_git_dir(str(plain)) is None      # ordinary checkout
+
+    assert worktree_git_dir(str(tmp_path / "nope")) is None      # not a repo
+    odd = tmp_path / "odd"
+    odd.mkdir()
+    (odd / ".git").write_text("something else entirely")
+    assert worktree_git_dir(str(odd)) is None        # never guess

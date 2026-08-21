@@ -41,6 +41,7 @@ from .base import (
     parse_event,
     register_builtin,
     run_env,
+    worktree_git_dir,
 )
 
 GRACE_SECONDS = 10
@@ -110,6 +111,12 @@ class CodexExecutor:
             "--json",
             "-o", str(handle.last_message_path),
         ]
+        # a linked worktree's git metadata lives in the MAIN repo, outside the
+        # sandboxed workspace — without this, every git write inside the
+        # worktree fails and the agent reports a read-only filesystem
+        git_dir = worktree_git_dir(task.workdir)
+        if git_dir and not task.read_only:
+            cmd += ["--add-dir", git_dir]
         if task.expect_verdict:
             # ONLY for review gates: the schema binds the whole answer, so on a
             # non-review read-only run (PM decomposition) it would leave the

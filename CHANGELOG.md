@@ -8,6 +8,21 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.29.1] - 2026-08-22
+
+### Fixed
+
+- **A sandboxed agent can use git in its worktree again.** A linked worktree's
+  `.git` is a *file* pointing at `<main repo>/.git/worktrees/<name>`, so every
+  git WRITE lands outside the worktree — outside what `--sandbox
+  workspace-write` allows. Commit, stash and even index refreshes failed, in
+  words that read like broken hardware: `cannot lock ref 'ORIG_HEAD':
+  Read-only file system`, `cannot create .git/worktrees/<job>/index.lock`.
+  (That message fooled this maintainer once: the directory really is writable —
+  it is just not in the sandbox.) codex now receives it as an `--add-dir`
+  writable root on write-capable runs, never on read-only reviews. Detected by
+  reading the `gitdir:` pointer, so an ordinary checkout grants nothing.
+
 ## [0.29.0] - 2026-08-22
 
 A reviewer refused test evidence because the scripts that produced it were

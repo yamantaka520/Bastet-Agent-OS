@@ -147,3 +147,43 @@ def test_verdict_schema_satisfies_strict_structured_outputs():
                 check(value, f"{path}[{i}]")
 
     check(VERDICT_SCHEMA)
+
+
+async def test_the_worktree_git_dir_is_granted_to_the_sandbox(fake_codex, tmp_path):
+    """A linked worktree keeps its index in the MAIN repo, outside the sandboxed
+    workspace — so every git write failed and the agent reported a read-only
+    filesystem. Live cost: the designer's blocker note read "cannot create
+    .git/worktrees/<job>/index.lock", and no stage could commit anything."""
+    set_events, log = fake_codex
+    set_events([
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}},
+        {"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}},
+    ])
+    git_meta = tmp_path / "mainrepo" / ".git" / "worktrees" / "job_x"
+    git_meta.mkdir(parents=True)
+    (tmp_path / ".git").write_text(f"gitdir: {git_meta}\n")
+
+    await drive(spec(tmp_path))
+    assert f"--add-dir {git_meta}" in log.read_text()
+
+
+async def test_a_read_only_run_gets_no_extra_write_access(fake_codex, tmp_path):
+    set_events, log = fake_codex
+    set_events([{"type": "item.completed",
+                 "item": {"type": "agent_message", "text": '{"verdict":"approve"}'}}])
+    git_meta = tmp_path / "mainrepo" / ".git" / "worktrees" / "job_x"
+    git_meta.mkdir(parents=True)
+    (tmp_path / ".git").write_text(f"gitdir: {git_meta}\n")
+
+    await drive(spec(tmp_path, read_only=True, expect_verdict=True))
+    assert "--add-dir" not in log.read_text()
+
+
+async def test_a_plain_repo_needs_no_extra_root(fake_codex, tmp_path):
+    """`.git` as a directory is an ordinary checkout: nothing lives elsewhere."""
+    set_events, log = fake_codex
+    set_events([{"type": "item.completed",
+                 "item": {"type": "agent_message", "text": "ok"}}])
+    (tmp_path / ".git").mkdir()
+    await drive(spec(tmp_path))
+    assert "--add-dir" not in log.read_text()

@@ -12,6 +12,7 @@ import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
+from pathlib import Path
 from typing import Any, Protocol
 
 
@@ -141,6 +142,30 @@ NONINTERACTIVE_ENV = {
     "PIP_NO_INPUT": "1",
     "PYTHONUNBUFFERED": "1",        # progress lines arrive while they still matter
 }
+
+
+def worktree_git_dir(workdir: str) -> str | None:
+    """Where a git worktree keeps its index/HEAD — which is NOT inside it.
+
+    A linked worktree's `.git` is a file reading `gitdir: <main repo>/.git/
+    worktrees/<name>`, so every git WRITE lands in the main repository. An
+    executor that sandboxes writes to the workspace therefore cannot commit,
+    stash, or even refresh the index cache, and says so in ways that read like
+    a broken disk: "cannot lock ref 'ORIG_HEAD': Read-only file system", or
+    "cannot create .git/worktrees/<job>/index.lock". The directory is perfectly
+    writable — it is just outside the sandbox. Sandboxed executors must be told
+    about it explicitly."""
+    marker = Path(workdir) / ".git"
+    try:
+        if not marker.is_file():
+            return None                      # a normal repo, or not a repo
+        text = marker.read_text(errors="replace").strip()
+    except OSError:
+        return None
+    if not text.startswith("gitdir:"):
+        return None
+    path = text.split(":", 1)[1].strip()
+    return path if path else None
 
 
 def run_env(task: TaskSpec, **extra: str) -> dict[str, str]:
