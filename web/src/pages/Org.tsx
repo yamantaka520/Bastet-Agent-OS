@@ -7,7 +7,8 @@ import { DataTable, InlineForm, Section, useList } from "../ui";
 
 type Project = { id: string; team_id: string; repo_path: string | null };
 type Agent = { id: string; name: string; executor_type: string; enabled: number;
-               account_id?: string | null; config_json?: string };
+               account_id?: string | null; config_json?: string;
+               depleted_at?: string | null; depleted_reason?: string | null };
 type OrgView = {
   amos: boolean;
   local_only: string[];
@@ -218,6 +219,13 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
     reloadAgents();
   };
 
+  // the balance is topped up — only a person can know that, so only a person
+  // can say it; the engine took the agent out of rotation on a vendor's 402
+  const undeplete = async (id: string) => {
+    await post(`/api/agents/${id}/undeplete`, {});
+    reloadAgents();
+  };
+
   const removeAgent = async (agentId: string) => {
     setError("");
     try {
@@ -343,13 +351,17 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
         ] : [
           a.id, a.name, a.executor_type, accountName(a.account_id ?? null),
           agentModel(a) || t("c.defaultModel"),
-          a.enabled ? "✅" : "⛔",
+          a.depleted_at ? `💳 ${t("c.depleted")}` : (a.enabled ? "✅" : "⛔"),
           canOperate ? (
             <span key="ops" className="row-ops">
               <button className="ghost"
                       onClick={() => setEditing(a.id)}>{t("c.edit")}</button>
               <button className="ghost" onClick={() => toggleAgent(a)}>
                 {a.enabled ? t("c.disable") : t("c.enable")}</button>
+              {a.depleted_at ? (
+                <button className="ghost" title={a.depleted_reason ?? ""}
+                        onClick={() => undeplete(a.id)}>{t("c.undeplete")}</button>
+              ) : null}
               <button className="ghost danger-text"
                       onClick={() => removeAgent(a.id)}>{t("c.delete")}</button>
             </span>

@@ -29,6 +29,8 @@ const zhHant = {
   "c.create": "建立",
   "c.enable": "啟用",
   "c.disable": "停用",
+  "c.depleted": "額度用盡",
+  "c.undeplete": "已充值，解除",
   "c.assign": "指派",
   "c.unassign": "取消指派",
   "c.apply": "套用",

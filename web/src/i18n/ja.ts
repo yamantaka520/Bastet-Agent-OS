@@ -28,6 +28,8 @@ const ja: Dict = {
   "c.create": "作成",
   "c.enable": "有効化",
   "c.disable": "無効化",
+  "c.depleted": "残高なし",
+  "c.undeplete": "入金済み・解除",
   "c.assign": "割り当て",
   "c.unassign": "割り当て解除",
   "c.apply": "適用",

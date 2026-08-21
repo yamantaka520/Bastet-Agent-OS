@@ -416,10 +416,58 @@ class Orchestrator:
         needles = ("max turns reached", "executor reported failed with no output",
                    "driver_crashed", "driver lost", "orphaned")
         hit = next((n for n in needles if n in text.lower()), "")
+        if not hit:
+            from . import quota_wait
+            # a depleted agent is recoverable by ROUTING, not by waiting: the
+            # agent is already out of rotation, so one controlled retry lands on
+            # a funded stand-in. Handling it here keeps the PM's intervention
+            # budget for problems that actually need judgement.
+            if quota_wait.is_credit_exhausted(text) and \
+                    self._alternate_agent(job, self._last_agent(job["id"])):
+                return True, "agent balance exhausted"
         return bool(hit), hit
 
+    def _last_agent(self, job_id: str) -> str:
+        row = self.db.one("SELECT agent_id FROM runs WHERE job_id=? "
+                          "ORDER BY rowid DESC LIMIT 1", (job_id,))
+        return row["agent_id"] if row else ""
+
+    def _mark_depleted(self, agent_id: str, job, detail: str) -> None:
+        """Take an agent out of rotation until a human tops it up.
+
+        Only money clears this, so the engine must not retry into it and must
+        say so out loud — the alternative (what actually happened) is a rework
+        loop that re-dispatches a dead agent forever, burning the PM's whole
+        intervention budget on a decision the router then undoes."""
+        if not agent_id:
+            return
+        row = self.db.one("SELECT depleted_at FROM agents WHERE id=?", (agent_id,))
+        if row is None or row["depleted_at"]:
+            return                       # unknown, or already known to be out
+        self.db.write("UPDATE agents SET depleted_at=?, depleted_reason=?, "
+                      "updated_at=? WHERE id=?", (now(), detail, now(), agent_id))
+        self.db.audit("orchestrator", "agent.depleted", "agent", agent_id,
+                      {"job_id": job["id"], "detail": detail})
+        self._emit("agent.depleted", job["project_id"], agent_id=agent_id,
+                   job_id=job["id"], title=job["title"], detail=detail)
+        run_memory.remember(
+            self.db, job["project_id"],
+            f"Agent {agent_id} 的付費額度耗盡（供應商回應：{detail[:160]}），"
+            f"已暫停對它派工，直到有人充值並解除。派工會自動改由同角色的其他 agent 接手。",
+            kind="warning", importance=0.85)
+
+    def clear_depleted(self, agent_id: str, user: str = "user") -> bool:
+        """A human says the balance is topped up. Only a human can."""
+        row = self.db.one("SELECT depleted_at FROM agents WHERE id=?", (agent_id,))
+        if row is None or not row["depleted_at"]:
+            return False
+        self.db.write("UPDATE agents SET depleted_at=NULL, depleted_reason=NULL, "
+                      "updated_at=? WHERE id=?", (now(), agent_id))
+        self.db.audit(f"user:{user}", "agent.undepleted", "agent", agent_id, {})
+        return True
+
     def _alternate_agent(self, job, last_agent: str) -> str:
-        """Prefer another enabled agent for the current stage's role."""
+        """Prefer another enabled, funded agent for the current stage's role."""
         try:
             stages = parse_stages(json.loads(job["stages_snapshot_json"]))
             role = next(s.role for s in stages if s.name == job["stage"])
@@ -429,13 +477,13 @@ class Orchestrator:
             row = self.db.one(
                 "SELECT par.agent_id FROM project_agent_roles par JOIN agents a "
                 "ON a.id=par.agent_id WHERE par.project_id=? AND par.role=? "
-                "AND a.enabled=1 AND par.agent_id<>? ORDER BY par.preference DESC LIMIT 1",
+                "AND a.enabled=1 AND a.depleted_at IS NULL AND par.agent_id<>? ORDER BY par.preference DESC LIMIT 1",
                 (job["project_id"], role, last_agent or ""))
             if row:
                 return row["agent_id"]
         row = self.db.one(
             "SELECT par.agent_id FROM project_agent_roles par JOIN agents a "
-            "ON a.id=par.agent_id WHERE par.project_id=? AND a.enabled=1 "
+            "ON a.id=par.agent_id WHERE par.project_id=? AND a.enabled=1 AND a.depleted_at IS NULL "
             "AND par.agent_id<>? ORDER BY par.preference DESC LIMIT 1",
             (job["project_id"], last_agent or ""))
         if row:
@@ -615,6 +663,12 @@ class Orchestrator:
                 # usually states when it lifts (live case: "resets 1:30am
                 # (Asia/Taipei)" blocked a card for hours until a human noticed)
                 from . import quota_wait
+                # a depleted balance is NOT a timer: mark the agent unusable so
+                # the next dispatch routes around it instead of re-earning the
+                # same instant 402 on every rework cycle
+                if quota_wait.is_credit_exhausted(result.summary or ""):
+                    self._mark_depleted(self._run_agent(run_id), job,
+                                        (result.summary or "")[:300])
                 resume_at = quota_wait.parse_reset(result.summary or "")
                 if resume_at:
                     self.db.write("UPDATE jobs SET resume_at=? WHERE id=?",
@@ -934,6 +988,11 @@ class Orchestrator:
             # retried with Claude1 and watched Codex1 fail again identically.
             self.db.write("UPDATE jobs SET default_agent_id=?, agent_override=? "
                           "WHERE id=?", (agent_id, agent_id, job_id))
+            # naming a depleted agent IS the human saying it has funds again —
+            # otherwise the override would silently lose to the routing filter
+            # and they would watch a different agent run instead
+            if not user.startswith(("server:", "pm-supervisor:", "supervisor")):
+                self.clear_depleted(agent_id, user=user)
         self.db.write("UPDATE jobs SET status='in_progress', updated_at=? WHERE id=?",
                       (now(), job_id))
         self.db.audit(f"user:{user}", "job.retry", "job", job_id,
@@ -1294,26 +1353,46 @@ class Orchestrator:
         override = (job["agent_override"] if "agent_override" in job.keys()
                     else None)
         if override:
-            row = self.db.one("SELECT * FROM agents WHERE id=? AND enabled=1",
-                              (override,))
+            row = self.db.one("SELECT * FROM agents WHERE id=? AND enabled=1 "
+                              "AND depleted_at IS NULL", (override,))
             if row is not None:
                 return row
             log.info("agent override %r unavailable; falling back", override)
         if stage.role:
             row = self.db.one(
                 "SELECT a.* FROM project_agent_roles par JOIN agents a ON a.id = par.agent_id "
-                "WHERE par.project_id=? AND par.role=? AND a.enabled=1 "
+                "WHERE par.project_id=? AND par.role=? AND a.enabled=1 AND a.depleted_at IS NULL "
                 "ORDER BY par.preference DESC LIMIT 1",
                 (job["project_id"], stage.role))
             if row is not None:
                 return row
             log.info("no agent for role %r in project %s; using job default",
                      stage.role, job["project_id"])
-        agent = self.db.one("SELECT * FROM agents WHERE id=? AND enabled=1",
-                            (job["default_agent_id"],))
-        if agent is None:
-            raise ValueError(f"job {job['id']}: default agent unavailable")
-        return agent
+        agent = self.db.one("SELECT * FROM agents WHERE id=? AND enabled=1 "
+                            "AND depleted_at IS NULL", (job["default_agent_id"],))
+        if agent is not None:
+            return agent
+        # last resort: any funded agent on this project. Without it, a role with
+        # exactly one agent (the live case: `tester` = Grok1 alone) dead-ends the
+        # moment that agent's balance empties, even with capable stand-ins sitting
+        # right there under other roles.
+        stand_in = self.db.one(
+            "SELECT a.* FROM project_agent_roles par JOIN agents a ON a.id=par.agent_id "
+            "WHERE par.project_id=? AND a.enabled=1 AND a.depleted_at IS NULL "
+            "ORDER BY par.preference DESC LIMIT 1", (job["project_id"],))
+        if stand_in is not None:
+            log.warning("job %s: %r has no funded agent; standing in with %s",
+                        job["id"], stage.role or "default", stand_in["id"])
+            return stand_in
+        depleted = self.db.one(
+            "SELECT id FROM agents WHERE id=? AND depleted_at IS NOT NULL",
+            (job["default_agent_id"],))
+        if depleted is not None:
+            raise ValueError(
+                f"job {job['id']}：所有可用 agent 的付費額度都用盡了（含 "
+                f"{depleted['id']}）。充值後在「組織 → Agents」解除暫停，或指派"
+                f"其他 agent 到這個角色。")
+        raise ValueError(f"job {job['id']}: default agent unavailable")
 
     def _project_repo(self, job) -> str:
         """The repo, expanded and checked. A missing repo is a configuration

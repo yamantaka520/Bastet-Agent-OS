@@ -30,6 +30,8 @@ const zhHans: Dict = {
   "c.create": "创建",
   "c.enable": "启用",
   "c.disable": "停用",
+  "c.depleted": "额度用尽",
+  "c.undeplete": "已充值，解除",
   "c.assign": "指派",
   "c.unassign": "取消指派",
   "c.apply": "应用",

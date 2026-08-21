@@ -28,6 +28,8 @@ const ko: Dict = {
   "c.create": "생성",
   "c.enable": "사용",
   "c.disable": "중지",
+  "c.depleted": "잔액 없음",
+  "c.undeplete": "충전 완료·해제",
   "c.assign": "배정",
   "c.unassign": "배정 해제",
   "c.apply": "적용",

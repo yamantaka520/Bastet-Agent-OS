@@ -323,6 +323,14 @@ class Db:
             agent_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(agents)")}
             if "account_id" not in agent_cols:
                 self._conn.execute("ALTER TABLE agents ADD COLUMN account_id TEXT")
+            if "depleted_at" not in agent_cols:
+                # when this agent's paid balance ran out. Set from a vendor's
+                # own 402, cleared only by a human (topping up is not something
+                # the engine can do). Dispatch skips depleted agents — routing
+                # work to an agent that cannot run it produced an infinite
+                # rework loop, one instant 402 per cycle.
+                self._conn.execute("ALTER TABLE agents ADD COLUMN depleted_at TEXT")
+                self._conn.execute("ALTER TABLE agents ADD COLUMN depleted_reason TEXT")
             gate_cols = {r[1] for r in
                          self._conn.execute("PRAGMA table_info(gate_results)")}
             if "config_error" not in gate_cols:

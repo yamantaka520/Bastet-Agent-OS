@@ -8,6 +8,37 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.26.0] - 2026-08-21
+
+A card looped on a Grok `402 Payment Required` while the PM watched its own
+decisions get undone. Routing was the bug, not the supervisor.
+
+### Fixed
+
+- **A depleted agent leaves the rotation.** `402 Payment Required: usage
+  balance exhausted` matched none of the quota markers, so the card merely
+  "failed" — and role mapping dispatched the same dead agent on every rework
+  cycle, earning an instant 402 each time. The PM diagnosed it correctly and
+  handed the stage over twice; the rework cycle cleared the one-shot override
+  both times and routed straight back. Now a vendor's credit exhaustion marks
+  the agent depleted (`agents.depleted_at`), every routing path skips depleted
+  agents — role mapping, explicit override, alternate selection, the job
+  default, and PM selection — and the stall becomes recoverable *by routing*,
+  so the infra supervisor swaps in a funded stand-in without spending a PM
+  intervention.
+- **A one-agent role stands in rather than dead-ends.** `tester` was one agent
+  on the live project; when its balance emptied there was no funded tester at
+  all, though three capable agents sat under other roles. Dispatch now falls
+  back to any funded agent on the project, and says so in the log.
+- **Only a human clears it.** Topping up is not something the engine can do:
+  the flag clears through `POST /api/agents/{id}/undeplete`, the 「已充值，解除」
+  button on the Agents card, or a human retry that explicitly names the agent.
+  Automated retries (PM, supervisor, quota resume) cannot clear it.
+- **Everyone is told, once.** An `agent.depleted` event, an audit row, a team
+  memory, and a Telegram note saying which agent, what the vendor said, that
+  work is being routed around it, and how to clear it. The PM's brief now names
+  this case so it stops proposing handovers the router already made.
+
 ## [0.25.3] - 2026-08-20
 
 A human-approve stage looked stuck with "needs approval" and no approve button

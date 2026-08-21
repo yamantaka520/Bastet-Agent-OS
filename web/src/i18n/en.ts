@@ -28,6 +28,8 @@ const en: Dict = {
   "c.create": "Create",
   "c.enable": "Enable",
   "c.disable": "Disable",
+  "c.depleted": "no balance",
+  "c.undeplete": "topped up",
   "c.assign": "Assign",
   "c.unassign": "Unassign",
   "c.apply": "Apply",

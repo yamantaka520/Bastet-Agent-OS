@@ -41,6 +41,29 @@ def is_quota_failure(text: str) -> bool:
     return any(marker in lowered for marker in QUOTA_MARKERS)
 
 
+# A depleted BALANCE is not a timer. A session limit lifts on the vendor's
+# clock, so waiting is the right answer; an exhausted prepaid balance lifts
+# only when a human pays, so waiting is the wrong answer and so is retrying —
+# the agent has to leave the rotation until someone tops it up.
+#
+# Live case this exists for: Grok1 answered `402 Payment Required: Grok Build
+# usage balance exhausted` in 30ms. None of the markers above matched, so the
+# card just "failed"; role mapping then dispatched the same dead agent on every
+# rework cycle. The PM correctly diagnosed it and handed the stage to another
+# agent twice, and the engine routed straight back to Grok1 both times.
+CREDIT_MARKERS = (
+    "payment required", "402", "balance exhausted", "insufficient credit",
+    "insufficient funds", "credit balance is too low", "billing",
+    "out of credits", "no credits", "purchase more",
+)
+
+
+def is_credit_exhausted(text: str) -> bool:
+    """A hard stop that only money clears — never a wait, never a retry."""
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in CREDIT_MARKERS)
+
+
 def parse_reset(text: str, now: datetime | None = None) -> str | None:
     """When a quota failure lifts, as UTC ISO — or None if `text` is not a
     quota failure at all. A quota failure with no parseable time gets the

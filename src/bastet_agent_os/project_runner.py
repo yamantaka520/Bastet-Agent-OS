@@ -56,10 +56,14 @@ class PlanError(Exception):
 # ---- decomposition ---------------------------------------------------------------
 
 def pm_agent(db, project_id: str) -> Any:
-    """The agent assigned the `pm` role on this project (highest preference)."""
+    """The agent assigned the `pm` role on this project (highest preference).
+
+    Depleted agents are skipped: a PM with no balance cannot decompose or
+    diagnose, and dispatching to it produces an instant 402 instead of a plan."""
     row = db.one(
         "SELECT a.* FROM project_agent_roles par JOIN agents a ON a.id = par.agent_id "
         "WHERE par.project_id=? AND par.role='pm' AND a.enabled=1 "
+        "AND a.depleted_at IS NULL "
         "ORDER BY par.preference DESC LIMIT 1", (project_id,))
     return row
 

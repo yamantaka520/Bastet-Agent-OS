@@ -669,6 +669,19 @@ def create_app(home: Home) -> FastAPI:
     def list_agents():
         return [dict(r) for r in db.query("SELECT * FROM agents ORDER BY created_at")]
 
+    @app.post("/api/agents/{agent_id}/undeplete")
+    def undeplete_agent(agent_id: str,
+                        auth: Auth = Depends(require_role("operator"))):
+        """The human says the balance is topped up.
+
+        Only a human can clear this: the engine took the agent out of rotation
+        because a vendor said "payment required", and nothing the engine can do
+        pays that bill."""
+        if db.one("SELECT id FROM agents WHERE id=?", (agent_id,)) is None:
+            raise HTTPException(status_code=404, detail="agent not found")
+        cleared = orch.clear_depleted(agent_id, user=auth.actor)
+        return {"agent_id": agent_id, "cleared": cleared}
+
     @app.put("/api/agents/{agent_id}")
     def update_agent(agent_id: str, a: AgentUpdateIn,
                      auth: Auth = Depends(require_role("operator"))):

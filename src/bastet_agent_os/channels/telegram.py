@@ -428,6 +428,13 @@ class TelegramChannel:
                     f"階段：{event.get('stage')}\n"
                     f"供應商訊息：{(event.get('detail') or '')[:160]}\n"
                     f"預計 {reset} (UTC) 自動重試。等不及可以直接按重試。")
+        elif etype == "agent.depleted":
+            # the one failure class no automation can clear: it needs money
+            text = (f"💳 Agent {event.get('agent_id')} 的付費額度用盡，已暫停對它派工\n"
+                    f"{self._job_line(event)}\n"
+                    f"供應商回應：{(event.get('detail') or '')[:200]}\n"
+                    f"同角色的其他 agent 會自動接手，任務不會停在這裡。\n"
+                    f"充值後請在「組織 → Agents」解除暫停（或直接對這張卡按重試並指定它）。")
         elif etype == "job.pm_intervention":
             deed = {"retry": "重跑該階段", "retry_other_agent": "換 agent 接手",
                     "supply_then_retry": "補充裁定後重跑",
