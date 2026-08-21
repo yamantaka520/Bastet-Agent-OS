@@ -752,6 +752,29 @@ class Orchestrator:
             self._emit("job.stage_changed", job["project_id"], job_id=job_id,
                        stage=stages[idx + 1].name)
 
+    def _handbacks_for(self, job_id: str, stage_name: str) -> int:
+        """How often this stage's gate has already sent work back, this episode.
+
+        Scoped to the last human retry for the same reason every other budget
+        is: the person fixed something, so the work starts walking back from
+        the beginning again rather than resuming at the earliest stage."""
+        floor = self.db.one(
+            "SELECT COALESCE(MAX(id), 0) AS i FROM audit_log WHERE "
+            "action='job.retry' AND target_id=? AND actor NOT LIKE 'user:pm-supervisor:%' "
+            "AND actor NOT LIKE 'user:server:%' AND actor <> 'user:supervisor'",
+            (job_id,))
+        rows = self.db.query(
+            "SELECT detail_json FROM audit_log WHERE action='job.rework' "
+            "AND target_id=? AND id > ?", (job_id, floor["i"] if floor else 0))
+        count = 0
+        for row in rows:
+            try:
+                if json.loads(row["detail_json"] or "{}").get("failed_stage") == stage_name:
+                    count += 1
+            except json.JSONDecodeError:
+                continue
+        return count
+
     def _rework(self, job, stages: list[StageDef], idx: int,
                 outcome: GateOutcome) -> bool:
         """A failed gate goes back to whoever can fix it. Returns True if the
@@ -766,7 +789,10 @@ class Orchestrator:
         converging, and by then a person genuinely needs to look)."""
         stage = stages[idx]
         job_id = job["id"]
-        target_idx = rework_target_for(stages, idx)
+        # how many times THIS stage has already been handed back — job-wide
+        # rework_count would mis-target once a different stage fails
+        target_idx = rework_target_for(stages, idx,
+                                       attempt=self._handbacks_for(job_id, stage.name))
         cycle = int(job["rework_count"] or 0) + 1
         blocked_reason = ""
         if stage.on_fail == "block":

@@ -8,6 +8,22 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.27.0] - 2026-08-22
+
+### Fixed
+
+- **Rework walks backwards instead of standing still.** The target for a failed
+  gate was the nearest writable stage counting *from the failing stage itself* —
+  so a stage that can write was always its own target, forever. Live cost: an
+  E2E stage failed one test, the tester re-ran that same failing test nine times
+  across four hours (three full rework budgets, two PM interventions), and
+  nobody ever touched the product code the test was failing on. The hand-back
+  now advances: the failing stage first (an implementer whose own tests fail
+  should fix them), then the nearest earlier writable stage, skipping read-only
+  reviewers, clamping at the earliest writable stage. Counted per stage per
+  episode, so a human retry starts the walk over. An explicit `rework_target`
+  still wins outright.
+
 ## [0.26.1] - 2026-08-21
 
 0.26.0 went live and the first real 402 exposed two holes in the handover

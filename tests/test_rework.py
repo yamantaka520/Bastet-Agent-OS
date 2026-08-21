@@ -467,3 +467,64 @@ async def test_the_stage_timeout_reaches_the_executor(orch, seeded):
     await orch.wait_idle()
 
     assert seen == [7200, 3600]      # declared budget, then the dispatch default
+
+
+async def test_work_walks_back_when_the_same_stage_keeps_failing(orch, seeded):
+    """Standing still does not converge.
+
+    Live case: an E2E stage failed one test, the rework target was the E2E
+    stage itself, and the tester re-ran the same failing test nine times over
+    four hours while nobody touched the product code it was failing on. The
+    second hand-back must reach someone earlier."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "role": "engineer", "gate": "auto"},
+        {"name": "review", "role": "reviewer", "gate": "agent-review",
+         "read_only": True},
+        {"name": "e2e", "role": "tester", "gate": "tests-pass",
+         "gate_config": {"command": "test -f fixed.txt"}},
+    ])
+    SCRIPT.append(RunResult(status="succeeded", summary="wrote code"))
+    SCRIPT.append(RunResult(status="succeeded", summary="looks fine",
+                            structured_verdict={"verdict": "approve", "reasons": []}))
+    SCRIPT.append(RunResult(status="succeeded", summary="ran tests"))   # gate fails
+    SCRIPT.append(RunResult(status="succeeded", summary="reran tests"))  # 1st handback
+    SCRIPT.append(fixes("fixed.txt"))            # 2nd handback: the implementer fixes it
+    SCRIPT.append(RunResult(status="succeeded", summary="looks fine",
+                            structured_verdict={"verdict": "approve", "reasons": []}))
+    SCRIPT.append(RunResult(status="succeeded", summary="tests green"))
+
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    handbacks = [e["back_to"] for e in audit(seeded, "job.rework")]
+    assert handbacks == ["e2e", "implement"], \
+        f"the work never walked back to anyone who could fix it: {handbacks}"
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+
+
+async def test_a_read_only_reviewer_is_never_a_target(orch, seeded):
+    """Walking back must skip reviewers: one cannot fix what it just rejected."""
+    from bastet_agent_os.workflow import parse_stages, rework_target_for
+    stages = parse_stages([
+        {"name": "implement", "gate": "auto"},
+        {"name": "review", "gate": "agent-review", "read_only": True},
+        {"name": "e2e", "gate": "tests-pass", "gate_config": {"command": "true"}},
+    ])
+    assert rework_target_for(stages, 2, attempt=0) == 2      # itself first
+    assert rework_target_for(stages, 2, attempt=1) == 0      # skips the reviewer
+    assert rework_target_for(stages, 2, attempt=9) == 0      # clamps, never None
+    # a failed review still hands back to the writer, first try
+    assert rework_target_for(stages, 1, attempt=0) == 0
+
+
+async def test_an_explicit_rework_target_is_never_overridden(orch, seeded):
+    """The template author's choice outranks the walk-back."""
+    from bastet_agent_os.workflow import parse_stages, rework_target_for
+    stages = parse_stages([
+        {"name": "design", "gate": "auto"},
+        {"name": "implement", "gate": "auto"},
+        {"name": "e2e", "gate": "tests-pass", "gate_config": {"command": "true"},
+         "rework_target": "implement"},
+    ])
+    for attempt in (0, 1, 5):
+        assert rework_target_for(stages, 2, attempt=attempt) == 1

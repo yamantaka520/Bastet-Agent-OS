@@ -122,23 +122,36 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
     return stages
 
 
-def rework_target_for(stages: list[StageDef], idx: int) -> int | None:
+def rework_target_for(stages: list[StageDef], idx: int,
+                      attempt: int = 0) -> int | None:
     """Which stage should fix what the gate at `idx` rejected.
 
-    An explicit `rework_target` wins. Otherwise: the nearest earlier stage that
-    can write — a read-only reviewer cannot fix what it just rejected, and
-    sending the work back to another reviewer would only loop. Returns None when
-    nothing earlier can act, which is the one case a human must be asked."""
+    An explicit `rework_target` wins. Otherwise the work walks *backwards*
+    through the writable stages: the failing stage first (an implementer whose
+    own tests fail should fix them), then the nearest earlier writable stage,
+    and so on. `attempt` is how many times this stage has already been handed
+    back in this episode.
+
+    Walking back matters because standing still does not converge. Live case:
+    an E2E stage failed one test; the target was the E2E stage itself, so the
+    tester re-ran the same failing test nine times over four hours while
+    nobody touched the product code the test was failing on. Read-only stages
+    are always skipped — a reviewer cannot fix what it just rejected.
+
+    Returns None when nothing can act, which is the one case a human must be
+    asked."""
     stage = stages[idx]
     if stage.rework_target:
         for i, candidate in enumerate(stages):
             if candidate.name == stage.rework_target:
                 return i
         return None
-    for i in range(idx, -1, -1):
-        if not stages[i].read_only:
-            return i
-    return None
+    writable = [i for i in range(idx, -1, -1) if not stages[i].read_only]
+    if not writable:
+        return None
+    # clamp: once the work has reached the earliest writable stage, staying
+    # there is all that is left — the cycle cap is what stops it, not this
+    return writable[min(attempt, len(writable) - 1)]
 
 
 def load_template_file(path: str | Path) -> tuple[str, list[StageDef]]:
