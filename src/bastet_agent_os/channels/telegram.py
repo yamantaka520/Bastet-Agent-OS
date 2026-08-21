@@ -444,7 +444,10 @@ class TelegramChannel:
                     f"{event.get('max_cycles')} 次）\n{self._job_line(event)}\n"
                     f"卡在：{event.get('stage')} → 決定：{deed}\n"
                     f"理由：{event.get('reason') or '(未說明)'}"
-                    + ("" if event.get("action") == "escalate"
+                    + ("\n\n卡片上有「PM 需要你的裁定」欄位：把答案寫進去按"
+                       "「送出裁定並重試」，它會進到任務收件匣並讓卡片接著跑"
+                       "（也可以直接按下面的重試）。"
+                       if event.get("action") == "escalate"
                        else "\n不需要你做什麼 —— 處理後會自己往前跑。"))
             if event.get("action") == "escalate":
                 # the human's lever on an escalated stall is RETRY (it also

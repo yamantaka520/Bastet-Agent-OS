@@ -8,6 +8,35 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.28.0] - 2026-08-22
+
+The PM escalated a question it could have answered, and the card showed the
+human a retry button and no question at all.
+
+### Changed
+
+- **Escalation is the PM's last resort, not its default.** It escalated "which
+  commit is the acceptance baseline?" — a fact its own read-only diagnosis run
+  could have established with `git ls-remote`. The brief now asks one question
+  first: is the reviewer demanding *a checkable fact* or *a decision that needs
+  authority*? Facts the PM rules on itself (`supply_then_retry`); escalation is
+  reserved for money, publishing, changing acceptance criteria, choosing between
+  two defensible product directions, and things only a human can do in the
+  physical world. An escalation's `reason` must now be phrased as an answerable
+  question, because the card presents it as one.
+
+### Added
+
+- **The card shows what the PM decided — and what it is asking.** An escalation
+  that lives only in the audit log is an escalation to nobody: the operator saw
+  `blocked` plus a retry button, with no sign the PM had a question for them.
+  Job detail now carries `pm_decision`, and an escalated card opens with a
+  「PM 需要你的裁定」panel: the question verbatim, a box for the answer, and one
+  button that files it to the job's inbox and retries — one action, because a
+  ruling only helps if the card runs again, and a human retry is what refreshes
+  the rework and PM budgets. The Telegram escalation notice points at it instead
+  of offering retry alone.
+
 ## [0.27.0] - 2026-08-22
 
 ### Fixed

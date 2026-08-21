@@ -46,11 +46,19 @@ export type Interaction = {
   created_at: string;
 };
 
+export type PmDecision = {
+  pm: string; at: string;
+  action: "retry" | "retry_other_agent" | "supply_then_retry" | "escalate" | null;
+  reason: string | null; cycle?: number; max?: number;
+};
+
 export type JobDetail = Job & {
   spec_md: string;
   worktree_path: string | null;
   runs: Run[];
   gates: Gate[];
+  // what the PM did — and, on an escalation, the question it needs answered
+  pm_decision?: PmDecision | null;
 };
 
 export type UsageRow = {

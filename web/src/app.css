@@ -154,6 +154,10 @@ textarea { background: var(--bg); color: var(--text); border: 1px solid var(--li
 .approval { border: 1px solid var(--accent); border-radius: 10px; padding: .8rem;
             display: grid; gap: .6rem; margin: .8rem 0; }
 .approval div { display: flex; gap: .6rem; }
+/* the PM's question outranks the generic stuck box next to it: this is a
+   specific ask addressed to the reader, not a status */
+.approval.pm-ask { border-width: 2px; background: var(--bg); }
+.approval.pm-ask textarea { width: 100%; }
 table { width: 100%; border-collapse: collapse; font-size: .82rem; }
 th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--line); }
 .gates { padding-left: 1.1rem; }

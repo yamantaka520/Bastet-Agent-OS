@@ -256,6 +256,8 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   const [supplyName, setSupplyName] = useState("");
   const [supplyText, setSupplyText] = useState("");
   const [supplyError, setSupplyError] = useState("");
+  const [rulingText, setRulingText] = useState("");
+  const [rulingError, setRulingError] = useState("");
   const [supplyNote, setSupplyNote] = useState("");
 
   useEffect(() => {
@@ -307,6 +309,21 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   const failure = job.runs.slice().reverse()
     .map((r) => r.error).find((e) => e && e.trim()) || "";
 
+  // one action, because they are one intent: the ruling only helps if the
+  // card runs again, and a human retry is also what refreshes the budgets
+  const ruleAndRetry = async () => {
+    setRulingError("");
+    try {
+      await post(`/api/jobs/${jobId}/supplies`,
+                 { name: "human-ruling", content: rulingText });
+      await post(`/api/jobs/${jobId}/retry`, { agent_id: "", spec: "",
+                                               refresh_workflow: false });
+      setRulingText("");
+      onChanged();
+      load();
+    } catch (e) { setRulingError(String((e as Error).message)); }
+  };
+
   const retry = async () => {
     await post(`/api/jobs/${jobId}/retry`, {
       agent_id: retryAgent,
@@ -342,6 +359,28 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
         <p className="notice">🔧 {t("board.reworkNote", { n: job.rework_count })}</p>
       )}
       <pre className="spec">{job.spec_md}</pre>
+
+      {canOperate && job.status === "blocked"
+        && job.pm_decision?.action === "escalate" && (
+        <div className="approval pm-ask">
+          <h3>🤖 {t("board.pmAsks")}</h3>
+          <p className="card-meta">
+            {job.pm_decision.pm} · {fmtTime(job.pm_decision.at)}
+            {job.pm_decision.cycle
+              ? ` · ${job.pm_decision.cycle}/${job.pm_decision.max}`
+              : ""}
+          </p>
+          <pre className="spec">{job.pm_decision.reason}</pre>
+          <textarea rows={3} placeholder={t("board.rulingPh")} value={rulingText}
+                    onChange={(e) => setRulingText(e.target.value)} />
+          <div className="row">
+            <button disabled={!rulingText.trim()} onClick={ruleAndRetry}>
+              {t("board.ruleAndRetry")}</button>
+            <span className="muted">{t("board.rulingHint")}</span>
+          </div>
+          {rulingError && <p className="error">{rulingError}</p>}
+        </div>
+      )}
 
       {canOperate && (job.status === "blocked" || job.status === "cancelled") && (
         <div className="approval">

@@ -1907,6 +1907,26 @@ def create_app(home: Home) -> FastAPI:
         job["gates"] = [dict(g) for g in db.query(
             "SELECT g.* FROM gate_results g JOIN runs r ON r.id=g.run_id "
             "WHERE r.job_id=? ORDER BY g.at", (job_id,))]
+        # what the PM did about this card, and above all what it is ASKING.
+        # An escalation that lives only in the audit log is an escalation to
+        # nobody: the operator saw "blocked" and a retry button, with no sign
+        # that the PM had a question for them.
+        pm = db.one("SELECT actor, at, detail_json FROM audit_log WHERE "
+                    "action='job.pm_intervention' AND target_id=? "
+                    "ORDER BY id DESC LIMIT 1", (job_id,))
+        job["pm_decision"] = None
+        if pm is not None:
+            try:
+                detail = json.loads(pm["detail_json"] or "{}")
+                decision = detail.get("decision") or {}
+                job["pm_decision"] = {
+                    "pm": pm["actor"].split(":", 1)[-1], "at": pm["at"],
+                    "action": decision.get("action"),
+                    "reason": decision.get("reason"),
+                    "cycle": detail.get("cycle"), "max": detail.get("max"),
+                }
+            except json.JSONDecodeError:
+                pass
         return job
 
     @app.post("/api/jobs/{job_id}/supplies")

@@ -259,3 +259,66 @@ def test_the_pm_is_told_execution_failed_is_not_an_approval():
     text = pm_supervisor.DIAGNOSIS_INSTRUCTIONS
     assert "execution failed" in text
     assert "沒有任何東西在等人核准" in text
+
+
+def test_escalation_is_the_last_resort_not_a_default():
+    """The PM escalated "which commit is the acceptance baseline" — a fact it
+    could have established from the repo — and the human got a card with a
+    retry button and no visible question."""
+    text = pm_supervisor.DIAGNOSIS_INSTRUCTIONS
+    assert "最後手段" in text
+    assert "可查證的事實" in text          # rule it yourself when it is checkable
+    assert "git ls-remote" in text          # and you may go and look
+    assert "一個具體的問題" in text          # an escalation must be answerable
+
+
+def test_the_card_can_see_what_the_pm_decided(tmp_path):
+    """An escalation that lives only in the audit log is an escalation to
+    nobody. The job detail must carry the PM's ask, verbatim."""
+    from fastapi.testclient import TestClient
+
+    from bastet_agent_os.config import Home
+    from bastet_agent_os.db import Db, now
+    from bastet_agent_os.server import create_app
+
+    home = Home(tmp_path / "home")
+    client = TestClient(create_app(home), base_url="http://127.0.0.1")
+    client.headers["Authorization"] = f"Bearer {home.api_token()}"
+    client.post("/api/teams", json={"id": "team1", "name": "T"})
+    client.post("/api/projects", json={"id": "p1", "repo_path": "/tmp/repo",
+                                      "team_id": "team1"})
+    db = Db(home.db_path)
+    db.write("INSERT INTO jobs(id, project_id, stages_snapshot_json, title, stage, "
+             "status, created_at, updated_at) VALUES('job_x','p1','[]','t','work',"
+             "'blocked',?,?)", (now(), now()))
+    ask = "以哪個 commit 為驗收基準？log 指向 b1e851c，遠端 HEAD 是 fe22082。"
+    db.audit("pm-supervisor:Agy", "job.pm_intervention", "job", "job_x",
+             {"cycle": 1, "max": 2,
+              "decision": {"action": "escalate", "reason": ask}})
+    db.close()
+
+    detail = client.get("/api/jobs/job_x").json()
+    assert detail["pm_decision"] == {"pm": "Agy", "at": detail["pm_decision"]["at"],
+                                     "action": "escalate", "reason": ask,
+                                     "cycle": 1, "max": 2}
+
+
+def test_a_card_with_no_pm_history_says_so(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from bastet_agent_os.config import Home
+    from bastet_agent_os.db import Db, now
+    from bastet_agent_os.server import create_app
+
+    home = Home(tmp_path / "home")
+    client = TestClient(create_app(home), base_url="http://127.0.0.1")
+    client.headers["Authorization"] = f"Bearer {home.api_token()}"
+    client.post("/api/teams", json={"id": "team1", "name": "T"})
+    client.post("/api/projects", json={"id": "p1", "repo_path": "/tmp/repo",
+                                      "team_id": "team1"})
+    db = Db(home.db_path)
+    db.write("INSERT INTO jobs(id, project_id, stages_snapshot_json, title, stage, "
+             "status, created_at, updated_at) VALUES('job_y','p1','[]','t','work',"
+             "'blocked',?,?)", (now(), now()))
+    db.close()
+    assert client.get("/api/jobs/job_y").json()["pm_decision"] is None
