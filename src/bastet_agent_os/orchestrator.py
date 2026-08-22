@@ -621,7 +621,9 @@ class Orchestrator:
         if job["id"] in self._pm_diagnosing:
             return
         if pm_supervisor.intervention_count(self.db, job["id"]) >= \
-                pm_supervisor.MAX_INTERVENTIONS:
+                pm_supervisor.MAX_INTERVENTIONS or \
+                pm_supervisor.lifetime_intervention_count(self.db, job["id"]) >= \
+                pm_supervisor.MAX_LIFETIME_INTERVENTIONS:
             return
         # an escalation is a terminal PM answer for this stall: "a human must
         # look". Re-diagnosing the same unchanged card every sweep would burn
@@ -1107,9 +1109,10 @@ class Orchestrator:
         # retry is not a human judgement, so it must NOT refill the budget — a
         # vendor limit interleaving with a rework loop would otherwise disable
         # the cycles cap entirely.
+        automated = user.startswith(("server:", "pm-supervisor:", "supervisor"))
         if user.startswith("server:"):
             self.db.write("UPDATE jobs SET resume_at=NULL WHERE id=?", (job_id,))
-        else:
+        elif not automated:
             self.db.write("UPDATE jobs SET rework_count=0, rework_note=NULL, "
                           "resume_at=NULL WHERE id=?", (job_id,))
         agent = agent_id or job["default_agent_id"]

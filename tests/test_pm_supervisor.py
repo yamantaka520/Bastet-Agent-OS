@@ -261,6 +261,16 @@ def test_the_pm_is_told_execution_failed_is_not_an_approval():
     assert "沒有任何東西在等人核准" in text
 
 
+def test_human_retries_do_not_grant_an_unlimited_lifetime_budget(seeded):
+    for episode in range(pm_supervisor.MAX_LIFETIME_INTERVENTIONS):
+        seeded.audit("pm-supervisor:fakebot", "job.pm_intervention", "job", "job1",
+                     {"episode": episode})
+        seeded.audit("user:root", "job.retry", "job", "job1", {})
+    assert pm_supervisor.intervention_count(seeded, "job1") == 0
+    assert pm_supervisor.lifetime_intervention_count(seeded, "job1") == \
+        pm_supervisor.MAX_LIFETIME_INTERVENTIONS
+
+
 def test_escalation_is_the_last_resort_not_a_default():
     """The PM escalated "which commit is the acceptance baseline" — a fact it
     could have established from the repo — and the human got a card with a

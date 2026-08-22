@@ -8,6 +8,20 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.31.1] - 2026-08-22
+
+### Fixed
+
+- PM supervision now has a six-intervention lifetime ceiling in addition to its
+  two-attempt episode budget. Manual retries can still resume a card, but can no
+  longer reopen unlimited automatic retries; INT-01 had reached 17 PM
+  interventions and 38 runs through that loophole.
+- PM and infrastructure retries no longer erase the card's rework count. Only
+  an actual human retry grants a fresh rework lease.
+- `tests-pass` gates decode subprocess output with UTF-8 replacement. Binary or
+  mixed-encoding test output is retained as readable evidence instead of
+  crashing the job driver with `UnicodeDecodeError`.
+
 ## [0.31.0] - 2026-08-22
 
 ### Added

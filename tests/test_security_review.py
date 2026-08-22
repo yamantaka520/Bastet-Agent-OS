@@ -147,3 +147,23 @@ async def test_quota_auto_resume_does_not_refill_the_rework_budget(orch, seeded)
     job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
     assert job["status"] == "done"
     assert job["rework_count"] == 2, "the machine retry must not grant a fresh lease"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("actor", ["pm-supervisor:fakebot", "supervisor"])
+async def test_automated_supervision_does_not_refill_rework_budget(
+        orch, seeded, actor):
+    """An automated retry cannot erase the evidence that the loop is spent."""
+    add_template(seeded, "dev", [{"name": "implement", "gate": "auto"}])
+    SCRIPT.append(RunResult(status="failed", summary="temporary executor failure"))
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+    seeded.write("UPDATE jobs SET rework_count=2, rework_note='same failure' WHERE id=?",
+                 (job_id,))
+
+    SCRIPT.append(RunResult(status="succeeded", summary="ok"))
+    orch.retry(job_id, user=actor)
+    await orch.wait_idle()
+
+    assert seeded.one("SELECT rework_count FROM jobs WHERE id=?", (job_id,))[
+        "rework_count"] == 2

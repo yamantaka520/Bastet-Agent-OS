@@ -279,7 +279,9 @@ def evaluate_gate(stage: StageDef, workdir: str,
         command = stage.gate_config["command"]
         try:
             proc = subprocess.run(command, shell=True, cwd=workdir,
-                                  capture_output=True, text=True, timeout=1800)
+                                  capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace",
+                                  timeout=1800)
         except (OSError, subprocess.TimeoutExpired) as exc:
             return GateOutcome("failed",
                                f"測試指令無法執行（{type(exc).__name__}: {exc}）"

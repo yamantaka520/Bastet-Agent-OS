@@ -37,6 +37,10 @@ from .db import new_id, now
 log = logging.getLogger("bastet.pm_supervisor")
 
 MAX_INTERVENTIONS = 2
+# A human retry opens a new diagnosis episode, but it must not grant automation
+# an unlimited lifetime budget. Live incident INT-01 reached 17 PM interventions
+# and 38 runs because manual retries repeatedly reopened automatic retries.
+MAX_LIFETIME_INTERVENTIONS = 6
 DIAGNOSIS_TIMEOUT_S = 600
 ACTIONS = ("retry", "retry_other_agent", "supply_then_retry", "escalate")
 
@@ -127,6 +131,14 @@ def intervention_count(db, job_id: str) -> int:
                  "action='job.pm_intervention' AND target_type='job' AND target_id=? "
                  "AND id > ?",
                  (job_id, _last_human_retry_id(db, job_id)))
+    return int(row["n"] if row else 0)
+
+
+def lifetime_intervention_count(db, job_id: str) -> int:
+    """All PM interventions for a card, never reset by any retry."""
+    row = db.one("SELECT COUNT(*) AS n FROM audit_log WHERE "
+                 "action='job.pm_intervention' AND target_type='job' AND target_id=?",
+                 (job_id,))
     return int(row["n"] if row else 0)
 
 

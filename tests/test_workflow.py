@@ -409,3 +409,18 @@ def test_a_stage_can_declare_its_own_time_budget():
     assert stages[0].to_dict()["timeout_s"] == 7200
     assert parse_stages([{"name": "x", "gate": "auto", "timeout_s": -5}])[0] \
         .timeout_s == 0                            # nonsense clamps to inherit
+
+
+def test_test_gate_replaces_non_utf8_output_instead_of_crashing(tmp_path):
+    """Binary-ish test output is evidence, not a reason to crash the driver."""
+    import sys
+
+    command = (f'"{sys.executable}" -c "import sys; '
+               'sys.stdout.buffer.write(bytes([255, 254, 10]))"')
+    stage = parse_stages([{"name": "test", "gate": "tests-pass",
+                           "gate_config": {"command": command}}])[0]
+
+    outcome = evaluate_gate(stage, str(tmp_path), None)
+
+    assert outcome.verdict == "passed"
+    assert "\ufffd" in outcome.detail
