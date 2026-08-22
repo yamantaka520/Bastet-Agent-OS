@@ -44,3 +44,16 @@ def test_changelog_top_release_matches():
     heads = re.findall(r"^## \[([^\]]+)\]", (ROOT / "CHANGELOG.md").read_text(), re.M)
     releases = [h for h in heads if h.lower() != "unreleased"]
     assert releases and releases[0] == __version__, heads[:3]
+
+
+def test_progress_states_the_current_release():
+    """PROGRESS.md claims a "Released: vX.Y.Z" — a claim that goes stale the
+    moment we ship, which is exactly what happened at 0.30.1 (the docs were
+    updated in the same release that made them wrong). Make the claim testable
+    instead of trusting memory. Historical mentions elsewhere in the file are
+    left alone: "landed in 0.29.1" stays true forever."""
+    text = (ROOT / "PROGRESS.md").read_text()
+    stated = re.search(r"^- Released: \*\*v([0-9][^*]*)\*\*", text, re.M)
+    assert stated, "PROGRESS.md no longer states a current release"
+    assert stated.group(1) == __version__, \
+        f"PROGRESS.md says v{stated.group(1)}, package says {__version__}"

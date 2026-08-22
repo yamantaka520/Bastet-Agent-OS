@@ -8,6 +8,17 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.30.2] - 2026-08-22
+
+### Fixed
+
+- PROGRESS.md stated the previous release — a claim that goes stale the instant
+  we ship, and did: 0.30.1 was the release that updated the docs and made them
+  wrong at the same time. The stated release is now pinned to `__version__` by
+  a test, alongside the existing checks on `web/package.json` and the CHANGELOG
+  heading. Historical mentions ("landed in 0.29.1") are untouched — those stay
+  true forever.
+
 ## [0.30.1] - 2026-08-22
 
 ### Documentation
