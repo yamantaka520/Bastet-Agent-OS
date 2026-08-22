@@ -390,7 +390,11 @@ class Orchestrator:
         task.add_done_callback(self._tasks.discard)
 
     SUPERVISOR_PERIOD_S = 30.0
-    STALLED_PROGRESS_S = 15 * 60
+    # a lost heartbeat, not a quiet stretch: the beat is written every
+    # LIVENESS_PERIOD_S (20s), so three missed minutes means the run is
+    # genuinely gone, while a legitimately silent stage (a 20-level E2E
+    # suite, a long build) is bounded by its own timeout_s instead
+    STALLED_HEARTBEAT_S = 3 * 60
     MAX_SUPERVISOR_RETRIES = 2
 
     def _supervisor_retry_count(self, job_id: str) -> int:
@@ -507,28 +511,43 @@ class Orchestrator:
         """
         interrupted, retried, resumed = [], [], []
         cutoff = (datetime.now(UTC) -
-                  timedelta(seconds=self.STALLED_PROGRESS_S)).isoformat()
+                  timedelta(seconds=self.STALLED_HEARTBEAT_S)).isoformat()
         for run_id, (executor, handle) in list(self._live.items()):
             row = self.db.one(
                 "SELECT r.*, j.project_id, j.title FROM runs r JOIN jobs j "
                 "ON j.id=r.job_id WHERE r.id=?", (run_id,))
             if not row or row["status"] != "running" or not row["started_at"]:
                 continue
-            semantic = row["progress_at"] or row["started_at"]
-            if semantic > cutoff:
+            # Interrupt the DEAD, never the merely quiet. This engine keeps two
+            # separate facts on purpose — heartbeat_at says the process is alive,
+            # progress_at says it last spoke — and killing on silence alone threw
+            # that distinction away. Live cost: an agent reported "FPS bench is
+            # still running. Waiting for it (20 levels × 60s)", beat every 20
+            # seconds to prove it was alive, and got executed at the 15-minute
+            # silence mark. Four times, growing to 42 minutes, across two agents;
+            # a 20-minute test can never finish inside a 15-minute patience.
+            # A quiet-but-alive run is the stage's own timeout_s to bound — that
+            # is what declaring a time budget is for. The board still shows it
+            # amber, because "alive but silent" is information, not a death
+            # sentence.
+            alive = row["heartbeat_at"] or row["started_at"]
+            if alive > cutoff:
                 continue
+            semantic = row["progress_at"] or row["started_at"]
             try:
                 await executor.cancel(handle)
                 interrupted.append(run_id)
                 self.db.audit("supervisor", "run.stalled_interrupted", "run", run_id,
-                              {"job_id": row["job_id"], "last_progress": semantic})
+                              {"job_id": row["job_id"], "last_progress": semantic,
+                               "last_alive": alive})
                 self._emit("run.stalled_interrupted", row["project_id"],
                            job_id=row["job_id"], run_id=run_id,
                            title=row["title"], last_progress=semantic)
                 run_memory.remember(
                     self.db, row["project_id"],
-                    f"專案監督器中斷假活 run {run_id}（任務「{row['title']}」）："
-                    f"語意進度自 {semantic} 起未更新；保留 worktree，交由受控恢復。",
+                    f"專案監督器中斷失去心跳的 run {run_id}（任務「{row['title']}」）："
+                    f"心跳自 {alive} 起未更新（最後輸出 {semantic}）；"
+                    f"保留 worktree，交由受控恢復。",
                     kind="warning", importance=0.8)
             except Exception:
                 log.exception("supervisor could not interrupt %s", run_id)
@@ -1312,6 +1331,7 @@ class Orchestrator:
                              + diff[:DIFF_PROMPT_LIMIT] + "\n```")
         return "\n\n".join(p for p in parts if p)
 
+    SCRATCH_RELPATH = "._bastet"     # engine↔agent boundary, never committed
     PREVIEW_RELPATH = "._bastet/preview"
     PREVIEW_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf",
                           ".html", ".md", ".txt", ".mp4", ".webm", ".mov"}
@@ -1566,17 +1586,26 @@ class Orchestrator:
         This commits to `bastet/<job_id>`, never to the project's own branch:
         merging stays a deliberate step (the 合併發布 / deploy stages), which is
         the part that should keep asking a human."""
-        status = subprocess.run(["git", "-C", workdir, "status", "--porcelain"],
+        # `._bastet/` is the engine↔agent boundary — previews, verdicts, the
+        # inbox — not product code. Committing it (which `add -A` did) made
+        # every run dirty the tree again by regenerating those files, so the
+        # reviewer kept seeing "uncommitted modifications" and refusing the
+        # evidence. Untrack it once, then keep it out for good.
+        subprocess.run(["git", "-C", workdir, "rm", "-r", "--cached", "-q",
+                        "--ignore-unmatch", self.SCRATCH_RELPATH],
+                       capture_output=True, text=True)
+        status = subprocess.run(["git", "-C", workdir, "status", "--porcelain",
+                                 "--", ".", f":(exclude){self.SCRATCH_RELPATH}"],
                                 capture_output=True, text=True)
         if status.returncode != 0 or not status.stdout.strip():
-            return None                       # nothing to keep
+            return None                       # nothing worth keeping
         title = (job["title"] or job["id"])[:60]
         message = (f"bastet({label}): {title}\n\njob {job['id']}\n"
                    f"stage {job['stage']} · status {job['status']}"
                    if label else
                    f"bastet: {title}\n\njob {job['id']}\n"
                    f"stage {job['stage']} · status {job['status']}")
-        for args in (["add", "-A"],
+        for args in (["add", "-A", "--", ".", f":(exclude){self.SCRATCH_RELPATH}"],
                      ["-c", "user.name=Bastet Agent OS",
                       "-c", "user.email=bastet@localhost",
                       "commit", "--no-verify", "-q", "-m", message]):

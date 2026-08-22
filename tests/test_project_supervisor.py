@@ -77,3 +77,57 @@ async def test_supervisor_does_not_duplicate_a_driver_while_gate_runs(orch, seed
     await orch.supervise_once()
 
     assert spawned == []
+
+
+@pytest.mark.asyncio
+async def test_a_quiet_but_alive_run_is_left_alone(orch, seeded):
+    """The live execution: an agent reported "FPS bench is still running.
+    Waiting for it (20 levels × 60s)", beat every 20 seconds to prove it was
+    alive, and was killed at the 15-minute silence mark — four times, growing
+    to 42 minutes, across two agents. A 20-minute test can never finish inside
+    a 15-minute patience."""
+    from datetime import UTC, datetime, timedelta
+
+    long_ago = (datetime.now(UTC) - timedelta(minutes=30)).isoformat()
+    just_now = datetime.now(UTC).isoformat()
+    seeded.write("UPDATE runs SET status='running', started_at=?, heartbeat_at=?, "
+                 "progress_at=?, progress_text=? WHERE id='run1'",
+                 (long_ago, just_now, long_ago,
+                  "FPS bench is still running. Waiting for it (20 levels × 60s)"))
+    cancelled = []
+
+    class Handle:
+        pass
+
+    class Exec:
+        async def cancel(self, handle):
+            cancelled.append(True)
+
+    orch._live["run1"] = (Exec(), Handle())
+    result = await orch.supervise_once()
+
+    assert cancelled == [], "a run that is alive and honest about waiting was killed"
+    assert result["interrupted"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_run_whose_heartbeat_stopped_is_interrupted(orch, seeded):
+    """The other half: a genuinely dead run must still be reclaimed."""
+    from datetime import UTC, datetime, timedelta
+
+    long_ago = (datetime.now(UTC) - timedelta(minutes=30)).isoformat()
+    seeded.write("UPDATE runs SET status='running', started_at=?, heartbeat_at=?, "
+                 "progress_at=? WHERE id='run1'", (long_ago, long_ago, long_ago))
+    cancelled = []
+
+    class Exec:
+        async def cancel(self, handle):
+            cancelled.append(True)
+
+    orch._live["run1"] = (Exec(), object())
+    result = await orch.supervise_once()
+
+    assert result["interrupted"] == ["run1"] and cancelled == [True]
+    detail = seeded.one("SELECT detail_json FROM audit_log "
+                        "WHERE action='run.stalled_interrupted'")["detail_json"]
+    assert "last_alive" in detail      # the record says which fact decided it

@@ -567,3 +567,33 @@ def test_the_review_brief_states_a_satisfiable_freshness_rule():
     assert "ancestor" in REVIEW_INSTRUCTIONS
     assert "no product code" in REVIEW_INSTRUCTIONS
     assert "uncommitted" in REVIEW_INSTRUCTIONS
+
+
+async def test_the_engines_scratch_dir_is_never_committed(orch, seeded, repo):
+    """`._bastet/` is the engine↔agent boundary — previews, verdicts, inbox —
+    not product code. Committing it (which `add -A` did) meant every run
+    dirtied the tree again by regenerating those files, so the reviewer kept
+    seeing "uncommitted modifications" and refusing the evidence. The card the
+    operator was watching went back to step one and hit the same wall."""
+    import subprocess
+    add_template(seeded, "dev", [{"name": "implement", "gate": "auto"}])
+
+    def writes_both(task):
+        from pathlib import Path
+        work = Path(task.workdir)
+        (work / "product.txt").write_text("real change")
+        preview = work / "._bastet" / "preview"
+        preview.mkdir(parents=True, exist_ok=True)
+        (preview / "screenshot.png").write_bytes(b"png")
+        return RunResult(status="succeeded", summary="did it")
+    SCRIPT.append(writes_both)
+
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True))
+    await orch.wait_idle()
+
+    listing = subprocess.run(
+        ["git", "-C", str(repo), "ls-tree", "-r", "--name-only",
+         f"bastet/{job_id}"], capture_output=True, text=True).stdout
+    assert "product.txt" in listing, "the actual work was not committed"
+    assert "._bastet" not in listing, \
+        f"the engine's scratch area was committed and will dirty every later run:\n{listing}"

@@ -8,6 +8,33 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.30.0] - 2026-08-22
+
+Two engine defects the same card kept exposing: we were killing our own
+long-running tests, and committing our own scratch directory into the work.
+
+### Fixed
+
+- **The supervisor interrupts the dead, not the merely quiet.** It judged
+  liveness by `progress_at` (when a run last *spoke*) instead of `heartbeat_at`
+  (when it was last confirmed *alive*) — throwing away the distinction this
+  engine keeps on purpose. Live cost: an agent reported "FPS bench is still
+  running. Waiting for it (20 levels × 60s)", beat every 20 seconds to prove it
+  was alive, and was executed at the 15-minute silence mark. Four times,
+  growing to 42 minutes, across two different agents — a 20-minute test can
+  never finish inside a 15-minute patience, so no retry and no handover could
+  ever have helped. A lost heartbeat (3 minutes, nine missed beats) now decides
+  interruption; a quiet-but-alive stage is bounded by its own `timeout_s`, which
+  is what declaring a time budget is for. The board still shows it amber,
+  because "alive but silent" is information, not a death sentence.
+- **`._bastet/` is never committed.** Per-stage commits (0.29.0) used
+  `git add -A`, which swept the engine↔agent boundary — previews, verdict
+  files, the inbox — into the job branch. Every later run then regenerated
+  those files and dirtied the tree again, so the reviewer went on refusing
+  evidence for "uncommitted modifications": the same wall the card hit before,
+  freshly painted by our own fix. Previously-committed scratch is untracked
+  once, and staging excludes the path from then on.
+
 ## [0.29.1] - 2026-08-22
 
 ### Fixed
