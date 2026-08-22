@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 import httpx
 import typer
@@ -14,6 +15,7 @@ resource_app = typer.Typer(help="Manage resources (LLM endpoints, secrets, …).
 project_app = typer.Typer(help="Manage projects (1:1 with AMOS projects).")
 agent_app = typer.Typer(help="Manage agents (executor bindings).")
 grant_app = typer.Typer(help="Manage grants (who may use which resource).")
+maintenance_app = typer.Typer(help="Drain dispatch safely for upgrades.")
 @app.callback()
 def _prepare() -> None:
     """Every command sees the same PATH the service gives its subprocesses.
@@ -29,6 +31,35 @@ app.add_typer(resource_app, name="resource")
 app.add_typer(project_app, name="project")
 app.add_typer(agent_app, name="agent")
 app.add_typer(grant_app, name="grant")
+app.add_typer(maintenance_app, name="maintenance")
+
+
+@maintenance_app.command("status")
+def maintenance_status():
+    """Show the durable dispatch fence and live drain counts."""
+    _print(_call("GET", "/api/maintenance/state"))
+
+
+@maintenance_app.command("enter")
+def maintenance_enter(
+    reason: str = typer.Option("planned upgrade", help="Audit reason."),
+    wait: bool = typer.Option(False, "--wait", help="Wait until jobs and runs drain."),
+    poll: float = typer.Option(2.0, min=0.2, help="Polling interval in seconds."),
+):
+    """Fence new dispatch/retries, optionally waiting for a safe restart point."""
+    current = _call("POST", "/api/maintenance/enter", {"reason": reason})
+    while wait and not current["drained"]:
+        typer.echo(f"draining: {current['active_jobs']} jobs, "
+                   f"{current['active_runs']} runs")
+        time.sleep(poll)
+        current = _call("GET", "/api/maintenance/state")
+    _print(current)
+
+
+@maintenance_app.command("leave")
+def maintenance_leave():
+    """Open the dispatch fence after the upgrade is verified."""
+    _print(_call("POST", "/api/maintenance/leave", {}))
 
 
 def _client() -> httpx.Client:

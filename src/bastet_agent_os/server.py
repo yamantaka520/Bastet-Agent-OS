@@ -307,6 +307,26 @@ class RoomMessageIn(BaseModel):
     author_id: str = ""
 
 
+class MaintenanceIn(BaseModel):
+    reason: str = ""
+
+
+class HandoffAckIn(BaseModel):
+    agent_id: str
+    acknowledgement: str = ""
+    questions: list[str] = []
+
+
+class ContextEvalIn(BaseModel):
+    job_id: str
+    stage: str
+    role: str | None = None
+    expected_buckets: list[str] = []
+    expected_terms: list[str] = []
+    forbidden_terms: list[str] = []
+    budget_tokens: int = 6000
+
+
 class UserRoleIn(BaseModel):
     role: str                      # viewer|operator|admin
 
@@ -564,7 +584,29 @@ def create_app(home: Home) -> FastAPI:
         from . import collaboration
         return {"project_id": project_id,
                 "members": collaboration.members(db, project_id),
-                "messages": collaboration.messages(db, project_id, limit)}
+                "messages": collaboration.messages(db, project_id, limit),
+                "handoffs": collaboration.project_handoffs(db, project_id, limit)}
+
+    @app.post("/api/projects/{project_id}/handoffs/{handoff_id}/ack")
+    def acknowledge_project_handoff(
+        project_id: str, handoff_id: str, body: HandoffAckIn,
+        auth: Auth = Depends(require_role("operator")),
+    ):
+        from . import collaboration
+        row = db.one("SELECT project_id FROM stage_handoffs WHERE id=?", (handoff_id,))
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="handoff not found")
+        try:
+            result = collaboration.acknowledge_handoff(
+                db, handoff_id, agent_id=body.agent_id,
+                acknowledgement=body.acknowledgement, questions=body.questions)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        db.audit(auth.actor, "handoff.acknowledged", "handoff", handoff_id,
+                 {"agent_id": body.agent_id, "questions": body.questions})
+        bus.emit("handoff.acknowledged", project_id, handoff_id=handoff_id,
+                 agent_id=body.agent_id)
+        return result
 
     @app.post("/api/projects/{project_id}/room/messages")
     def post_project_room_message(project_id: str, body: RoomMessageIn,
@@ -2214,6 +2256,41 @@ def create_app(home: Home) -> FastAPI:
 
     # ---- maintenance: check & update the moving parts (SPEC §5.13) -----------
 
+    @app.get("/api/context/evaluations",
+             dependencies=[Depends(require_role("viewer"))])
+    def context_evaluations(limit: int = 100):
+        from . import context_eval
+        return context_eval.recent(db, max(1, min(limit, 500)))
+
+    @app.post("/api/context/evaluate")
+    def context_evaluate(body: ContextEvalIn,
+                         auth: Auth = Depends(require_role("operator"))):
+        from . import context_eval
+        try:
+            result = context_eval.evaluate(db, **body.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        db.audit(auth.actor, "context.evaluated", "job", body.job_id,
+                 {"evaluation_id": result["id"], "passed": result["passed"]})
+        return result
+
+    @app.get("/api/maintenance/state",
+             dependencies=[Depends(require_role("viewer"))])
+    def maintenance_state():
+        from . import maintenance_mode
+        return maintenance_mode.state(db)
+
+    @app.post("/api/maintenance/enter")
+    def maintenance_enter(body: MaintenanceIn,
+                          auth: Auth = Depends(require_role("admin"))):
+        from . import maintenance_mode
+        return maintenance_mode.enter(db, auth.actor, body.reason)
+
+    @app.post("/api/maintenance/leave")
+    def maintenance_leave(auth: Auth = Depends(require_role("admin"))):
+        from . import maintenance_mode
+        return maintenance_mode.leave(db, auth.actor)
+
     @app.get("/api/maintenance/components",
              dependencies=[Depends(require_role("admin"))])
     async def maintenance_components():
@@ -2224,16 +2301,23 @@ def create_app(home: Home) -> FastAPI:
     @app.post("/api/maintenance/components/{component_id}/update")
     async def maintenance_update(component_id: str,
                                  auth: Auth = Depends(require_role("admin"))):
-        from . import maintenance
+        from . import maintenance, maintenance_mode
         try:
+            maintenance_mode.require_drained(db)
             return await asyncio.to_thread(maintenance.update, db, component_id,
                                            auth.actor)
+        except maintenance_mode.MaintenanceModeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/api/maintenance/update-all")
     async def maintenance_update_all(auth: Auth = Depends(require_role("admin"))):
-        from . import maintenance
+        from . import maintenance, maintenance_mode
+        try:
+            maintenance_mode.require_drained(db)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return await asyncio.to_thread(maintenance.update_all, db, auth.actor)
 
     @app.get("/api/memory/browse", dependencies=[Depends(require_role("viewer"))])

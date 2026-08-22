@@ -21,6 +21,7 @@ log = logging.getLogger("bastet.events")
 # `unknown event type` on a healthy system. tests/test_events.py fails if the code
 # emits a literal type that is not listed here.
 EVENT_TYPES = {
+    "handoff.acknowledged",
     # jobs
     "job.created", "job.stage_changed", "job.done", "job.blocked", "job.cancelled",
     "job.rework", "job.resumed", "job.retried", "job.archived", "job.deleted",

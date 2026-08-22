@@ -318,6 +318,20 @@ CREATE TABLE IF NOT EXISTS stage_handoffs (
 );
 CREATE INDEX IF NOT EXISTS idx_handoffs_job ON stage_handoffs(job_id, at);
 
+-- A durable dispatch fence for safe upgrades.  The row exists even while the
+-- fence is open so status checks never depend on process-local state.
+CREATE TABLE IF NOT EXISTS maintenance_lock (
+  id INTEGER PRIMARY KEY CHECK(id=1),
+  enabled INTEGER NOT NULL DEFAULT 0,
+  generation INTEGER NOT NULL DEFAULT 0,
+  owner TEXT,
+  reason TEXT,
+  entered_at TEXT,
+  released_at TEXT
+);
+INSERT OR IGNORE INTO maintenance_lock(id, enabled, generation)
+VALUES(1, 0, 0);
+
 -- One row per independently declared test case.  Evidence is reusable only
 -- while its covered paths and command inputs remain unchanged.
 CREATE TABLE IF NOT EXISTS test_evidence (
@@ -336,6 +350,25 @@ CREATE TABLE IF NOT EXISTS test_evidence (
 );
 CREATE INDEX IF NOT EXISTS idx_test_evidence_job_case
   ON test_evidence(job_id, stage, case_id, at);
+
+CREATE TABLE IF NOT EXISTS context_evaluations (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  job_id TEXT NOT NULL REFERENCES jobs(id),
+  stage TEXT NOT NULL,
+  role TEXT,
+  expected_buckets_json TEXT NOT NULL DEFAULT '[]',
+  expected_terms_json TEXT NOT NULL DEFAULT '[]',
+  forbidden_terms_json TEXT NOT NULL DEFAULT '[]',
+  report_json TEXT NOT NULL,
+  bucket_recall REAL NOT NULL,
+  term_recall REAL NOT NULL,
+  noise_count INTEGER NOT NULL,
+  passed INTEGER NOT NULL,
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_context_evaluations_job
+  ON context_evaluations(job_id, at);
 CREATE INDEX IF NOT EXISTS idx_chat_msg_session ON chat_messages(session_id, at);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_scope
   ON chat_sessions(scope_type, scope_id);
@@ -432,6 +465,19 @@ class Db:
             channel_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(channels)")}
             if "name" not in channel_cols:
                 self._conn.execute("ALTER TABLE channels ADD COLUMN name TEXT")
+            handoff_cols = {r[1] for r in
+                            self._conn.execute("PRAGMA table_info(stage_handoffs)")}
+            for col, decl in [
+                ("delivered_at", "TEXT"),
+                ("delivered_to_agent_id", "TEXT"),
+                ("acknowledged_at", "TEXT"),
+                ("acknowledged_by", "TEXT"),
+                ("acknowledgement", "TEXT"),
+                ("questions_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ]:
+                if col not in handoff_cols:
+                    self._conn.execute(
+                        f"ALTER TABLE stage_handoffs ADD COLUMN {col} {decl}")
             self._conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
                 (str(SCHEMA_VERSION),),

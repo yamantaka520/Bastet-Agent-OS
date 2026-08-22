@@ -60,7 +60,8 @@ def build_context(db: Db, job, stage_name: str, budget_tokens: int = 6000,
                   amos_query: str | None = None,
                   skip: frozenset[str] = frozenset(),
                   recall: dict | None = None,
-                  stage_role: str | None = None) -> tuple[str, ContextReport]:
+                  stage_role: str | None = None,
+                  agent_id: str | None = None) -> tuple[str, ContextReport]:
     """Assemble the run's task-layer context. Returns (text, report).
 
     `skip` omits buckets the caller already carries elsewhere (e.g. "spec"
@@ -81,7 +82,7 @@ def build_context(db: Db, job, stage_name: str, budget_tokens: int = 6000,
         if not _relevant(bucket, stage_name, stage_role):
             report.add(bucket, False, 0, f"not relevant to role {stage_role or '-'}")
             continue
-        text = _gather(db, job, stage_name, bucket, amos_query, recall)
+        text = _gather(db, job, stage_name, bucket, amos_query, recall, agent_id)
         if not text:
             report.add(bucket, False, 0, "empty")
             continue
@@ -122,7 +123,7 @@ def _rollover(bucket: str, budget: int, remaining: int) -> int:
 
 
 def _gather(db: Db, job, stage_name: str, bucket: str, amos_query: str | None,
-            recall: dict | None = None) -> str:
+            recall: dict | None = None, agent_id: str | None = None) -> str:
     if bucket == "spec":
         return f"# Task: {job['title']}\n{job['spec_md']}"
 
@@ -139,7 +140,9 @@ def _gather(db: Db, job, stage_name: str, bucket: str, amos_query: str | None,
         return "## Pipeline history\n" + "\n".join(lines)
 
     if bucket == "handoff":
-        from .collaboration import latest_handoffs
+        from .collaboration import deliver_handoffs, latest_handoffs
+        if agent_id:
+            deliver_handoffs(db, job["id"], stage_name, agent_id)
         rows = latest_handoffs(db, job["id"])
         if not rows:
             return ""
@@ -150,7 +153,9 @@ def _gather(db: Db, job, stage_name: str, bucket: str, amos_query: str | None,
             lines.append(f"- {row['from_stage']} → {row['to_stage'] or '完成'}: "
                          f"{row['summary']}\n  changed: {', '.join(paths) or 'none'}"
                          + (f"\n  verified: {', '.join(checks)}" if checks else ""))
-        return "## Stage handoffs\n" + "\n".join(lines)
+        return ("## Stage handoffs\n" + "\n".join(lines)
+                + "\n\nAcknowledge each handoff in the project room; state your "
+                  "understanding and any questions before handing off again.")
 
     if bucket == "test_evidence":
         rows = db.query(

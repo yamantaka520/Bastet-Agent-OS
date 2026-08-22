@@ -292,6 +292,8 @@ type Component = { id: string; label: string; kind: string; installed: string | 
                    available: string | null; state: string; source: string };
 type UpdateResult = { id: string; status: string; from: string | null;
                       to: string | null; log: string; restart_required: boolean };
+type DrainState = { enabled: boolean; generation: number; reason: string | null;
+                    active_jobs: number; active_runs: number; drained: boolean };
 
 const STATE_BADGE: Record<string, string> = {
   current: "🟢", outdated: "🟡", missing: "🔴", unknown: "⚪",
@@ -303,11 +305,18 @@ function MaintenanceSection() {
   const [busy, setBusy] = useState("");
   const [result, setResult] = useState<UpdateResult[] | null>(null);
   const [error, setError] = useState("");
+  const [drain, setDrain] = useState<DrainState | null>(null);
 
   const check = async () => {
     setBusy("check");
     setError("");
-    try { setRows(await api<Component[]>("/api/maintenance/components")); }
+    try {
+      const [components, state] = await Promise.all([
+        api<Component[]>("/api/maintenance/components"),
+        api<DrainState>("/api/maintenance/state"),
+      ]);
+      setRows(components); setDrain(state);
+    }
     catch (e) { setError(String((e as Error).message)); }
     finally { setBusy(""); }
   };
@@ -340,6 +349,15 @@ function MaintenanceSection() {
 
   const outdated = (rows ?? []).filter((r) => r.state === "outdated").length;
   const restart = (result ?? []).some((r) => r.restart_required);
+  const setDrainMode = async (enabled: boolean) => {
+    setBusy("drain"); setError("");
+    try {
+      setDrain(await post<DrainState>(
+        enabled ? "/api/maintenance/enter" : "/api/maintenance/leave",
+        enabled ? { reason: "admin console maintenance" } : {}));
+    } catch (e) { setError(String((e as Error).message)); }
+    finally { setBusy(""); }
+  };
 
   return (
     <Section title={t("mnt.title")}
@@ -347,10 +365,21 @@ function MaintenanceSection() {
                <span className="row-ops">
                  <button className="ghost" disabled={!!busy} onClick={check}>
                    {busy === "check" ? t("mnt.checking") : t("mnt.checkAll")}</button>
-                 <button disabled={!!busy} onClick={updateAll}>
+                 <button disabled={!!busy || !drain?.drained} onClick={updateAll}>
                    {busy === "all" ? t("mnt.updating") : t("mnt.updateAll")}</button>
                </span>}>
       {error && <p className="error">{error}</p>}
+      {drain && (
+        <div className="stage-editor">
+          <p><b>{t("mnt.drainTitle")}</b> — {drain.enabled
+            ? (drain.drained ? t("mnt.drained") : t("mnt.draining"))
+            : t("mnt.open")}</p>
+          <p className="muted">{t("mnt.activeCounts", {
+            jobs: drain.active_jobs, runs: drain.active_runs })}</p>
+          <button disabled={!!busy} onClick={() => setDrainMode(!drain.enabled)}>
+            {drain.enabled ? t("mnt.leaveDrain") : t("mnt.enterDrain")}</button>
+        </div>
+      )}
       {!rows && <p className="muted">{t("mnt.checking")}</p>}
       {rows && (
         <>
@@ -367,7 +396,8 @@ function MaintenanceSection() {
               <span key={`s-${r.id}`}>
                 {STATE_BADGE[r.state] ?? "⚪"} {t(`mnt.state.${r.state}`,
                                                  undefined, r.state)}</span>,
-              <button key={`u-${r.id}`} className="ghost" disabled={!!busy}
+              <button key={`u-${r.id}`} className="ghost"
+                      disabled={!!busy || !drain?.drained}
                       onClick={() => updateOne(r.id)}>
                 {busy === r.id ? t("mnt.updating")
                                : r.state === "missing" ? t("mnt.install")

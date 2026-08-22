@@ -110,6 +110,8 @@ class Orchestrator:
 
     def dispatch(self, req: DispatchRequest, actor: str = "user") -> str:
         """Validate, create the job at its first stage, schedule the driver."""
+        from .maintenance_mode import require_dispatch_allowed
+        require_dispatch_allowed(self.db)
         project = self.db.one("SELECT * FROM projects WHERE id=?", (req.project_id,))
         if project is None:
             raise ValueError(f"unknown project {req.project_id!r}")
@@ -511,6 +513,8 @@ class Orchestrator:
         gates and failed acceptance criteria remain human decisions.
         """
         interrupted, retried, resumed = [], [], []
+        from .maintenance_mode import enabled as maintenance_enabled
+        draining = maintenance_enabled(self.db)
         cutoff = (datetime.now(UTC) -
                   timedelta(seconds=self.STALLED_HEARTBEAT_S)).isoformat()
         for run_id, (executor, handle) in list(self._live.items()):
@@ -552,6 +556,9 @@ class Orchestrator:
                     kind="warning", importance=0.8)
             except Exception:
                 log.exception("supervisor could not interrupt %s", run_id)
+
+        if draining:
+            return {"interrupted": interrupted, "retried": retried, "resumed": resumed}
 
         for job in self.db.query("SELECT * FROM jobs WHERE status='blocked' AND archived=0"):
             recoverable, reason = self._recoverable_block(job)
@@ -1023,6 +1030,32 @@ class Orchestrator:
             self._block(job_id, f"stage {job['stage']} rejected by {user}")
             return {"job_id": job_id, "status": "blocked"}
 
+        # The driver returned when a human gate became pending, so approval is
+        # the only place that can publish this stage's handoff.  Missing this
+        # call left live project rooms empty even after multi-stage jobs had
+        # completed: approve() advanced directly to the next stage.
+        if last_run:
+            from . import collaboration
+            run = self.db.one("SELECT * FROM runs WHERE id=?", (last_run["id"],))
+            artifacts = json.loads(run["artifacts_json"] or "{}") if run else {}
+            summary = str(artifacts.get("summary") or
+                          (run["progress_text"] if run else "") or
+                          comment or "已由人工核准完成")
+            next_stage = names[idx + 1] if idx + 1 < len(stages) else None
+            workdir = (run["workdir"] if run else None) or job["worktree_path"] \
+                or self._project_repo(job)
+            paths = collaboration.changed_paths(workdir)
+            handoff_id = collaboration.record_handoff(
+                self.db, project_id=job["project_id"], job_id=job_id,
+                run_id=last_run["id"], from_stage=job["stage"],
+                to_stage=next_stage, agent_id=run["agent_id"],
+                summary=summary[:3000], paths=paths,
+                verification=[f"human-approve: passed by {user}"])
+            self.db.audit("orchestrator", "stage.handoff", "job", job_id,
+                          {"handoff_id": handoff_id, "from": job["stage"],
+                           "to": next_stage, "changed_paths": paths[:50],
+                           "via": "human-approve"})
+
         if idx + 1 >= len(stages):
             self.db.write("UPDATE jobs SET status='done', updated_at=? WHERE id=?",
                           (now(), job_id))
@@ -1058,6 +1091,8 @@ class Orchestrator:
         stage attempted again — with a different agent if the first one is the
         problem. Only jobs that are actually stuck may be retried; a running job
         would end up with two drivers."""
+        from .maintenance_mode import require_dispatch_allowed
+        require_dispatch_allowed(self.db)
         job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if job is None:
             raise ValueError(f"unknown job {job_id!r}")
@@ -1191,7 +1226,7 @@ class Orchestrator:
             context_text, report = build_context(
                 self.db, job, stage.name, skip=frozenset({"spec"}),
                 recall=run_memory.recall_kwargs(self.db, job, agent["id"]),
-                stage_role=stage.role)
+                stage_role=stage.role, agent_id=agent["id"])
             self.db.audit("orchestrator", "context.assembled", "run", run_id,
                           report.to_dict())
             # model: agent config > resource routing default > official default
@@ -1665,18 +1700,19 @@ class Orchestrator:
         This commits to `bastet/<job_id>`, never to the project's own branch:
         merging stays a deliberate step (the 合併發布 / deploy stages), which is
         the part that should keep asking a human."""
-        # `._bastet/` is the engine↔agent boundary — previews, verdicts, the
-        # inbox — not product code. Committing it (which `add -A` did) made
-        # every run dirty the tree again by regenerating those files, so the
-        # reviewer kept seeing "uncommitted modifications" and refusing the
-        # evidence. Untrack it once, then keep it out for good.
-        subprocess.run(["git", "-C", workdir, "rm", "-r", "--cached", "-q",
-                        "--ignore-unmatch", self.SCRATCH_RELPATH],
-                       capture_output=True, text=True)
-        status = subprocess.run(["git", "-C", workdir, "status", "--porcelain",
-                                 "--", ".", f":(exclude){self.SCRATCH_RELPATH}"],
-                                capture_output=True, text=True)
-        if status.returncode != 0 or not status.stdout.strip():
+        # Never add new engine scratch, but never DELETE files the repository
+        # deliberately tracks under `._bastet/` either. INT-01 used tracked test
+        # evidence there; the old `git rm --cached` silently deleted all ten
+        # evidence files on every stage commit, making its gate impossible.
+        product_status = subprocess.run(
+            ["git", "-C", workdir, "status", "--porcelain", "--", ".",
+             f":(exclude){self.SCRATCH_RELPATH}"], capture_output=True, text=True)
+        tracked_scratch = subprocess.run(
+            ["git", "-C", workdir, "status", "--porcelain",
+             "--untracked-files=no", "--", self.SCRATCH_RELPATH],
+            capture_output=True, text=True)
+        if product_status.returncode != 0 or tracked_scratch.returncode != 0 or not (
+                product_status.stdout.strip() or tracked_scratch.stdout.strip()):
             return None                       # nothing worth keeping
         title = (job["title"] or job["id"])[:60]
         message = (f"bastet({label}): {title}\n\njob {job['id']}\n"
@@ -1684,10 +1720,14 @@ class Orchestrator:
                    if label else
                    f"bastet: {title}\n\njob {job['id']}\n"
                    f"stage {job['stage']} · status {job['status']}")
-        for args in (["add", "-A", "--", ".", f":(exclude){self.SCRATCH_RELPATH}"],
-                     ["-c", "user.name=Bastet Agent OS",
-                      "-c", "user.email=bastet@localhost",
-                      "commit", "--no-verify", "-q", "-m", message]):
+        commands = [["add", "-A", "--", ".",
+                     f":(exclude){self.SCRATCH_RELPATH}"]]
+        if tracked_scratch.stdout.strip():
+            commands.append(["add", "-u", "--", self.SCRATCH_RELPATH])
+        commands.append(["-c", "user.name=Bastet Agent OS",
+                         "-c", "user.email=bastet@localhost",
+                         "commit", "--no-verify", "-q", "-m", message])
+        for args in commands:
             proc = subprocess.run(["git", "-C", workdir, *args],
                                   capture_output=True, text=True)
             if proc.returncode != 0:
@@ -1761,6 +1801,11 @@ class Orchestrator:
             precision = result.precision
 
         artifacts = dict(result.artifacts)
+        # Human approval happens after the driver has returned. Persist the
+        # agent's conclusion so that approve() can hand the actual work summary
+        # to the next agent instead of substituting the reviewer's comment.
+        if result.summary:
+            artifacts["summary"] = result.summary
         diff_path = self._collect_diff(job_id, workdir)
         if diff_path:
             artifacts["diff"] = diff_path

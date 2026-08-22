@@ -42,6 +42,12 @@ the honest states are the point (a yellow 有新版 for the Claude Agent SDK, an
 
 ![System settings and the maintenance card with component versions](https://raw.githubusercontent.com/yamantaka520/Bastet-Agent-OS/main/assets/screenshot-admin.png)
 
+Before an upgrade, acquire the durable drain fence with
+`bastet maintenance enter --wait`. New dispatch, retries, PM intervention and
+driver recovery pause while existing runs finish. Component updates remain
+disabled until the fence reports `drained`; release it with
+`bastet maintenance leave` after restart verification.
+
 ## Why
 
 Running one coding agent is easy. Running a *team* of them across several

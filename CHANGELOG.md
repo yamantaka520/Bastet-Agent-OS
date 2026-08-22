@@ -8,6 +8,27 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.32.0] - 2026-08-22
+
+### Added
+
+- Durable maintenance/drain lock across API, CLI, supervisor and Admin UI. It
+  fences new dispatch, retries, PM intervention and driver recovery while
+  allowing existing runs to finish; component updates require a drained lock.
+- Stage handoff delivery and acknowledgement records. Context assembly records
+  the actual receiving Agent, and the project room exposes acknowledgement,
+  understanding and question fields for auditable stage-to-stage transfer.
+- Human-approved stages now publish the completed run's summary, changed paths,
+  and approval evidence to the project room before advancing. Previously the
+  approval path bypassed handoff creation entirely.
+- Persistent context golden-case evaluation API measuring expected-bucket
+  recall, expected-term recall and forbidden-term noise.
+
+### Changed
+
+- `bastet maintenance enter --wait` is the supported safe-deployment entry
+  point; `status` reports active jobs/runs and `leave` reopens dispatch.
+
 ## [0.31.1] - 2026-08-22
 
 ### Fixed

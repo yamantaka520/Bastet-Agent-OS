@@ -14,6 +14,10 @@ Hermes，或任何 OpenAI / Claude 相容端點 —— 組織成有角色、有�
 Bastet 是**控制平面，不是另一個 agent 框架**。執行力來自調度既有的 agent；Bastet
 補上的是治理、一個遇到失敗還會繼續跑的工作流引擎，以及團隊記憶。
 
+更版前請先執行 `bastet maintenance enter --wait` 取得持久化維護鎖並排空。
+鎖定期間會暫停新派工、重試、PM 介入與 driver 恢復，但既有 run 可自然完成；
+重啟驗證後再用 `bastet maintenance leave` 恢復派工。
+
 Linux · macOS · Windows · WebUI + CLI ·
 [English](README.md)
 

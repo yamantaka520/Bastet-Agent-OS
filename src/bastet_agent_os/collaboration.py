@@ -94,6 +94,41 @@ def latest_handoffs(db, job_id: str, limit: int = 6) -> list[dict[str, Any]]:
     return [dict(r) for r in reversed(rows)]
 
 
+def project_handoffs(db, project_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    return [dict(r) for r in db.query(
+        "SELECT * FROM stage_handoffs WHERE project_id=? ORDER BY at DESC LIMIT ?",
+        (project_id, limit))]
+
+
+def deliver_handoffs(db, job_id: str, stage: str, agent_id: str) -> list[str]:
+    """Record exactly which next-stage agent received each pending contract."""
+    rows = db.query("SELECT id FROM stage_handoffs WHERE job_id=? AND to_stage=? "
+                    "AND delivered_at IS NULL ORDER BY at", (job_id, stage))
+    stamp = now()
+    for row in rows:
+        db.write("UPDATE stage_handoffs SET delivered_at=?,delivered_to_agent_id=? "
+                 "WHERE id=? AND delivered_at IS NULL", (stamp, agent_id, row["id"]))
+    return [row["id"] for row in rows]
+
+
+def acknowledge_handoff(db, handoff_id: str, *, agent_id: str,
+                        acknowledgement: str, questions: list[str] | None = None) -> dict:
+    row = db.one("SELECT * FROM stage_handoffs WHERE id=?", (handoff_id,))
+    if row is None:
+        raise ValueError(f"unknown handoff {handoff_id!r}")
+    expected = row["delivered_to_agent_id"]
+    if expected and expected != agent_id:
+        raise ValueError(f"handoff was delivered to {expected}, not {agent_id}")
+    db.write("UPDATE stage_handoffs SET acknowledged_at=?,acknowledged_by=?,"
+             "acknowledgement=?,questions_json=? WHERE id=?",
+             (now(), agent_id, acknowledgement.strip(),
+              json.dumps(questions or [], ensure_ascii=False), handoff_id))
+    post(db, row["project_id"], author_type="agent", author_id=agent_id,
+         kind="handoff_ack", content=acknowledgement.strip() or "已接收交接",
+         meta={"handoff_id": handoff_id, "questions": questions or []})
+    return dict(db.one("SELECT * FROM stage_handoffs WHERE id=?", (handoff_id,)))
+
+
 def path_matches(path: str, patterns: list[str]) -> bool:
     from fnmatch import fnmatch
     def root(pattern: str) -> str:
