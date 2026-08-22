@@ -1,4 +1,4 @@
-# Release: PyPI (Trusted Publishing) + Docker Hub, on every v* tag.
+# Release: GitHub Release + PyPI (Trusted Publishing) + Docker Hub, on every v* tag.
 #
 # Publishing is OFF until the maintainer completes the one-time setup in their
 # own accounts (nothing here can do it for them). Until then the tag is still
@@ -56,6 +56,26 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --title "$GITHUB_REF_NAME"
 
   docker:
     runs-on: ubuntu-latest
