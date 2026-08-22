@@ -433,6 +433,8 @@ without needing Node on the target host.
 | M5 | Federation: shared org view over AMOS sync | ✅ done |
 | M6 | Self-healing workflow loop, run memory for every executor, maintenance card | ✅ done |
 | 0.19–0.22 | Supplies, previews, heartbeats, timezone; config-by-chat; auto-push; the media loop; quota self-wait; per-stage time budgets; PyPI + Docker | ✅ done |
+| 0.23–0.24 | Docs set, badges and live screenshots; nothing a run spawns can wait on a prompt; every run heartbeats; verdict schemas bound to review gates only | ✅ done |
+| 0.25–0.30 | PM-level supervision of business stalls; depleted agents leave the routing rotation; rework walks backwards; the card shows the PM's question; per-stage commits with the engine's scratch excluded; interrupt the dead, not the merely quiet | ✅ done |
 
 Validated on a real deployment (Ubuntu 26.04, Python 3.14, systemd user service)
 driving a live project. See [PROGRESS.md](PROGRESS.md) for what is verified and

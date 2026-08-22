@@ -295,6 +295,68 @@ The Windows leg stayed red by declaration, as it has been: ~35 tests assume
 POSIX fake-executor scripts, forward-slash paths and 0600 bits. It reports and
 does not block, and real Windows support is still its own pass.
 
+### 08-19 → 08-22: one card, six defects, in the order it found them
+
+The most instructive stretch of the project so far. A single integration card
+(INT-01: merge five feature branches, prove 20-level E2E) sat stuck for three
+days, and each attempt to unstick it uncovered a deeper cause underneath the
+last. The order matters, because each fix made the next defect visible.
+
+1. **The verdict schema hijacked non-review runs (0.24.2).** Promoting a codex
+   agent to `pm` made every decomposition fail with "no usable tasks". Codex,
+   agy and grok all bound their review schema to `read_only`, and decomposition
+   is a read-only run whose *answer is a task list* — so the PM could only emit
+   `{verdict, reasons, comments}` and honestly rejected its own job. `read_only`
+   is a tool restriction; expecting a verdict belongs to the agent-review gate.
+2. **The PM vanished after planning (0.25.0).** The operator's complaint was
+   exact: business stalls (cycles spent, criteria disputes) just waited for a
+   human, while the agent that had planned the cards had no further duty. PM
+   supervision was built with hard limits, because a supervisor that loops is
+   worse than none.
+3. **The router undid the PM's decisions (0.26.0).** Grok answered `402 Payment
+   Required: usage balance exhausted` in 30 ms. No quota marker matched, so the
+   card merely "failed" — and role mapping dispatched the same dead agent on
+   every rework cycle. The PM diagnosed it correctly and handed the stage over
+   *twice*; the loop cleared the one-shot override both times and routed
+   straight back. **The supervisor was working; the router was undoing it.** A
+   depleted agent now leaves every routing path, and the stall becomes
+   recoverable by routing rather than by judgement.
+4. **Rework stood still (0.27.0).** The hand-back target was computed from the
+   failing stage *inclusive*, so any writable stage was permanently its own
+   target. An E2E gate sent the same failing test back to the tester nine times
+   across four hours while nobody touched the product code. The docstring said
+   "nearest earlier stage"; the code said `range(idx, -1, -1)`. Hand-backs now
+   advance.
+5. **The engine committed nothing until the end, then committed too much
+   (0.29.0 → 0.30.0).** A reviewer refused test evidence because the scripts
+   that produced it were uncommitted changes on top of HEAD — and it was right:
+   the worktree was committed once, at completion, so every stage reasoned about
+   a tree matching no commit. Per-stage commits fixed that and introduced the
+   next defect: `git add -A` swept `._bastet/` (previews, verdicts, inbox) into
+   the branch, and each later run regenerated those files and dirtied the tree
+   again. Same reviewer complaint, freshly painted by our own fix. Underneath
+   both: a linked worktree keeps its git metadata in the *main* repo, outside a
+   `workspace-write` sandbox, so agents could not commit at all (0.29.1) — and
+   that error reads like hardware failure (`cannot lock ref 'ORIG_HEAD':
+   Read-only file system`), which is why it survived one round of misdiagnosis
+   by the maintainer, who touched the directory, saw it was writable, and ruled
+   the filesystem out. Both facts were true: writable, and outside the sandbox.
+6. **We were killing our own long tests (0.30.0).** The supervisor judged
+   liveness by `progress_at` (last *spoke*) instead of `heartbeat_at` (last
+   confirmed *alive*) — discarding a distinction this engine had built on
+   purpose two versions earlier. An agent reported "FPS bench is still running.
+   Waiting for it (20 levels × 60s)", beat every 20 seconds, and was executed at
+   the 15-minute silence mark. Four times, 17 → 42 minutes, across two agents:
+   a 20-minute test cannot finish inside a 15-minute patience, so no retry and
+   no handover could ever have worked.
+
+Two things this stretch settled about method. **The agents found what the
+maintainer missed**: defect 6's smoking gun was the agent's own progress line,
+and defect 5's root cause came from a designer agent's blocker report naming the
+`index.lock` path exactly. And **a fix is not done when the tests pass** — three
+of these six were introduced *by the previous fix*, and only running the real
+card again exposed them.
+
 ## Design decisions, in one place
 
 | Decision | Why |
@@ -347,6 +409,12 @@ Listed because each one changed how the code is written now.
 | A credential fallback could send a GitLab token to github.com | credentials travel only to the exact host they were configured for |
 | The event registry drifted eight types behind the code | a registry that nothing enforces is documentation, and stale documentation at that |
 | Our own image inverted the PATH rule, and no CI leg could see it | the suite runs inside the artefact we ship, not only on runners that look nothing like it |
+| A verdict schema bound to `read_only` made the PM reject its own decomposition | one flag, one meaning: a tool restriction is not an output contract |
+| The router re-dispatched an agent with no balance, undoing the PM twice | when a supervisor's decisions keep evaporating, suspect the layer below it |
+| Rework handed work back to the stage that had just failed it, forever | "nearest earlier stage" in the docstring, `range(idx, …)` in the code — read both |
+| Per-stage commits swept the engine's own scratch into the work | a fix that makes the symptom reappear differently is not a fix |
+| `Read-only file system` from a directory that was writable | a sandbox denial can wear the costume of a hardware failure |
+| The supervisor executed a run that was alive and honestly waiting | if you build two facts because they differ, do not decide on one of them |
 
 ## Collaboration model
 

@@ -69,6 +69,15 @@ Permission changes take effect immediately; tokens do not need re-issuing.
 
 ## Trust boundaries you should know about
 
+- **A sandboxed executor is granted one directory outside its workspace.** A
+  linked worktree keeps its git metadata in the main repository
+  (`.git/worktrees/<job>`), so codex receives that path as an extra writable
+  root on write-capable runs — otherwise every git operation inside the
+  worktree fails. Read-only review runs never get it. The grant is narrow (that
+  one job's metadata directory, derived from the worktree's own `gitdir:`
+  pointer) but it is real: an agent that can write there can rewrite that job
+  branch's history. It cannot reach other jobs' metadata or the main repo's
+  working tree.
 - **Agents run with the host user's privileges** inside their worktree.
   Container isolation is available per stage and is the right choice for
   untrusted work.
@@ -86,6 +95,12 @@ Permission changes take effect immediately; tokens do not need re-issuing.
   editing is an operator capability and is audited.
 - **Credentials injected into a run are readable by that run.** Prefer
   short-lived, minimum-scope tokens; grant per project rather than globally.
+- **The PM supervisor acts without a human, inside a fence.** It may retry a
+  stage, hand it to another agent, and file a ruling into the job's inbox — two
+  audit-counted interventions per episode. It may not approve human gates, edit
+  the spec or workflow, or supply credential-shaped content (refused the same
+  way the human supply endpoint refuses it). Its diagnosis run is read-only, and
+  the gate output it reads is untrusted data by policy.
 - **Install commands never run as a side effect.** Applying a chat proposal
   creates the resource; executing its `install_command` is a separate,
   admin-pressed, fully-logged button.

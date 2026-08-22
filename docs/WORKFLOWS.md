@@ -68,9 +68,17 @@ instructions not to fake a green exit.
 
 ## 4. When a gate fails: the rework loop
 
-The card goes **back** to a stage that can fix it — past read-only reviewers to
-the last stage that writes (or the explicit `rework_target`) — carrying the
-gate's real output (up to 8 000 chars; the assertion is at the end, so the tail
+The card goes **back** to a stage that can fix it, and the target **advances**
+if the same gate keeps failing: the failing stage first (an implementer whose
+own tests fail should fix them), then the nearest earlier writable stage,
+skipping read-only reviewers, clamping at the earliest writable stage. An
+explicit `rework_target` overrides the walk entirely. Counted per stage per
+episode, so a human retry starts the walk over.
+
+Standing still does not converge: with the target pinned to the failing stage,
+a live E2E gate sent the same failing test back to the tester nine times across
+four hours while nobody touched the product code it was failing on. The card
+carries the gate's real output (up to 8 000 chars; the assertion is at the end, so the tail
 is what is kept). The brief that travels with it forbids the shortcuts by name:
 don't edit the test command, delete the test, make the assertion trivially
 true, add skip/xfail, or touch the workflow config. The cheapest way to pass a
@@ -86,6 +94,19 @@ Every hand-back is audited as `job.rework`, counted on the board card (🔧), an
 written into team memory as a `warning` so the next agent does not repeat the
 mistake.
 
+**And then the PM takes over.** A card blocked for a *business* reason — cycles
+spent, an acceptance dispute, a missing ruling — is handed to the project's `pm`
+agent, which reads the spec, the gate output, the rework note and the run
+history and picks one bounded action: retry, hand the stage to another agent,
+file a ruling into the job's inbox and retry, or escalate. Hard limits: two
+audit-counted interventions per episode (a human retry refreshes them, the PM's
+own retries cannot), escalations latch until a human retries, `human-approve`
+gates and quota waits are never touched, and the diagnosis run is read-only.
+Escalation is the last resort — a checkable fact (which commit is the baseline,
+how to obtain evidence) the PM is expected to settle itself, and its escalation
+`reason` must be phrased as a question, because the card presents it as one with
+a box for the answer and one button that files the ruling and retries.
+
 ## 5. Execution failures are not gate failures
 
 A run that crashes, times out, or is cancelled blocks the card (after
@@ -99,6 +120,16 @@ backoff. A background sweep retries due cards automatically (audited as
 `server:quota-reset`); the Telegram message says 「會自己續跑 —— 不需要你做什麼」.
 A manual retry beats the clock. Ordinary failures are never mistaken for
 timers; unknown timezones fall back to UTC.
+
+**A depleted balance is not a timer.** `402 Payment Required` / "balance
+exhausted" means only money will fix it, so the agent is marked depleted and
+**every** routing path skips it — role mapping, explicit override, alternate
+selection, job default, PM selection. The stall becomes recoverable *by
+routing*: the supervisor swaps in a funded stand-in without spending a PM
+intervention. Only a human clears the flag (the Agents card,
+`POST /api/agents/{id}/undeplete`, or a retry that explicitly names the agent);
+automated retries cannot. Without this the router kept re-dispatching a dead
+agent every rework cycle, undoing the PM's correct handovers twice over.
 
 **A restart is not a death.** A card whose driver died with the service process
 is re-driven from its current stage at startup (`job.resumed`). A paused or
@@ -149,6 +180,20 @@ In chat, an agent's generated files return to the conversation via
 1. Whatever the agents produced is committed to **`bastet/<job_id>`** — the
    job's own branch. Your branches are never written to; merging is a
    deliberate human act.
+
+   Commits happen at **every stage boundary**, not only at the end:
+   `bastet(<stage>): <title>`. So the branch history reads as the pipeline
+   actually ran (rework included) and every stage starts from a clean tree —
+   which is what lets a reviewer bind test evidence to the content under
+   review. `._bastet/` (previews, verdict files, the inbox) is *never*
+   committed; it is the engine↔agent boundary, and committing it made each run
+   dirty the tree again by regenerating those files.
+
+   Agents may also commit themselves. A linked worktree keeps its git metadata
+   in the *main* repo (`.git/worktrees/<name>`), outside a `workspace-write`
+   sandbox, so sandboxed executors are granted that directory explicitly —
+   without it every git write failed with what looks like a broken disk
+   (`cannot lock ref 'ORIG_HEAD': Read-only file system`).
 2. The branch is **pushed** to the project's remote: `origin` if the repo has
    one, else a granted git resource's URL, with credentials matched by exact
    host only (a GitLab token never travels to github.com). Opt out per project
@@ -162,10 +207,28 @@ human approval.
 
 ## 10. Liveness: telling working from stuck
 
-An in-progress card shows a stage progress bar and a **heartbeat**: the run's
-last output line and how long ago — 🟢 fresh, 🟠 after three silent minutes
-with a "possibly stuck" hint. `updated_at` cannot make this distinction because
-long stages legitimately go minutes between database writes.
+An in-progress card shows a stage progress bar and a **heartbeat** — which is
+two separate facts, deliberately:
+
+- **alive**: the process has not exited, confirmed every 20 seconds even when
+  the executor prints nothing (some print nothing until they finish);
+- **talking**: the last output line, and how long ago it was said.
+
+🟢 when both look healthy. 🟠 in two different situations: no heartbeat for
+three minutes (probably dead), or alive but **silent for over ten minutes** —
+which is what a run blocked on a child process waiting for input looks like
+from outside. `updated_at` cannot make any of these distinctions, because long
+stages legitimately go minutes between database writes.
+
+**What the engine does about it matters more than the colour.** Interruption is
+decided by *liveness*, never by silence: a lost heartbeat (three minutes, nine
+missed beats) means the run is gone and it is interrupted with the worktree
+kept; a quiet-but-alive stage is bounded by its own `timeout_s`, which is what
+declaring a time budget is for. Killing on silence alone once executed an agent
+that had honestly reported "FPS bench is still running. Waiting for it (20
+levels × 60s)" — four times, because a 20-minute test can never finish inside a
+15-minute patience. If a stage is legitimately slow and quiet, give it
+`timeout_s`; the amber badge is information, not a verdict.
 
 If a card is genuinely stuck, the diagnosis order that has worked in practice:
 
@@ -185,3 +248,7 @@ If a card is genuinely stuck, the diagnosis order that has worked in practice:
 | 🟠 blocked: 設定問題 | a gate command cannot run in this repo | fix the template's command (retry offers workflow refresh) or supply the missing dependency |
 | 🟠 blocked: execution failed/timeout | the executor died | check the error; consider `timeout_s` on the stage; retry (optionally with another agent) |
 | 🟠 blocked: 服務重啟時中斷… | project was paused/closed during a restart | resume the project, then retry |
+| 🤖 PM 監督介入 | the PM diagnosed a business stall and acted (retry / handover / ruling) | nothing; the notice says what it decided and why |
+| 🤖 PM 需要你的裁定 | the PM escalated a decision it may not make | answer the question on the card; one button files the ruling and retries |
+| 💳 額度用盡，已暫停派工 | a vendor said `402`; that agent left the routing rotation | top up, then clear it on the Agents card — work is already routed around it |
+| 🟠 還活著，但已沉默 N 分鐘 | the process lives but has said nothing; often a child waiting on input | check `pgrep -P <pid>` for a child at 0% CPU; a legitimately slow stage wants `timeout_s` |

@@ -43,15 +43,23 @@ first (the id is secondary), its stage and status, its template, and 🔧 how ma
 times a gate handed it back.
 
 An in-progress card shows a **stage progress bar** (n of m stages) and a
-**heartbeat**: the run's last output line and how long ago — 🟢 while fresh,
-🟠 after three silent minutes with a "possibly stuck" hint. That is the
-difference between *working* and *stuck*, which `updated_at` cannot tell you.
+**heartbeat** — two separate facts on purpose: **alive** (the process has not
+exited, confirmed every 20 seconds even when the executor prints nothing) and
+**talking** (the last output line, and how long ago). 🟠 means one of two
+things: no heartbeat for three minutes (probably dead), or alive but silent for
+over ten minutes — what a run blocked on a child process waiting for input looks
+like from outside. `updated_at` can tell you none of this. The engine acts on
+liveness, never on silence: a genuinely slow, quiet stage is bounded by its own
+`timeout_s`, not by the supervisor's patience.
 
 Click a card for the drawer: the spec, per-stage runs with cost, gate results,
 the diff, in-run interaction requests, and — when it is stuck — a retry that can
 switch agent, refresh the workflow from the template, or edit the spec first.
 Human-approve gates are approved or rejected here, **with the previews the stage
-left** (screenshots inline, HTML/Markdown snapshots one click away). Finished
+left** (screenshots inline, HTML/Markdown snapshots one click away). When the
+project's PM has escalated something, the drawer opens with **its question** and
+a box for your answer: one button files the ruling into the job's inbox and
+retries. Finished
 cards can be archived (kept, hidden) or deleted (refused if they spent money —
 the accounting is the product; archive those instead).
 

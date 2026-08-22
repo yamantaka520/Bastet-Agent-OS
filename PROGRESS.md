@@ -1,20 +1,45 @@
 # Bastet Agent OS Progress
 
-Last updated: 2026-08-17
+Last updated: 2026-08-22
 
 ## Current project status
 
-- Released: **v0.24.0**. Version arc v0.1.0 → v0.24.0 in three weeks
-  (2026-07-28 → 2026-08-17), ~110 commits. See [CHANGELOG.md](CHANGELOG.md) for
+- Released: **v0.30.0**. Version arc v0.1.0 → v0.30.0 in under four weeks
+  (2026-07-28 → 2026-08-22), ~125 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.
-- Milestones M0–M6 complete, plus two hardening arcs: 08-02 → 08-06 (the media
+- Milestones M0–M6 complete, plus three hardening arcs: 08-02 → 08-06 (the media
   loop, quota self-wait, per-stage time budgets, retry semantics that respect
-  human intent) and 08-16 → 08-17 (headless runs cannot be prompted — stdin is
+  human intent), 08-16 → 08-17 (headless runs cannot be prompted — stdin is
   closed and the env says CI; every run heartbeats even when its executor is
-  silent, and the board separates "alive" from "talking").
-- Test suite: **414 passing**, `ruff` clean; CI green on Linux/macOS and
+  silent, and the board separates "alive" from "talking"), and **08-19 → 08-22**
+  — the arc where one card exposed six defects in a row and each fix was
+  verified on it:
+  1. **PM-level supervision** (0.25.0): a card blocked for a *business* reason
+     is diagnosed by the project's PM agent, which retries, hands the stage
+     over, files a ruling into the job inbox, or escalates with an answerable
+     question. Two audit-counted interventions per episode; a human retry is a
+     fresh lease; human gates and quota waits are never touched.
+  2. **A depleted agent leaves the rotation** (0.26.0/0.26.1): a vendor's
+     `402 … balance exhausted` marks the agent, and every routing path skips
+     it — otherwise the router kept re-dispatching a dead agent and undoing the
+     PM's correct handovers.
+  3. **Rework walks backwards** (0.27.0): the hand-back target advanced instead
+     of standing still, so a failing test finally reached someone who could fix
+     the code rather than the tester who kept re-running it.
+  4. **The card asks what the PM asks** (0.28.0): escalations are the last
+     resort and are shown on the card as an answerable question with one button
+     that files the ruling and retries.
+  5. **Every stage commits; scratch never does** (0.29.0/0.30.0): stage
+     boundaries commit to the job branch, `._bastet/` is excluded, and a
+     sandboxed agent can use git in its worktree again (0.29.1).
+  6. **Interrupt the dead, not the merely quiet** (0.30.0): liveness decides
+     interruption, so a 20-minute test is no longer executed at the 15-minute
+     silence mark.
+- Test suite: **479 passing**, `ruff` clean; CI green on Linux/macOS and
   inside the shipped Docker base image (Windows legs are declarative).
+- Releases are automated: a `v*` tag publishes to PyPI (Trusted Publishing) and
+  pushes the multi-arch image to Docker Hub.
 - Distribution: [PyPI](https://pypi.org/project/bastet-agent-os/) (wheel carries
   the built WebUI — no Node on the host) and
   [Docker Hub](https://hub.docker.com/r/yamantaka520/bastet-agent-os)
@@ -22,6 +47,9 @@ Last updated: 2026-08-17
 - Executors: `claude-code`, `claude-sdk`, `codex`, `grok`, `agy`, `hermes`,
   `bastet-lite`. Standard tooling tracked by the maintenance card: pytest,
   Pillow, Playwright (+chromium), turbovec.
+- Resource kinds: llm, mcp, api, skill, git, image, video, music, tts, stt and
+  **model3d** (3D model/animation generation); a resource can be reclassified
+  when a truer category arrives after it.
 - WebUI in five languages, typed against a canonical dictionary so a missing
   translation fails the build.
 
@@ -35,11 +63,20 @@ feature is confirmed against real vendor CLIs before release:
 | Host | Ubuntu 26.04 LTS, Python 3.14.4 |
 | Install | `~/.bastet/venv`, from PyPI |
 | Service | `systemctl --user` unit, `bastet serve` on `0.0.0.0:8890` |
-| Executors | claude 2.1.2xx, codex 0.145+, grok 0.2.1xx, agy 1.1.x, hermes 0.19+ |
+| Executors | claude 2.1.2xx, codex 0.147.x, grok 0.2.1xx, agy 1.0.1x, hermes 0.19+ |
 | Memory | Agent Memory OS 1.8.1 with turbovec — semantic recall **active** |
 | Live project | CatsWalker (a real Three.js game), driven end-to-end through the workflow engine |
 
 ### Verified there, end to end
+
+- **The 08-19 → 08-22 arc, on one card** (INT-01, a five-branch integration):
+  each fix above was confirmed against it in production, in order — Grok1 taken
+  out of rotation on a real `402`; the PM diagnosing and handing over twice; the
+  hand-back reaching 頁面實作 instead of looping on the tester; the reviewer
+  approving once evidence could bind to a commit; stage commits appearing on the
+  branch (`bastet(<stage>): …`) and the agent then committing on its own,
+  including a change that made its E2E log bind to HEAD automatically — the
+  first thing it could not have done while the sandbox blocked git.
 
 - **The rework loop**, across many real cards: failed tests and rejected reviews
   hand back, converge, and the pipeline finishes without a human step; honest
@@ -64,15 +101,19 @@ feature is confirmed against real vendor CLIs before release:
   claimer; the rule today is poll-to-completion inside the run.
 - **Scheduled workflows**: the 持續維護 preset wants a cron-like trigger.
 - **Merge assistance**: finished branches are reviewed/merged by hand (the push
-  output carries the MR link).
+  output carries the MR link). Live shape of the gap: an integration card can
+  accumulate a dozen commits on `bastet/<job_id>` while `main` stays where it
+  was, and nothing in the engine will move it — by design, since merging is an
+  authority decision, but the last mile is still manual.
 - **`~/.bastet/secrets` accumulates** rotated credential files.
 - **Telegram bot token** from an early session should still be rotated.
-- **Release workflow secrets** (PyPI Trusted Publisher + Docker Hub) not yet
-  configured — releases are published manually. The workflow no longer goes red
-  over it: the tag/version check and the wheel build still run, and publishing
-  is gated on `vars.PUBLISH_TO_PYPI` / the Docker Hub secrets, reporting a
-  skip notice instead of a failure — and the `pypi` environment job only exists
-  when the switch is on, so no failed deployment record appears either.
+- **A one-agent role dead-ends less gracefully than it should.** Dispatch now
+  falls back to any funded agent on the project, but the stand-in may hold a
+  very different role; a per-role stand-in list would be honest about it.
+- **The E2E stage's own time budget is undeclared** on the live 網頁開發 preset.
+  Since 0.30.0 a silent stage is bounded by `timeout_s` rather than by the
+  supervisor's patience, so long suites (20-level FPS runs) should say how long
+  they may take.
 - **The Windows CI leg is red by declaration** (`continue-on-error`): ~35 tests
   assume POSIX fake-executor scripts, forward-slash paths and 0600 bits. Real
   Windows support needs its own pass.

@@ -8,6 +8,32 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.30.1] - 2026-08-22
+
+### Documentation
+
+The doc set catches up with the 0.25 → 0.30 arc, which six releases of engine
+changes had outrun:
+
+- **PROGRESS.md**: current release, the 08-19 → 08-22 hardening arc with all six
+  defects and their fixes, 479 tests, automated releases, `model3d`; open items
+  rewritten (the release-secrets item is done; per-role stand-ins and the E2E
+  stage's undeclared time budget are the honest new ones).
+- **docs/WORKFLOWS.md**: the rework walk-back, PM-level supervision and its
+  fence, depleted agents leaving the routing rotation, per-stage commits with
+  `._bastet/` excluded and why a sandboxed agent needs its worktree's git
+  metadata, liveness as two separate facts, and four new rows in the
+  every-stop table.
+- **docs/USER_GUIDE.md**: alive-vs-talking on the board, and the PM's question
+  appearing on the card with a box for the ruling.
+- **SECURITY.md**: the extra writable root granted to sandboxed executors —
+  what it is, how narrow, and what it does allow — plus the PM supervisor's
+  fence as a trust boundary.
+- **docs/HISTORY.md**: the full account of one card finding six defects in
+  order, three of them introduced by the previous fix, and the two method
+  lessons it settled.
+- **README.md**: roadmap rows through 0.30.
+
 ## [0.30.0] - 2026-08-22
 
 Two engine defects the same card kept exposing: we were killing our own
