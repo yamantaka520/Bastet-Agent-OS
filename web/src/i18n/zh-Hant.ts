@@ -131,6 +131,12 @@ const zhHant = {
   "project.secrets": "可用憑證（含團隊/全域繼承）",
   "project.noSecrets": "尚無可用憑證 — 到「管理」頁新增，範圍選這個專案或其團隊。",
   "project.jobs": "近期任務",
+  "project.room": "專案會議室",
+  "project.roomMembers": "成員",
+  "project.roomEmpty": "尚無訊息",
+  "project.roomMessage": "訊息",
+  "project.roomAssignment": "PM 任務分派",
+  "project.roomPlaceholder": "交接內容、變更範圍、驗證結果或任務分派…",
   "project.headJob": "任務",
   "project.noJobs": "尚無任務 — 到「看板」派第一個。",
 

@@ -32,7 +32,7 @@ EVENT_TYPES = {
     # gates (emitted as gate.<verdict>)
     "gate.pending", "gate.passed", "gate.failed",
     # projects
-    "project.status", "project.deleted",
+    "project.status", "project.deleted", "room.message",
     # everything else
     "chat.message",
     "budget.warning", "budget.exceeded",

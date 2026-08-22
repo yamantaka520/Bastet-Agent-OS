@@ -301,6 +301,12 @@ class ChatMessageIn(BaseModel):
     reply: bool = True                 # let the responder answer straight away
 
 
+class RoomMessageIn(BaseModel):
+    content: str
+    kind: str = "message"             # message|assignment
+    author_id: str = ""
+
+
 class UserRoleIn(BaseModel):
     role: str                      # viewer|operator|admin
 
@@ -545,8 +551,40 @@ def create_app(home: Home) -> FastAPI:
             "VALUES(?,?,?,?,?,?)",
             (p.id, team_id, p.repo_path, json.dumps(p.config), ts, ts),
         )
+        from . import collaboration
+        collaboration.ensure_room(db, p.id)
         db.audit(auth.actor, "project.create", "project", p.id, {"team": team_id})
         return {"id": p.id, "team_id": team_id}
+
+    @app.get("/api/projects/{project_id}/room",
+             dependencies=[Depends(require_role("viewer"))])
+    def project_room(project_id: str, limit: int = 200):
+        if db.one("SELECT id FROM projects WHERE id=?", (project_id,)) is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        from . import collaboration
+        return {"project_id": project_id,
+                "members": collaboration.members(db, project_id),
+                "messages": collaboration.messages(db, project_id, limit)}
+
+    @app.post("/api/projects/{project_id}/room/messages")
+    def post_project_room_message(project_id: str, body: RoomMessageIn,
+                                  auth: Auth = Depends(require_role("operator"))):
+        if db.one("SELECT id FROM projects WHERE id=?", (project_id,)) is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        if not body.content.strip():
+            raise HTTPException(status_code=400, detail="empty message")
+        if body.kind not in ("message", "assignment"):
+            raise HTTPException(status_code=400, detail="unsupported room message kind")
+        from . import collaboration
+        author_type = "pm" if body.kind == "assignment" else "user"
+        message_id = collaboration.post(
+            db, project_id, author_type=author_type,
+            author_id=body.author_id or auth.actor, content=body.content,
+            kind=body.kind)
+        db.audit(auth.actor, f"room.{body.kind}", "project", project_id,
+                 {"message_id": message_id, "author": body.author_id or auth.actor})
+        bus.emit("room.message", project_id, message_id=message_id, kind=body.kind)
+        return {"id": message_id}
 
     @app.get("/api/projects", dependencies=[Depends(require_role("viewer"))])
     def list_projects(status: str = "", q: str = "", since: str = "", until: str = ""):
@@ -641,6 +679,8 @@ def create_app(home: Home) -> FastAPI:
             "updated_at) VALUES(?,?,?,?,?,?)",
             (b.project_id, amos_project["team_id"],
              check_repo_path(b.repo_path), "{}", ts, ts))
+        from . import collaboration
+        collaboration.ensure_room(db, b.project_id)
         db.audit(auth.actor, "project.bind", "project", b.project_id,
                  {"team": amos_project["team_id"], "repo": b.repo_path})
         return {"id": b.project_id, "team_id": amos_project["team_id"]}
@@ -1111,6 +1151,13 @@ def create_app(home: Home) -> FastAPI:
         removed["grants"] = db.write(
             "DELETE FROM grants WHERE scope_type='project' AND scope_id=?",
             (project_id,)).rowcount
+        room = db.one("SELECT id FROM project_rooms WHERE project_id=?", (project_id,))
+        if room:
+            removed["room_messages"] = db.write(
+                "DELETE FROM room_messages WHERE room_id=?", (room["id"],)).rowcount
+            db.write("DELETE FROM project_rooms WHERE id=?", (room["id"],))
+        db.write("DELETE FROM stage_handoffs WHERE project_id=?", (project_id,))
+        db.write("DELETE FROM test_evidence WHERE project_id=?", (project_id,))
         db.write("DELETE FROM projects WHERE id=?", (project_id,))
         db.audit(auth.actor, "project.delete", "project", project_id,
                  {"status": project["status"], "repo_path": project["repo_path"],

@@ -128,6 +128,12 @@ const ko: Dict = {
   "project.secrets": "사용 가능한 자격 증명（팀/전역 상속 포함）",
   "project.noSecrets": "사용 가능한 자격 증명이 없습니다 — 「관리」 탭에서 이 프로젝트나 팀 범위로 추가하세요.",
   "project.jobs": "최근 작업",
+  "project.room": "프로젝트 회의실",
+  "project.roomMembers": "구성원",
+  "project.roomEmpty": "아직 메시지가 없습니다",
+  "project.roomMessage": "메시지",
+  "project.roomAssignment": "PM 작업 배정",
+  "project.roomPlaceholder": "인계, 변경 범위, 검증 결과 또는 작업 배정…",
   "project.headJob": "작업",
   "project.noJobs": "작업이 없습니다 — 「보드」에서 첫 작업을 배정하세요.",
 

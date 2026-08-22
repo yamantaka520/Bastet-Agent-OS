@@ -277,6 +277,65 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   meta_json TEXT NOT NULL DEFAULT '{}',   -- model, usage, cost, job_id …
   at TEXT NOT NULL
 );
+
+-- One durable internal room per project.  This is agent-to-agent operational
+-- communication, distinct from chat_sessions (the human input channel).
+CREATE TABLE IF NOT EXISTS project_rooms (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL UNIQUE REFERENCES projects(id),
+  title TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS room_messages (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES project_rooms(id),
+  author_type TEXT NOT NULL,       -- agent|pm|user|system
+  author_id TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'message', -- message|assignment|handoff|test_evidence
+  content TEXT NOT NULL,
+  meta_json TEXT NOT NULL DEFAULT '{}',
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_room_messages ON room_messages(room_id, at);
+
+-- The contract between consecutive stages.  A summary alone is insufficient:
+-- changed paths and verification are what let the next agent select context
+-- and what let the test engine invalidate stale evidence safely.
+CREATE TABLE IF NOT EXISTS stage_handoffs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  job_id TEXT NOT NULL REFERENCES jobs(id),
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  from_stage TEXT NOT NULL,
+  to_stage TEXT,
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  summary TEXT NOT NULL DEFAULT '',
+  changed_paths_json TEXT NOT NULL DEFAULT '[]',
+  verification_json TEXT NOT NULL DEFAULT '[]',
+  risks_json TEXT NOT NULL DEFAULT '[]',
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_handoffs_job ON stage_handoffs(job_id, at);
+
+-- One row per independently declared test case.  Evidence is reusable only
+-- while its covered paths and command inputs remain unchanged.
+CREATE TABLE IF NOT EXISTS test_evidence (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  job_id TEXT NOT NULL REFERENCES jobs(id),
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  stage TEXT NOT NULL,
+  case_id TEXT NOT NULL,
+  command TEXT NOT NULL,
+  verdict TEXT NOT NULL,
+  base_commit TEXT,
+  covered_paths_json TEXT NOT NULL DEFAULT '[]',
+  output_tail TEXT NOT NULL DEFAULT '',
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_test_evidence_job_case
+  ON test_evidence(job_id, stage, case_id, at);
 CREATE INDEX IF NOT EXISTS idx_chat_msg_session ON chat_messages(session_id, at);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_scope
   ON chat_sessions(scope_type, scope_id);

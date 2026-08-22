@@ -132,6 +132,12 @@ const zhHans: Dict = {
   "project.secrets": "可用凭据（含团队/全局继承）",
   "project.noSecrets": "尚无可用凭据 — 到“管理”页新增，范围选这个项目或其团队。",
   "project.jobs": "近期任务",
+  "project.room": "项目会议室",
+  "project.roomMembers": "成员",
+  "project.roomEmpty": "暂无消息",
+  "project.roomMessage": "消息",
+  "project.roomAssignment": "PM 任务分派",
+  "project.roomPlaceholder": "交接内容、变更范围、验证结果或任务分派…",
   "project.headJob": "任务",
   "project.noJobs": "尚无任务 — 到“看板”派第一个。",
 

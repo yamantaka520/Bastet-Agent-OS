@@ -128,6 +128,12 @@ const ja: Dict = {
   "project.secrets": "利用可能な認証情報（チーム／グローバル継承を含む）",
   "project.noSecrets": "利用可能な認証情報がありません — 「管理」タブでこのプロジェクトかチームを範囲に指定して追加してください。",
   "project.jobs": "最近のジョブ",
+  "project.room": "プロジェクト会議室",
+  "project.roomMembers": "メンバー",
+  "project.roomEmpty": "メッセージはまだありません",
+  "project.roomMessage": "メッセージ",
+  "project.roomAssignment": "PM タスク割り当て",
+  "project.roomPlaceholder": "引き継ぎ、変更範囲、検証結果、または割り当て…",
   "project.headJob": "ジョブ",
   "project.noJobs": "ジョブがありません — 「ボード」から最初のジョブをディスパッチしてください。",
 

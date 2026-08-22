@@ -244,7 +244,8 @@ class Orchestrator:
                 f"刪除會讓帳目對不上 — 請改用封存")
         runs = [r["id"] for r in
                 self.db.query("SELECT id FROM runs WHERE job_id=?", (job_id,))]
-        for table in ("run_interactions", "gate_results", "run_tokens"):
+        for table in ("run_interactions", "gate_results", "run_tokens",
+                      "test_evidence", "stage_handoffs"):
             for run_id in runs:
                 self.db.write(f"DELETE FROM {table} WHERE run_id=?", (run_id,))
         self.db.write("DELETE FROM runs WHERE job_id=?", (job_id,))
@@ -374,7 +375,7 @@ class Orchestrator:
             runs += len(run_ids)
             for run_id in run_ids:
                 for table in ("run_interactions", "gate_results", "run_tokens",
-                              "usage_ledger"):
+                              "usage_ledger", "test_evidence", "stage_handoffs"):
                     self.db.write(f"DELETE FROM {table} WHERE run_id=?", (run_id,))
             self.cleanup_worktree(job["id"])
             self.db.write("DELETE FROM runs WHERE job_id=?", (job["id"],))
@@ -723,7 +724,7 @@ class Orchestrator:
             # for files in a directory the stage never wrote to.
             job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
             workdir = job["worktree_path"] or self._project_repo(job)
-            outcome = self._judge(stage, workdir, result)
+            outcome = self._judge(stage, workdir, result, job=job, run_id=run_id)
             self._record_gate(run_id, stage, outcome,
                               reviewer_kind="agent",
                               reviewer_id="workflow-engine" if stage.gate == "tests-pass"
@@ -747,6 +748,22 @@ class Orchestrator:
                 if self._rework(job, stages, idx, outcome):
                     continue          # sent back to be fixed; keep driving
                 return
+
+            # A passed stage must hand the next agent facts, not force it to
+            # reconstruct the work from a broad transcript or the whole repo.
+            from . import collaboration
+            next_stage = stages[idx + 1].name if idx + 1 < len(stages) else None
+            paths = collaboration.changed_paths(workdir)
+            collaboration.record_handoff(
+                self.db, project_id=job["project_id"], job_id=job_id,
+                run_id=run_id, from_stage=stage.name, to_stage=next_stage,
+                agent_id=self._run_agent(run_id), summary=result.summary[:3000],
+                paths=paths,
+                verification=([f"{stage.gate}: {outcome.verdict}"]
+                              if stage.gate != "auto" else []))
+            self.db.audit("orchestrator", "stage.handoff", "job", job_id,
+                          {"from": stage.name, "to": next_stage,
+                           "changed_paths": paths[:50]})
 
             if idx + 1 >= len(stages):
                 self.db.write("UPDATE jobs SET status='done', updated_at=? WHERE id=?",
@@ -857,11 +874,69 @@ class Orchestrator:
                  job_id, stage.name, target.name, cycle, stage.max_cycles)
         return True
 
-    def _judge(self, stage: StageDef, workdir: str, result: RunResult) -> GateOutcome:
+    def _judge(self, stage: StageDef, workdir: str, result: RunResult,
+               *, job=None, run_id: str = "") -> GateOutcome:
         if stage.gate == "human-approve":
             return GateOutcome("pending", "waiting for human approval")
+        if stage.gate == "tests-pass" and stage.gate_config.get("cases") and job is not None:
+            return self._judge_incremental_tests(stage, workdir, job, run_id)
         return evaluate_gate(stage, workdir, result.structured_verdict,
                              reviewer_output=result.summary)
+
+    def _judge_incremental_tests(self, stage: StageDef, workdir: str, job,
+                                 run_id: str) -> GateOutcome:
+        """Run declared cases whose evidence was invalidated by code changes.
+
+        A monolithic command remains monolithic. Skipping is allowed only for
+        named cases with explicit covered_paths and an ancestor evidence commit.
+        """
+        import subprocess
+
+        from . import collaboration
+        head = subprocess.run(["git", "-C", workdir, "rev-parse", "HEAD"],
+                              capture_output=True, text=True).stdout.strip() or None
+        details, failed = [], None
+        for case in stage.gate_config.get("cases") or []:
+            case_id = str(case.get("id") or "").strip()
+            command = str(case.get("command") or "").strip()
+            covered = [str(p) for p in case.get("covered_paths") or []]
+            if not case_id or not command:
+                return GateOutcome("failed", "incremental test case needs id and command",
+                                   config_error=True)
+            previous = self.db.one(
+                "SELECT * FROM test_evidence WHERE job_id=? AND stage=? AND case_id=? "
+                "ORDER BY at DESC LIMIT 1", (job["id"], stage.name, case_id))
+            changed = []
+            if previous and previous["base_commit"] and head:
+                ancestor = subprocess.run(
+                    ["git", "-C", workdir, "merge-base", "--is-ancestor",
+                     previous["base_commit"], head]).returncode == 0
+                if ancestor:
+                    changed = collaboration.changed_paths(workdir,
+                                                          previous["base_commit"])
+                else:
+                    previous = None
+            if collaboration.evidence_reusable(previous, changed):
+                details.append(f"SKIP {case_id}: prior pass still covers unchanged paths")
+                continue
+            probe = StageDef(name=stage.name, gate="tests-pass",
+                             gate_config={"command": command})
+            outcome = evaluate_gate(probe, workdir, None)
+            verdict = "passed" if outcome.verdict == "passed" else "failed"
+            self.db.write(
+                "INSERT INTO test_evidence(id,project_id,job_id,run_id,stage,case_id,"
+                "command,verdict,base_commit,covered_paths_json,output_tail,at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (new_id("tev"), job["project_id"], job["id"], run_id, stage.name,
+                 case_id, command, verdict, head, json.dumps(covered),
+                 outcome.detail[-8000:], now()))
+            details.append(f"{verdict.upper()} {case_id}: {outcome.detail[-1200:]}")
+            if outcome.verdict != "passed":
+                failed = outcome
+                break
+        if failed:
+            return GateOutcome("failed", "\n".join(details), failed.config_error)
+        return GateOutcome("passed", "\n".join(details))
 
     # -- in-run interactions (SPEC §5.1.1 interaction_request) ---------------------
 
@@ -1112,7 +1187,8 @@ class Orchestrator:
                        stage=stage.name, agent_id=agent["id"])
             context_text, report = build_context(
                 self.db, job, stage.name, skip=frozenset({"spec"}),
-                recall=run_memory.recall_kwargs(self.db, job, agent["id"]))
+                recall=run_memory.recall_kwargs(self.db, job, agent["id"]),
+                stage_role=stage.role)
             self.db.audit("orchestrator", "context.assembled", "run", run_id,
                           report.to_dict())
             # model: agent config > resource routing default > official default

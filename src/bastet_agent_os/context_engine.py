@@ -24,10 +24,13 @@ CHARS_PER_TOKEN = 4
 
 # budget fractions per bucket; unused budget rolls over in this order
 BUCKETS = [
-    ("spec", 0.30),
-    ("history", 0.20),
-    ("deps", 0.20),
-    ("memory", 0.30),
+    ("spec", 0.22),
+    ("handoff", 0.22),
+    ("history", 0.12),
+    ("test_evidence", 0.12),
+    ("room", 0.10),
+    ("deps", 0.10),
+    ("memory", 0.12),
 ]
 
 
@@ -56,7 +59,8 @@ class ContextReport:
 def build_context(db: Db, job, stage_name: str, budget_tokens: int = 6000,
                   amos_query: str | None = None,
                   skip: frozenset[str] = frozenset(),
-                  recall: dict | None = None) -> tuple[str, ContextReport]:
+                  recall: dict | None = None,
+                  stage_role: str | None = None) -> tuple[str, ContextReport]:
     """Assemble the run's task-layer context. Returns (text, report).
 
     `skip` omits buckets the caller already carries elsewhere (e.g. "spec"
@@ -74,6 +78,9 @@ def build_context(db: Db, job, stage_name: str, budget_tokens: int = 6000,
             continue
         allowance = min(remaining, int(budget_tokens * fraction) + _rollover(
             bucket, budget_tokens, remaining))
+        if not _relevant(bucket, stage_name, stage_role):
+            report.add(bucket, False, 0, f"not relevant to role {stage_role or '-'}")
+            continue
         text = _gather(db, job, stage_name, bucket, amos_query, recall)
         if not text:
             report.add(bucket, False, 0, "empty")
@@ -88,6 +95,22 @@ def build_context(db: Db, job, stage_name: str, budget_tokens: int = 6000,
         report.add(bucket, True, used, "clipped" if clipped != text else "")
 
     return "\n\n".join(parts), report
+
+
+def _relevant(bucket: str, stage_name: str, role: str | None) -> bool:
+    """Cheap, deterministic first-stage selector; every decision is audited.
+
+    Test evidence is useful to testers/reviewers and to a rework stage, while
+    broad room discussion is most useful to PM/review/co-ordination roles.
+    Handoffs remain universal: they are the narrowest description of what the
+    previous agent changed.
+    """
+    label = f"{stage_name} {role or ''}".lower()
+    if bucket == "test_evidence":
+        return any(x in label for x in ("test", "qa", "review", "驗", "測", "審"))
+    if bucket == "room":
+        return any(x in label for x in ("pm", "plan", "review", "lead", "整合", "審"))
+    return True
 
 
 def _rollover(bucket: str, budget: int, remaining: int) -> int:
@@ -114,6 +137,38 @@ def _gather(db: Db, job, stage_name: str, bucket: str, amos_query: str | None,
         lines = [f"- stage {r['stage']}: gate {r['verdict'] or 'n/a'} {r['detail_md'] or ''}"
                  for r in reversed(rows)]
         return "## Pipeline history\n" + "\n".join(lines)
+
+    if bucket == "handoff":
+        from .collaboration import latest_handoffs
+        rows = latest_handoffs(db, job["id"])
+        if not rows:
+            return ""
+        lines = []
+        for row in rows:
+            paths = json.loads(row["changed_paths_json"] or "[]")
+            checks = json.loads(row["verification_json"] or "[]")
+            lines.append(f"- {row['from_stage']} → {row['to_stage'] or '完成'}: "
+                         f"{row['summary']}\n  changed: {', '.join(paths) or 'none'}"
+                         + (f"\n  verified: {', '.join(checks)}" if checks else ""))
+        return "## Stage handoffs\n" + "\n".join(lines)
+
+    if bucket == "test_evidence":
+        rows = db.query(
+            "SELECT case_id,command,verdict,base_commit,covered_paths_json,at "
+            "FROM test_evidence WHERE job_id=? ORDER BY at DESC LIMIT 12", (job["id"],))
+        if not rows:
+            return ""
+        return "## Test evidence\n" + "\n".join(
+            f"- {r['case_id']}: {r['verdict']} at {r['base_commit'] or 'unknown'}; "
+            f"coverage={r['covered_paths_json']}" for r in rows)
+
+    if bucket == "room":
+        from .collaboration import messages
+        rows = messages(db, job["project_id"], limit=12)
+        if not rows:
+            return ""
+        return "## Project room (recent)\n" + "\n".join(
+            f"- [{r['kind']}] {r['author_id']}: {r['content'][:500]}" for r in rows)
 
     if bucket == "deps":
         rows = db.query(
@@ -142,9 +197,20 @@ def _gather(db: Db, job, stage_name: str, bucket: str, amos_query: str | None,
 
             # recall AS the running agent: without a requester AMOS applies no
             # ACL, so every project's memories land in every project's pack
-            pack = MemoryClient().context_pack(query, max_tokens=1200,
-                                               **(recall or {}))
-            text = pack if isinstance(pack, str) else str(pack or "")
+            client = MemoryClient()
+            # Search is relevance-first. context_pack's importance-heavy ranking
+            # can crowd a new task out with old high-importance memories.
+            hits = client.search(query, limit=10, **(recall or {}))
+            selected = []
+            for hit in hits or []:
+                record = getattr(hit, "record", hit)
+                content = (record.get("content", "") if isinstance(record, dict)
+                           else getattr(record, "content", ""))
+                if content:
+                    selected.append(str(content)[:600])
+                if len(selected) >= 6:
+                    break
+            text = "\n".join(f"- {item}" for item in selected)
             return f"## Team memory (AMOS)\n{text}" if text.strip() else ""
         except Exception as exc:  # AMOS optional — degrade to no memory bucket
             log.debug("AMOS context pack unavailable: %s", type(exc).__name__)

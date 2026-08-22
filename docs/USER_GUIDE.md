@@ -9,10 +9,11 @@ For getting Bastet onto a machine see [INSTALLATION.md](INSTALLATION.md).
 |---|---|
 | **Team** | the top of the org. Owns projects; memory can be shared at this level. |
 | **Project** | 1:1 with a real git repo **on the Bastet host**, and with an AMOS project. Has a lifecycle state and a light. |
-| **Agent** | an executor + an account + optional model config. `claude-code`, `claude-sdk`, `codex`, `grok`, `agy`, `hermes`, `bastet-lite`. |
+| **Agent** | an executor + an account + optional model config. `claude-code`, `claude-sdk`, `codex`, opt-in `codex-app-server`, `grok`, `agy`, `hermes`, `bastet-lite`. |
 | **Role** | what an agent is *for* in a project (`engineer`, `reviewer`, `pm`, `ops-engineer`…). A stage asks for a role; the project's role assignment decides who runs it. |
 | **Workflow template** | an ordered list of stages, each with a gate. |
 | **Gate** | how a stage's exit is judged: `auto`, `tests-pass`, `agent-review`, `human-approve`. |
+| **Project room** | project-local PM assignments, agent discussion, and structured stage handoffs; members follow project role assignments. |
 | **Job** | one task moving through a workflow. A card on the board. |
 | **Run** | one stage of one job executed by one agent. Carries usage and cost. |
 | **Resource** | something an agent may call: an LLM endpoint, an MCP server, an API, a skill, a git remote. |

@@ -6,6 +6,7 @@ from . import (  # noqa: F401  (register builtins)
     claude_code,
     claude_sdk,
     codex,
+    codex_app_server,
     grok,
     hermes,
 )

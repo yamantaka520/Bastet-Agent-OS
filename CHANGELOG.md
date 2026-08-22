@@ -8,6 +8,28 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.31.0] - 2026-08-22
+
+### Added
+
+- Project meeting rooms are created with every project. Membership follows
+  project role assignments; PM assignments and structured stage handoffs share
+  one project-local activity stream in the UI and API.
+- Stage completion records source/target stage, summary, changed paths,
+  verification and risks for the next agent.
+- Named `tests-pass` cases can declare `covered_paths`. Passing evidence is
+  reused only while its commit remains an ancestor and changed paths do not
+  intersect coverage; monolithic commands retain always-run behavior.
+- Context selection now budgets spec, handoffs, history, test evidence, room
+  messages, dependencies and semantic AMOS results by current stage role.
+- Added opt-in `codex-app-server` using the stable stdio JSONL protocol for
+  stateful threads, streamed events and approvals. `codex exec` stays supported.
+
+### Changed
+
+- AMOS retrieval uses semantic search instead of an importance-heavy generic
+  context pack, reducing unrelated high-importance memories in runs.
+
 ## [0.30.2] - 2026-08-22
 
 ### Fixed

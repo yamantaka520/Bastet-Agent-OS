@@ -128,6 +128,12 @@ const en: Dict = {
   "project.secrets": "Available credentials (incl. team/global inheritance)",
   "project.noSecrets": "No credentials yet — add one on the Admin tab scoped to this project or its team.",
   "project.jobs": "Recent jobs",
+  "project.room": "Project room",
+  "project.roomMembers": "Members",
+  "project.roomEmpty": "No messages yet",
+  "project.roomMessage": "Message",
+  "project.roomAssignment": "PM assignment",
+  "project.roomPlaceholder": "Handoff, changed scope, verification, or assignment…",
   "project.headJob": "Job",
   "project.noJobs": "No jobs yet — dispatch the first one from the Board.",
 

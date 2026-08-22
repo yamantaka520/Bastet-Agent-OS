@@ -42,6 +42,10 @@ type Overview = {
   jobs: { id: string; title: string; stage: string; status: string;
           updated_at: string }[];
 };
+type RoomMember = { id: string; name: string; role: string; executor_type: string };
+type RoomMessage = { id: string; author_type: string; author_id: string;
+                     kind: string; content: string; at: string };
+type Room = { project_id: string; members: RoomMember[]; messages: RoomMessage[] };
 
 const GROUPS = ["planning", "ready", "running", "paused", "maintenance", "closed"];
 const JOB_BADGE: Record<string, string> = {
@@ -343,7 +347,68 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
         head={[t("project.headJob"), t("c.stage"), t("c.status"), t("c.updatedAt")]}
         rows={ov.jobs.map((j) => [j.title, j.stage, j.status,
                                   fmtTime(j.updated_at)])} />
+
+      <ProjectRoom projectId={projectId} canOperate={canOperate}
+                   refreshKey={refreshKey} t={t} />
     </div>
+  );
+}
+
+function ProjectRoom({ projectId, canOperate, refreshKey, t }: {
+  projectId: string; canOperate: boolean; refreshKey: number; t: T;
+}) {
+  const [room, setRoom] = useState<Room | null>(null);
+  const [content, setContent] = useState("");
+  const [kind, setKind] = useState("message");
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    api<Room>(`/api/projects/${projectId}/room`).then(setRoom).catch(() => setRoom(null));
+  }, [projectId]);
+  useEffect(load, [load, refreshKey]);
+
+  const send = async () => {
+    if (!content.trim()) return;
+    setError("");
+    try {
+      await post(`/api/projects/${projectId}/room/messages`, { content, kind });
+      setContent("");
+      load();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
+  return (
+    <>
+      <h4>{t("project.room")}</h4>
+      {error && <p className="error">{error}</p>}
+      <p className="muted">
+        {t("project.roomMembers")}：
+        {room?.members.map((m) => `${m.name}（${m.role}）`).join("、") || "—"}
+      </p>
+      <div className="project-room-log">
+        {!room?.messages.length && <span className="muted">
+          {t("project.roomEmpty")}</span>}
+        {room?.messages.map((m) => (
+          <div key={m.id} className={`chat-msg ${m.kind}`}>
+            <div className="chat-msg-head">
+              <b>{m.author_id}</b><span className="flow-tag">{m.kind}</span>
+              <span className="muted">{fmtTime(m.at)}</span>
+            </div>
+            <div className="chat-msg-body">{m.content}</div>
+          </div>
+        ))}
+      </div>
+      {canOperate && (
+        <div className="project-room-compose">
+          <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            <option value="message">{t("project.roomMessage")}</option>
+            <option value="assignment">{t("project.roomAssignment")}</option>
+          </select>
+          <textarea value={content} onChange={(e) => setContent(e.target.value)}
+                    placeholder={t("project.roomPlaceholder")} />
+          <button onClick={send}>{t("c.send")}</button>
+        </div>
+      )}
+    </>
   );
 }
 

@@ -369,3 +369,15 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
 .chat-media { max-width: 22rem; max-height: 16rem; border-radius: 8px;
               border: 1px solid var(--line); display: block; margin-top: .3rem; }
 .chat-media-row { display: flex; align-items: center; gap: .5rem; }
+
+/* Project rooms are compact activity streams inside an expanded project. */
+.project-room-log { display: flex; flex-direction: column; gap: .45rem;
+  max-height: 22rem; overflow: auto; padding: .35rem 0; }
+.project-room-log .handoff { border-left: 3px solid var(--accent); }
+.project-room-log .assignment { border-left: 3px solid var(--warn, #d9a05b); }
+.project-room-compose { display: grid; grid-template-columns: 10rem 1fr auto;
+  gap: .45rem; align-items: start; margin-top: .55rem; }
+.project-room-compose textarea { min-height: 4.5rem; resize: vertical; }
+@media (max-width: 820px) {
+  .project-room-compose { grid-template-columns: 1fr; }
+}

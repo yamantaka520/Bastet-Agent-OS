@@ -66,6 +66,23 @@ found) is flagged as a configuration problem, not a failing test — and is stil
 handed back to an agent that can add the missing script or dependency, with
 instructions not to fake a green exit.
 
+For an incremental suite, retain `command` as the fallback and declare named
+cases with explicit coverage:
+
+```yaml
+gate: tests-pass
+gate_config:
+  command: pytest -q
+  cases:
+    - id: context-unit
+      command: pytest -q tests/test_context.py
+      covered_paths: ["src/context/**", "tests/test_context.py"]
+```
+
+A passing case is skipped after rework only when its evidence commit is still
+an ancestor and the handoff change set does not intersect `covered_paths`.
+Missing coverage, rewritten history, or a previous failure always re-runs it.
+
 ## 4. When a gate fails: the rework loop
 
 The card goes **back** to a stage that can fix it, and the target **advances**

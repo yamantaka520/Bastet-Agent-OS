@@ -220,7 +220,7 @@ channels(id PK, kind, config_json, secret_ref, enabled)
 class Executor(Protocol):
     """一種 agent 執行後端。實作以 entry point 註冊：bastet.executors"""
 
-    kind: str                      # "claude-code" | "codex" | "hermes" | "bastet-lite"
+    kind: str                      # "claude-code" | "codex" | "codex-app-server" | "hermes" | "bastet-lite"
     capabilities: set[str]        # {"code", "review", "light-task", "mcp", ...}
 
     async def start(self, task: TaskSpec) -> RunHandle: ...
@@ -448,14 +448,24 @@ Reviewer run 強制唯讀工具面（`read_only: true`：不可寫檔、不可�
 
 ### 5.6 動態 Context 引擎
 
-- **架構：外層 allocator**。Bastet 自建預算分配層，把 AMOS
-  `context_pack`（memory 來源）當作其中一個 bucket，任務層來源（Job spec、
-  相依卡片結論、上一階段 gate 意見、專案 config 摘要）為其他 buckets，
+- **架構：外層 allocator + role selector**。Bastet 自建預算分配層，以當前
+  stage/role 決定可用來源，再把語意搜尋的 AMOS memories 當作其中一個 bucket；
+  任務層來源（Job spec、結構化交接、測試證據、會議室訊息、相依卡片結論、
+  上一階段 gate 意見）為其他 buckets，
   統一在 token 預算內取捨。
   （不採「任務資料寫成 AMOS memory 再召回」：一次性任務資料會污染記憶庫，
   違反 AMOS 不存 one-off trivia 的定位。）
 - 注入精度分兩級：整合 executor = 盡力注入（prompt/MCP/hooks）；
   `bastet-lite` = 每輪完全掌控（本引擎的完全體，M3）。
+
+### 5.6.1 專案會議室與交接
+
+- 建立專案時同步建立唯一會議室；成員由 `project_agent_roles` 衍生，不維護
+  第二份名單。PM 的任務分派與成員內部溝通都記錄在此 scope。
+- 每個 stage 通過 gate 時必須產生結構化 handoff：來源/目標 stage、摘要、
+  changed paths、verification 與 risks。下一階段的 context 優先取得此交接。
+- `tests-pass` 可拆為具 `covered_paths` 的 named cases。只有先前 pass 的 commit
+  仍為 ancestor 且本次 changed paths 不碰 coverage 才可沿用；其餘重測。
 
 ### 5.7 Chat Channels
 
