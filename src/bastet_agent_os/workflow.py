@@ -13,6 +13,7 @@ Gate verdicts (SPEC §5.4.2):
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -271,7 +272,8 @@ def _command_unavailable(returncode: int, output: str) -> bool:
 
 def evaluate_gate(stage: StageDef, workdir: str,
                   structured_verdict: dict | None,
-                  reviewer_output: str = "") -> GateOutcome:
+                  reviewer_output: str = "",
+                  env: dict[str, str] | None = None) -> GateOutcome:
     if stage.gate == "auto":
         return GateOutcome("passed")
 
@@ -281,6 +283,7 @@ def evaluate_gate(stage: StageDef, workdir: str,
             proc = subprocess.run(command, shell=True, cwd=workdir,
                                   capture_output=True, text=True,
                                   encoding="utf-8", errors="replace",
+                                  env={**os.environ, **(env or {})},
                                   timeout=1800)
         except (OSError, subprocess.TimeoutExpired) as exc:
             return GateOutcome("failed",
@@ -289,7 +292,15 @@ def evaluate_gate(stage: StageDef, workdir: str,
         # the tail IS the diagnosis — for the notification a human reads and for
         # the brief the fixing agent gets. 1000 chars cut off pytest's actual
         # assertion; keep enough that the failure is visible without the log.
-        tail = (proc.stdout + proc.stderr)[-OUTPUT_TAIL:]
+        output = proc.stdout + proc.stderr
+        tail = output[-OUTPUT_TAIL:]
+        # TAP and other streaming runners can report the actual failure long
+        # before their final summary. A tail-only record hid the one `not ok`
+        # line in a 457-test suite and left operators staring at passing tests.
+        failure_lines = [line for line in output.splitlines()
+                         if line.startswith(("not ok ", "FAILED ", "ERROR "))]
+        if failure_lines and not any(line in tail for line in failure_lines):
+            tail = "Failure summary:\n" + "\n".join(failure_lines[-20:]) + "\n…\n" + tail
         if proc.returncode == 0:
             return GateOutcome("passed", tail)
         if _command_unavailable(proc.returncode, tail):

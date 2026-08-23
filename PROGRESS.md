@@ -4,7 +4,7 @@ Last updated: 2026-08-22
 
 ## Current project status
 
-- Released: **v0.32.0**. Version arc v0.1.0 → v0.32.0 in under four weeks
+- Released: **v0.32.1**. Version arc v0.1.0 → v0.32.1 in under four weeks
   (2026-07-28 → 2026-08-22), ~125 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.

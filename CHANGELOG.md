@@ -8,6 +8,18 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.32.1] - 2026-08-23
+
+### Fixed
+
+- `tests-pass` gates now receive the same project secrets and granted resource
+  environment as their stage Agent. Previously a stage could complete using a
+  GitLab resource and then fail its deterministic gate solely because the
+  engine dropped `BASTET_RES_*` variables at the gate boundary.
+- Long TAP output retains its `not ok` failure summary even when thousands of
+  later passing lines push the actual failure outside the stored output tail.
+  Blocked cards now show the actionable failure instead of an all-green tail.
+
 ## [0.32.0] - 2026-08-22
 
 ### Added

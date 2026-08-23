@@ -887,13 +887,34 @@ class Orchestrator:
                *, job=None, run_id: str = "") -> GateOutcome:
         if stage.gate == "human-approve":
             return GateOutcome("pending", "waiting for human approval")
-        if stage.gate == "tests-pass" and stage.gate_config.get("cases") and job is not None:
-            return self._judge_incremental_tests(stage, workdir, job, run_id)
-        return evaluate_gate(stage, workdir, result.structured_verdict,
-                             reviewer_output=result.summary)
+        gate_env: dict[str, str] = {}
+        access = None
+        if stage.gate == "tests-pass" and job is not None:
+            # A deterministic gate runs after the agent, but it is still part
+            # of the same stage and must see the same granted resources. Live
+            # failure: the agent completed, then npm's GitLab assertion failed
+            # only because BASTET_RES_* disappeared at the gate boundary.
+            from . import resource_access
+            gate_env.update(self._project_secrets(job, run_id))
+            access = resource_access.build(
+                self.db, self.home.root, job["project_id"],
+                self._project_team(job["project_id"]), run_id,
+                audit_actor=f"gate:{run_id}")
+            gate_env.update(access.env)
+        try:
+            if (stage.gate == "tests-pass" and stage.gate_config.get("cases")
+                    and job is not None):
+                return self._judge_incremental_tests(stage, workdir, job, run_id,
+                                                     gate_env)
+            return evaluate_gate(stage, workdir, result.structured_verdict,
+                                 reviewer_output=result.summary, env=gate_env)
+        finally:
+            if access is not None:
+                resource_access.cleanup(self.home.root, run_id)
 
     def _judge_incremental_tests(self, stage: StageDef, workdir: str, job,
-                                 run_id: str) -> GateOutcome:
+                                 run_id: str,
+                                 gate_env: dict[str, str] | None = None) -> GateOutcome:
         """Run declared cases whose evidence was invalidated by code changes.
 
         A monolithic command remains monolithic. Skipping is allowed only for
@@ -930,7 +951,7 @@ class Orchestrator:
                 continue
             probe = StageDef(name=stage.name, gate="tests-pass",
                              gate_config={"command": command})
-            outcome = evaluate_gate(probe, workdir, None)
+            outcome = evaluate_gate(probe, workdir, None, env=gate_env)
             verdict = "passed" if outcome.verdict == "passed" else "failed"
             self.db.write(
                 "INSERT INTO test_evidence(id,project_id,job_id,run_id,stage,case_id,"

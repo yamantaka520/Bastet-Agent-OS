@@ -240,6 +240,19 @@ async def test_pool_resources_reach_the_run(orch, seeded, tmp_path):
     assert not os.path.exists(captured["mcp"])  # cleaned up: the file held a secret
 
 
+async def test_pool_resources_reach_the_tests_pass_gate(orch, seeded):
+    """The gate is part of the stage, so it gets the run's resource grants."""
+    add_template(seeded, "resource-gate", [{
+        "name": "e2e", "gate": "tests-pass",
+        "gate_config": {"command":
+            "test \"$BASTET_RES_ANTHROPIC_MAIN_URL\" = https://upstream.example"},
+    }])
+    SCRIPT.append(RunResult(status="succeeded"))
+    job_id = orch.dispatch(req(template_id="resource-gate"))
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+
+
 async def test_executor_account_does_not_wipe_injected_credentials(orch, seeded,
                                                                    tmp_path):
     """Regression: binding an agent to an executor account used to *replace*
@@ -282,6 +295,25 @@ def test_tests_pass_separates_a_missing_command_from_a_failing_test(tmp_path):
     assert missing.verdict == "failed" and missing.config_error is True
     assert "工作流設定問題" in missing.detail
     assert "definitely-not-a-real-command" in missing.detail   # names the command
+
+
+def test_tests_pass_receives_resource_environment(tmp_path):
+    stage = parse_stages([{"name": "t", "gate": "tests-pass",
+                           "gate_config": {"command":
+                               "test \"$BASTET_RES_GITLAB_URL\" = ssh://git/repo"}}])[0]
+    outcome = evaluate_gate(stage, str(tmp_path), None,
+                            env={"BASTET_RES_GITLAB_URL": "ssh://git/repo"})
+    assert outcome.verdict == "passed"
+
+
+def test_tests_pass_keeps_failure_line_when_long_tail_hides_it(tmp_path):
+    stage = parse_stages([{"name": "t", "gate": "tests-pass",
+                           "gate_config": {"command":
+                               "printf 'not ok 7 - missing resource\\n'; "
+                               "python -c 'print(\"ok\\n\" * 5000)'; exit 1"}}])[0]
+    outcome = evaluate_gate(stage, str(tmp_path), None)
+    assert outcome.verdict == "failed"
+    assert "not ok 7 - missing resource" in outcome.detail
 
 
 def test_npm_missing_script_is_recognised_as_a_config_error(tmp_path):
