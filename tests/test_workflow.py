@@ -355,6 +355,44 @@ async def test_a_config_error_is_persisted_on_the_gate_row(orch, seeded):
     assert '"config_error": true' in audited["detail_json"]
 
 
+async def test_gate_revalidation_reuses_successful_run_and_finishes(orch, seeded):
+    add_template(seeded, "revalidate", [{
+        "name": "e2e", "gate": "tests-pass", "on_fail": "block",
+        "gate_config": {"command": "exit 1"},
+    }])
+    SCRIPT.append(RunResult(status="succeeded", summary="existing output is complete"))
+    job_id = orch.dispatch(req(template_id="revalidate"))
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "blocked"
+    run = seeded.one("SELECT id FROM runs WHERE job_id=?", (job_id,))["id"]
+
+    stages = [{"name": "e2e", "gate": "tests-pass", "on_fail": "block",
+               "gate_config": {"command": "exit 0"}}]
+    seeded.write("UPDATE jobs SET stages_snapshot_json=? WHERE id=?",
+                 (json.dumps(stages), job_id))
+    result = orch.revalidate_gate(job_id, user="operator")
+
+    assert result == {"job_id": job_id, "status": "done", "stage": None,
+                      "verdict": "passed", "reused_run_id": run}
+    assert seeded.one("SELECT COUNT(*) n FROM runs WHERE job_id=?", (job_id,))["n"] == 1
+    assert seeded.one("SELECT COUNT(*) n FROM gate_results WHERE run_id=?", (run,))["n"] == 2
+    assert seeded.one("SELECT COUNT(*) n FROM stage_handoffs WHERE job_id=?",
+                      (job_id,))["n"] == 1
+    audit = seeded.one("SELECT detail_json FROM audit_log WHERE action='gate.revalidated'")
+    assert '"verdict": "passed"' in audit["detail_json"]
+
+
+async def test_gate_revalidation_refuses_non_deterministic_gate(orch, seeded):
+    add_template(seeded, "review", [{"name": "review", "gate": "agent-review",
+                                      "on_fail": "block"}])
+    SCRIPT.append(RunResult(status="succeeded", structured_verdict={
+        "verdict": "reject", "reasons": ["no"]}))
+    job_id = orch.dispatch(req(template_id="review"))
+    await orch.wait_idle()
+    with pytest.raises(ValueError, match="only tests-pass"):
+        orch.revalidate_gate(job_id)
+
+
 def test_gate_tools_names_what_each_preset_needs():
     """The shipped presets run pytest/npm/make; nothing used to check they exist,
     so a project could burn an agent run and then fail on a missing runner."""

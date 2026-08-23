@@ -8,6 +8,18 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.33.0] - 2026-08-24
+
+### Added
+
+- Gate-only revalidation for blocked `tests-pass` stages through
+  `POST /api/jobs/{id}/revalidate` and `bastet job-revalidate`. It reuses the
+  latest successful stage run, executes only the deterministic gate, and then
+  follows the normal gate audit, project-room handoff, completion and branch
+  delivery path. It refuses non-deterministic gates and stages without a
+  successful run, preventing an Agent failure from forcing already-complete
+  work and tests to run again.
+
 ## [0.32.3] - 2026-08-23
 
 ### Fixed

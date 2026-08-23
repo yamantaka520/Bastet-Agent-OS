@@ -2121,6 +2121,14 @@ def create_app(home: Home) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.post("/api/jobs/{job_id}/revalidate")
+    def revalidate_job_gate(job_id: str,
+                            auth: Auth = Depends(require_role("operator"))):
+        try:
+            return orch.revalidate_gate(job_id, user=auth.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/jobs/{job_id}/archive")
     def archive_job(job_id: str, body: ArchiveIn,
                     auth: Auth = Depends(require_role("operator"))):

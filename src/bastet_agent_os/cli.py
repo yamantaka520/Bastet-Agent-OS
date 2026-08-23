@@ -265,6 +265,12 @@ def job_show(job_id: str):
     _print(_call("GET", f"/api/jobs/{job_id}"))
 
 
+@app.command("job-revalidate")
+def job_revalidate(job_id: str):
+    """Re-run a blocked deterministic gate without re-running its Agent."""
+    _print(_call("POST", f"/api/jobs/{job_id}/revalidate", {}))
+
+
 user_app = typer.Typer(help="Manage users (multi-user auth; admin only).")
 app.add_typer(user_app, name="user")
 

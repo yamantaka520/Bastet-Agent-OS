@@ -758,44 +758,97 @@ class Orchestrator:
                     continue          # sent back to be fixed; keep driving
                 return
 
-            # A passed stage must hand the next agent facts, not force it to
-            # reconstruct the work from a broad transcript or the whole repo.
-            from . import collaboration
-            next_stage = stages[idx + 1].name if idx + 1 < len(stages) else None
-            paths = collaboration.changed_paths(workdir)
-            collaboration.record_handoff(
-                self.db, project_id=job["project_id"], job_id=job_id,
-                run_id=run_id, from_stage=stage.name, to_stage=next_stage,
-                agent_id=self._run_agent(run_id), summary=result.summary[:3000],
-                paths=paths,
-                verification=([f"{stage.gate}: {outcome.verdict}"]
-                              if stage.gate != "auto" else []))
-            self.db.audit("orchestrator", "stage.handoff", "job", job_id,
-                          {"from": stage.name, "to": next_stage,
-                           "changed_paths": paths[:50]})
-
-            if idx + 1 >= len(stages):
-                self.db.write("UPDATE jobs SET status='done', updated_at=? WHERE id=?",
-                              (now(), job_id))
-                self.db.audit("orchestrator", "job.done", "job", job_id, {})
-                run_memory.job_finished(self.db, job, "done")
-                self._emit("job.done", job["project_id"], job_id=job_id)
-                self._sync_project(job["project_id"])
-                self.cleanup_worktree(job_id)   # commits the work to bastet/<job>
-                # deliver the finished branch to the project's remote — a push
-                # failure is a delivery problem, never a reason to un-finish
-                try:
-                    from . import git_push
-                    git_push.push_job_branch(self.db, job, emit=self._emit)
-                except Exception as exc:
-                    log.warning("job %s: auto-push crashed: %r", job_id, exc)
+            if self._accept_passed_stage(job, stages, idx, stage, workdir,
+                                         run_id, result.summary, outcome):
                 return
-            # the note has served its purpose: the gate it described just passed
-            self.db.write("UPDATE jobs SET stage=?, rework_note=NULL, "
-                          "agent_override=NULL, updated_at=? WHERE id=?",
-                          (stages[idx + 1].name, now(), job_id))
-            self._emit("job.stage_changed", job["project_id"], job_id=job_id,
-                       stage=stages[idx + 1].name)
+
+    def _accept_passed_stage(self, job, stages: list[StageDef], idx: int,
+                             stage: StageDef, workdir: str, run_id: str,
+                             summary: str, outcome: GateOutcome) -> bool:
+        """Publish the handoff and advance after either a run or revalidation."""
+        from . import collaboration
+
+        next_stage = stages[idx + 1].name if idx + 1 < len(stages) else None
+        paths = collaboration.changed_paths(workdir)
+        collaboration.record_handoff(
+            self.db, project_id=job["project_id"], job_id=job["id"],
+            run_id=run_id, from_stage=stage.name, to_stage=next_stage,
+            agent_id=self._run_agent(run_id), summary=summary[:3000], paths=paths,
+            verification=([f"{stage.gate}: {outcome.verdict}"]
+                          if stage.gate != "auto" else []))
+        self.db.audit("orchestrator", "stage.handoff", "job", job["id"],
+                      {"from": stage.name, "to": next_stage,
+                       "changed_paths": paths[:50]})
+        if next_stage is not None:
+            self.db.write("UPDATE jobs SET stage=?, status='in_progress', "
+                          "rework_note=NULL, agent_override=NULL, updated_at=? WHERE id=?",
+                          (next_stage, now(), job["id"]))
+            self._emit("job.stage_changed", job["project_id"], job_id=job["id"],
+                       stage=next_stage)
+            return False
+
+        self.db.write("UPDATE jobs SET status='done', updated_at=? WHERE id=?",
+                      (now(), job["id"]))
+        self.db.audit("orchestrator", "job.done", "job", job["id"], {})
+        run_memory.job_finished(self.db, job, "done")
+        self._emit("job.done", job["project_id"], job_id=job["id"])
+        self._sync_project(job["project_id"])
+        self.cleanup_worktree(job["id"])
+        try:
+            from . import git_push
+            git_push.push_job_branch(self.db, job, emit=self._emit)
+        except Exception as exc:
+            log.warning("job %s: auto-push crashed: %r", job["id"], exc)
+        return True
+
+    def revalidate_gate(self, job_id: str, user: str = "user") -> dict:
+        """Re-run a deterministic gate against the last successful stage output."""
+        from .maintenance_mode import require_dispatch_allowed
+
+        require_dispatch_allowed(self.db)
+        job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job is None:
+            raise ValueError(f"unknown job {job_id!r}")
+        if job["status"] != "blocked":
+            raise ValueError(f"job {job_id} is {job['status']}, not blocked")
+        stages = parse_stages(json.loads(job["stages_snapshot_json"]))
+        names = [item.name for item in stages]
+        if job["stage"] not in names:
+            raise ValueError(f"job {job_id} is at unknown stage {job['stage']!r}")
+        idx = names.index(job["stage"])
+        stage = stages[idx]
+        if stage.gate != "tests-pass":
+            raise ValueError("only tests-pass gates can be revalidated without an Agent")
+        run = self.db.one(
+            "SELECT * FROM runs WHERE job_id=? AND stage=? AND status='succeeded' "
+            "ORDER BY attempt DESC LIMIT 1", (job_id, stage.name))
+        if run is None:
+            raise ValueError("no successful run exists for this stage")
+        workdir = job["worktree_path"] or run["workdir"] or self._project_repo(job)
+        artifacts = json.loads(run["artifacts_json"] or "{}")
+        summary = str(artifacts.get("summary") or run["progress_text"] or
+                      "Revalidated existing successful stage output")
+        outcome = self._judge(stage, workdir, RunResult(status="succeeded"),
+                              job=job, run_id=run["id"])
+        self._record_gate(run["id"], stage, outcome, reviewer_kind="user",
+                          reviewer_id=f"revalidate:{user}")
+        self.db.audit(f"user:{user}", "gate.revalidated", "job", job_id,
+                      {"stage": stage.name, "run_id": run["id"],
+                       "verdict": outcome.verdict,
+                       "config_error": outcome.config_error,
+                       "detail": outcome.detail[:300]})
+        self._emit(f"gate.{outcome.verdict}", job["project_id"], job_id=job_id,
+                   stage=stage.name, gate=stage.gate,
+                   detail=outcome.detail[:200], revalidated=True)
+        if outcome.verdict != "passed":
+            self._block(job_id, f"stage {stage.name}: gate revalidation failed")
+            return {"job_id": job_id, "status": "blocked",
+                    "verdict": outcome.verdict, "detail": outcome.detail}
+        done = self._accept_passed_stage(job, stages, idx, stage, workdir,
+                                         run["id"], summary, outcome)
+        return {"job_id": job_id, "status": "done" if done else "in_progress",
+                "stage": None if done else stages[idx + 1].name,
+                "verdict": "passed", "reused_run_id": run["id"]}
 
     def _handbacks_for(self, job_id: str, stage_name: str) -> int:
         """How often this stage's gate has already sent work back, this episode.
