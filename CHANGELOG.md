@@ -8,6 +8,15 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.32.2] - 2026-08-23
+
+### Fixed
+
+- The local CLI now translates wildcard server bind addresses (`0.0.0.0` and
+  `::`) to loopback destinations. A LAN-exposed installation previously sent
+  the wildcard as its HTTP Host and was rejected by Bastet's own host guard,
+  breaking maintenance/drain commands with `403 bad host`.
+
 ## [0.32.1] - 2026-08-23
 
 ### Fixed

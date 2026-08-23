@@ -169,4 +169,12 @@ class Home:
 
     def server_url(self) -> str:
         cfg = self.config()
-        return f"http://{cfg.get('host', DEFAULT_HOST)}:{cfg.get('port', DEFAULT_PORT)}"
+        host = cfg.get("host", DEFAULT_HOST)
+        # 0.0.0.0/:: are bind addresses, not valid destinations. Using the
+        # bind address here also sends a Host header rejected by our own host
+        # guard, so a correctly LAN-exposed server made its local CLI unusable.
+        if host == "0.0.0.0":
+            host = "127.0.0.1"
+        elif host == "::":
+            host = "[::1]"
+        return f"http://{host}:{cfg.get('port', DEFAULT_PORT)}"
