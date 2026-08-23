@@ -5,6 +5,7 @@ from bastet_agent_os.context_eval import evaluate
 
 async def test_human_approval_publishes_handoff_to_project_room(orch, seeded):
     from fake_executor import SCRIPT, add_template, req
+
     from bastet_agent_os.executors.base import RunResult
 
     add_template(seeded, "gated-handoff", [
@@ -38,7 +39,7 @@ def test_maintenance_fence_tracks_drain_and_is_audited(seeded):
 
     try:
         maintenance_mode.require_dispatch_allowed(seeded)
-        assert False, "dispatch should be fenced"
+        raise AssertionError("dispatch should be fenced")
     except maintenance_mode.MaintenanceModeError:
         pass
 

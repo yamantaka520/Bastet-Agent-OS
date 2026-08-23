@@ -8,6 +8,13 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.32.3] - 2026-08-23
+
+### Fixed
+
+- Restored the full cross-platform CI matrix by correcting lint violations in
+  the maintenance/handoff and release-workflow regression tests.
+
 ## [0.32.2] - 2026-08-23
 
 ### Fixed
