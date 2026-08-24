@@ -95,6 +95,7 @@ class TelegramChannel:
             await self._poll_loop()
         finally:
             notify_task.cancel()
+            await asyncio.gather(notify_task, return_exceptions=True)
             await self._client.aclose()
 
     def stop(self) -> None:

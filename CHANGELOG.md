@@ -8,6 +8,18 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.33.2] - 2026-08-24
+
+### Fixed
+
+- Graceful shutdown now stops channels, awaits every cancelled lifespan task,
+  terminates live executor handles with a bounded timeout, and reaps owned job
+  drivers. Generated systemd units use a 15-second control-group stop fence.
+- SQLite now uses WAL with `synchronous=FULL`, ensuring committed workflow
+  state survives sudden power loss. Startup recovery keeps the same job,
+  task-plan link and worktree, orphans interrupted runs, revokes their tokens,
+  and resumes the recorded stage as a new attempt.
+
 ## [0.33.1] - 2026-08-24
 
 ### Fixed

@@ -437,6 +437,11 @@ def create_app(home: Home) -> FastAPI:
             channel.stop()
         for task in tasks:
             task.cancel()
+        # Cancelling without awaiting leaves Uvicorn's lifespan waiting on the
+        # very background tasks we just asked to stop.  This used to run into
+        # systemd's 90 second TimeoutStopSec even with no active jobs.
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await orch.shutdown()
 
     allowed_hosts = _build_allowed_hosts(cfg)
 

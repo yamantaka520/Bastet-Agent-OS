@@ -187,8 +187,10 @@ channels(id PK, kind, config_json, secret_ref, enabled)
 
 ### 3.2 SQLite 併發策略（M1 載明）
 
-- `PRAGMA journal_mode=WAL; busy_timeout>=5000; synchronous=NORMAL; foreign_keys=ON`
+- `PRAGMA journal_mode=WAL; busy_timeout>=5000; synchronous=FULL; foreign_keys=ON`
   （FK 預設關閉，必須顯式開）。
+- `FULL` 是刻意的 durability 優先：已提交的 job/run/gate/handoff 狀態在突然斷電後
+  不可倒退；WAL 在重新開啟時自動 recovery。效能代價由短交易與單 writer 控制。
 - 寫入採短交易；控制平面與 gateway **同一 FastAPI 進程**（M1 決策），共用單一
   writer 連線（序列化寫入），讀取用獨立唯讀連線。
 - 配額 check-and-reserve 用 `BEGIN IMMEDIATE` 短交易（§5.2.4）。
@@ -241,9 +243,12 @@ class Executor(Protocol):
     #             structured_verdict（gate 用的結構化欄位，與自由文字嚴格分離，§5.4.2）
 ```
 
-**RunHandle 持久化契約**：handle state 必須可序列化（存 `runs.executor_handle_json`），
-控制平面重啟後以 `kind + handle state` 重建並重新 attach；無法重接的 run 標
-`orphaned` 終態。
+**RunHandle 持久化契約**：handle state 可序列化並存於
+`runs.executor_handle_json`。目前 CLI executor 無法跨 OS process 安全 re-attach；啟動時
+把非終止 run 標為 `orphaned`、撤銷其 run token，保留原 job、workflow snapshot、
+task-plan link 與 worktree，再以同一 job id 從已記錄 stage 建立下一 attempt。這提供
+**at-least-once stage execution**，不是對外部副作用的 exactly-once 保證；部署、付款、
+發訊等 effectful stage 必須使用 idempotency key（至少包含 job id + stage）。
 
 #### 5.1.2 claude-code executor（M1 首發）
 

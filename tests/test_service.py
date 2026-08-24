@@ -7,6 +7,8 @@ def test_systemd_unit_restarts_always():
     unit = systemd_unit("/opt/venv/bin/bastet")
     assert "ExecStart=/opt/venv/bin/bastet serve" in unit
     assert "Restart=always" in unit
+    assert "TimeoutStopSec=15" in unit
+    assert "KillMode=control-group" in unit
     assert "WantedBy=default.target" in unit  # user service, not system
 
 

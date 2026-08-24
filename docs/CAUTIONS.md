@@ -116,8 +116,12 @@
 
 ## 營運
 
-- **重啟服務會殺掉正在跑的階段。** 啟動時會自動接手（`job.resumed`），但該輪
-  進度沒了 —— 部署前看一眼板上有沒有 in-progress 的重活，等它跑完再重啟。
+- **突然重啟採 at-least-once 接續。** SQLite WAL + `synchronous=FULL` 保住已提交
+  狀態；啟動時舊 run 轉為 `orphaned` 並撤銷 token，同一張 job 從記錄的 stage 開新
+  attempt，task-plan、worktree、gate、交接與用量不會重建成另一張卡。尚未提交的
+  Agent 進度仍可能重做，因此部署、付款、發訊等外部副作用必須使用 idempotency key。
+- **計畫性部署仍應 drain。** 先進 maintenance fence，等 active jobs/runs 都為 0，
+  再重啟；crash recovery 是安全網，不是用來取代正常交接點。
 - **審計是 hash 串接的 append-only。** 不要手動改 audit_log —— 鏈會斷，
   `verify_audit_chain()` 會抓到。刪任務/專案時的用量帳務會被拒絕或要求 force
   並記錄寫掉的金額，這是刻意的。

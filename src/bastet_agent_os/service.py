@@ -39,6 +39,8 @@ ExecStart={binary} serve
 Environment="PATH=%h/.local/bin:%h/.grok/bin:/usr/local/bin:/usr/bin:/bin"
 Restart=always
 RestartSec=5
+TimeoutStopSec=15
+KillMode=control-group
 
 [Install]
 WantedBy=default.target

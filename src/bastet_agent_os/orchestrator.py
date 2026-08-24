@@ -658,6 +658,29 @@ class Orchestrator:
         while self._tasks:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
+    async def shutdown(self) -> None:
+        """Stop owned work promptly while leaving durable state restartable.
+
+        A sudden process loss is recovered at startup from DB state.  A planned
+        shutdown should reach the same safe boundary deliberately: terminate
+        executor handles so no detached process keeps editing a worktree, then
+        cancel and reap every driver/PM task.  Runs intentionally remain
+        non-terminal; the next process atomically classifies them as orphaned
+        and resumes their existing job at the recorded stage.
+        """
+        for executor, handle in list(self._live.values()):
+            try:
+                await asyncio.wait_for(executor.cancel(handle), timeout=5)
+            except TimeoutError:
+                log.warning("shutdown executor cancel timed out")
+            except Exception as exc:
+                log.info("shutdown executor cancel: %s", type(exc).__name__)
+        pending = list(self._tasks)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
     # -- job driver -------------------------------------------------------------
 
     async def _drive_job(self, job_id: str, req: DispatchRequest) -> None:

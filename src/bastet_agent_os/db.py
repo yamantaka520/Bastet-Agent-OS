@@ -399,7 +399,11 @@ class Db:
         cur = self._conn
         cur.execute("PRAGMA journal_mode=WAL")
         cur.execute("PRAGMA busy_timeout=5000")
-        cur.execute("PRAGMA synchronous=NORMAL")
+        # FULL costs an extra fsync but guarantees that a committed state
+        # transition survives power loss.  WAL+NORMAL preserves consistency,
+        # yet SQLite explicitly allows the newest commits to disappear after a
+        # power failure — unacceptable for job/run/handoff state.
+        cur.execute("PRAGMA synchronous=FULL")
         cur.execute("PRAGMA foreign_keys=ON")
         self.migrate()
 
