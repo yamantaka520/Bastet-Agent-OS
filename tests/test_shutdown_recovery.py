@@ -1,10 +1,12 @@
 """Process shutdown and power-loss recovery are explicit engine contracts."""
 
 import asyncio
+import inspect
 import time
 
 from fastapi.testclient import TestClient
 
+from bastet_agent_os import cli
 from bastet_agent_os.config import Home
 from bastet_agent_os.db import Db
 from bastet_agent_os.server import create_app
@@ -26,6 +28,11 @@ def test_empty_server_shutdown_reaps_background_loops(tmp_path):
     with TestClient(app, base_url="http://127.0.0.1") as client:
         assert client.get("/api/version").status_code == 200
     assert time.monotonic() - started < 5
+
+
+def test_server_bounds_open_connection_shutdown_before_systemd_fence():
+    source = inspect.getsource(cli.serve)
+    assert "timeout_graceful_shutdown=5" in source
 
 
 async def test_orchestrator_shutdown_cancels_and_reaps_owned_tasks(orch):

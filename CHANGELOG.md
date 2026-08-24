@@ -8,6 +8,14 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.33.3] - 2026-08-24
+
+### Fixed
+
+- Uvicorn now limits graceful connection draining to five seconds. An open
+  dashboard WebSocket previously prevented application lifespan shutdown from
+  starting at all, so systemd still hit its 15-second kill fence in v0.33.2.
+
 ## [0.33.2] - 2026-08-24
 
 ### Fixed

@@ -137,7 +137,11 @@ def serve(host: str = typer.Option("", help="bind address; default from "
             import json as _json
             cfg["host"] = host
             home.config_path.write_text(_json.dumps(cfg, indent=2))
-    uvicorn.run(create_app(home), host=host, port=port, log_level="info")
+    # Uvicorn waits for open WebSockets before entering application lifespan
+    # shutdown. A dashboard tab can therefore hold the service forever unless
+    # the server owns a bounded graceful-connection window.
+    uvicorn.run(create_app(home), host=host, port=port, log_level="info",
+                timeout_graceful_shutdown=5)
 
 
 @project_app.command("add")
