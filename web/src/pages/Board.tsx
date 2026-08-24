@@ -3,7 +3,6 @@ import {
   api, apiBlob, post, Interaction, Job, JobDetail, UsageRow,
 } from "../api";
 import { useT, type T } from "../i18n";
-import { del } from "../api";
 import { fmtAgo, fmtTime } from "../ui";
 
 const STATUS_BADGE: Record<string, string> = {
@@ -16,13 +15,14 @@ export default function BoardPage(props: { projectId: string; refreshKey: number
   const { projectId, refreshKey } = props;
   const [jobs, setJobs] = useState<Job[]>([]);
   const [usage, setUsage] = useState<UsageRow[]>([]);
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [showDispatch, setShowDispatch] = useState(false);
 
   const refresh = useCallback(() => {
-    api<Job[]>(`/api/jobs?project_id=${projectId}&limit=100`).then(setJobs);
+    api<Job[]>(`/api/jobs?project_id=${projectId}&limit=100&include_archived=${includeArchived}`).then(setJobs);
     api<UsageRow[]>(`/api/usage?project_id=${projectId}`).then(setUsage);
-  }, [projectId]);
+  }, [projectId, includeArchived]);
   useEffect(refresh, [refresh, refreshKey]);
 
   const totalCost = usage.reduce((sum, row) => sum + (row.cost_usd ?? 0), 0);
@@ -30,6 +30,9 @@ export default function BoardPage(props: { projectId: string; refreshKey: number
   return (
     <>
       <div className="toolbar">
+        <label className="row"><input type="checkbox" checked={includeArchived}
+          onChange={(e) => setIncludeArchived(e.target.checked)} />
+          {t("board.showArchived")}</label>
         <span className="cost">Σ ${totalCost.toFixed(4)}</span>
         {props.canOperate && (
           <button onClick={() => setShowDispatch(true)}>{t("board.dispatch")}</button>
@@ -78,7 +81,7 @@ function Board({ jobs, onSelect }: { jobs: Job[]; onSelect: (id: string) => void
                     onClick={() => onSelect(job.id)}>
               {/* the title is what identifies work to a human; the id is
                   plumbing, so it goes underneath */}
-              <div className="card-title">{STATUS_BADGE[job.status] ?? "⚪"} {job.title}</div>
+              <div className="card-title">{job.archived ? "📦 " : ""}{STATUS_BADGE[job.status] ?? "⚪"} {job.title}</div>
               <div className="card-meta">{t(`board.status.${job.status}`,
                                             undefined, job.status)}
                 {job.template_id ? ` · ${job.template_id}` : ""}
@@ -476,18 +479,10 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
       {canOperate && (job.status === "cancelled" || job.status === "done") && (
         <div className="row job-removal">
           <button className="ghost" onClick={async () => {
-            await post(`/api/jobs/${jobId}/archive`, { archived: true });
+            await post(`/api/jobs/${jobId}/archive`, { archived: !job.archived });
             onChanged();
             onClose();
-          }}>{t("board.archive")}</button>
-          <button className="ghost danger-text" onClick={async () => {
-            if (!window.confirm(t("board.deleteConfirm"))) return;
-            try {
-              await del(`/api/jobs/${jobId}`);
-              onChanged();
-              onClose();
-            } catch (e) { window.alert(String((e as Error).message)); }
-          }}>{t("board.deleteCard")}</button>
+          }}>{t(job.archived ? "board.unarchive" : "board.archive")}</button>
           <span className="muted">{t("board.removalHint")}</span>
         </div>
       )}

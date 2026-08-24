@@ -1,8 +1,7 @@
-"""Getting a finished card off the board — without quietly losing the accounting.
+"""Getting a finished card off the board without losing operational history.
 
-Two operations on purpose: archive hides a card and keeps everything, delete
-removes it for good and is refused when the job spent money, because a system
-that reports cost must not let spend evaporate on a click.
+Archive and the compatibility DELETE endpoint are both reversible. Jobs, runs,
+task-plan links and accounting must survive every board-removal operation.
 """
 
 import pytest
@@ -77,41 +76,39 @@ async def test_a_running_card_cannot_be_archived(job):
 
 # ---- delete ----------------------------------------------------------------------
 
-async def test_deleting_a_cancelled_card_removes_it_and_its_runs(job):
+async def test_deleting_a_cancelled_card_archives_it_and_keeps_history(job):
     orch, db = job
     lifecycle.save_task_plan(db, "proj1", [
         {"title": "PM 規劃的事", "spec": "s", "job_id": "j1"}], by="pm", confirmed=True)
 
     out = orch.delete_job("j1", actor="u")
-    assert out == {"deleted": "j1", "runs": 1, "plan": "unlinked"}
-    assert db.one("SELECT * FROM jobs WHERE id='j1'") is None
-    assert db.one("SELECT COUNT(*) AS n FROM runs WHERE job_id='j1'")["n"] == 0
-    # the PM's task survives, back to "not dispatched" — it still needs doing
+    assert out == {"deleted": "j1", "archived": True,
+                   "recoverable": True, "runs": 1}
+    assert db.one("SELECT archived FROM jobs WHERE id='j1'")["archived"] == 1
+    assert db.one("SELECT COUNT(*) AS n FROM runs WHERE job_id='j1'")["n"] == 1
+    # The task-plan link survives too, so unarchive restores the same card.
     tasks = lifecycle.task_plan(db, "proj1")["tasks"]
-    assert len(tasks) == 1 and "job_id" not in tasks[0]
+    assert len(tasks) == 1 and tasks[0]["job_id"] == "j1"
     assert db.query("SELECT * FROM audit_log WHERE action='job.delete'")
 
 
-async def test_deleting_a_card_the_dispatch_created_removes_its_plan_row(job):
+async def test_deleting_a_card_the_dispatch_created_keeps_its_plan_row(job):
     orch, db = job
     lifecycle.save_task_plan(db, "proj1", [
         {"title": "一次失敗的嘗試", "spec": "s", "job_id": "j1", "origin": "chat"}],
         by="pm", confirmed=True)
-    assert orch.delete_job("j1")["plan"] == "row_removed"
-    assert lifecycle.task_plan(db, "proj1")["tasks"] == []
+    assert orch.delete_job("j1")["recoverable"] is True
+    assert lifecycle.task_plan(db, "proj1")["tasks"][0]["job_id"] == "j1"
 
 
-async def test_delete_is_refused_when_the_job_spent_money(job):
-    """Accounting integrity beats tidiness: archive exists for this case."""
+async def test_delete_with_spend_is_recoverable_and_keeps_accounting(job):
     orch, db = job
     db.write("INSERT INTO usage_ledger(id, run_id, resource_id, model, tokens_in, "
              "tokens_out, cost_usd, at) VALUES('u1','r1','res1','m',10,5,0.42,?)",
              (now(),))
-    with pytest.raises(ValueError, match="封存"):
-        orch.delete_job("j1")
-    assert db.one("SELECT * FROM jobs WHERE id='j1'") is not None
-    orch.archive_job("j1", True)                      # the offered alternative works
+    assert orch.delete_job("j1")["recoverable"] is True
     assert db.one("SELECT archived FROM jobs WHERE id='j1'")["archived"] == 1
+    assert db.one("SELECT COUNT(*) AS n FROM usage_ledger")["n"] == 1
 
 
 async def test_a_running_card_cannot_be_deleted(job):
@@ -121,8 +118,8 @@ async def test_a_running_card_cannot_be_deleted(job):
         orch.delete_job("j1")
 
 
-async def test_deleting_the_last_job_re_evaluates_the_project(orch, seeded):
-    """A project left 'running' by a card that no longer exists would be lying."""
+async def test_deleting_the_last_job_keeps_project_history(orch, seeded):
+    """Removing the last visible card must not erase project progress."""
     seeded.write("DELETE FROM runs")
     seeded.write("DELETE FROM jobs")
     lifecycle.save_task_plan(seeded, "proj1", [{"title": "只有這件事", "spec": "s"}],
@@ -132,4 +129,6 @@ async def test_deleting_the_last_job_re_evaluates_the_project(orch, seeded):
     await orch.wait_idle()
     seeded.write("UPDATE jobs SET status='cancelled' WHERE id=?", (job_id,))
     orch.delete_job(job_id, actor="u")
-    assert lifecycle.job_progress(seeded, "proj1")["total"] == 0
+    progress = lifecycle.job_progress(seeded, "proj1")
+    assert progress["total"] == 1
+    assert progress["cancelled"] == 1

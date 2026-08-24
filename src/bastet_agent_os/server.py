@@ -2140,8 +2140,11 @@ def create_app(home: Home) -> FastAPI:
 
     @app.delete("/api/jobs/{job_id}")
     async def delete_job(job_id: str, auth: Auth = Depends(require_role("operator"))):
-        """Remove a finished card for good. Refused when it spent anything —
-        archive keeps the accounting honest instead."""
+        """Recoverably remove a finished card from the board.
+
+        Kept as DELETE for client compatibility; the record and all history are
+        retained as archived and can be restored with the archive endpoint.
+        """
         try:
             return orch.delete_job(job_id, actor=auth.actor)
         except ValueError as exc:

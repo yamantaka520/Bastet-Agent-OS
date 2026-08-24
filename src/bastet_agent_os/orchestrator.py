@@ -224,46 +224,30 @@ class Orchestrator:
         return {"job_id": job_id, "archived": archived}
 
     def delete_job(self, job_id: str, actor: str = "user") -> dict:
-        """Remove a card and its runs for good.
+        """Hide a finished card without destroying its history.
 
-        Refused when the job spent anything: usage rows hang off its runs, and
-        deleting them would quietly reduce reported spend in a system whose whole
-        point is honest accounting. Archive those instead. The audit log keeps a
-        record of the deletion either way."""
+        This method deliberately keeps the old name for API compatibility. A
+        card is operational history, so deletion must be recoverable: the job,
+        runs, gates, handoffs, accounting and task-plan link remain in place.
+        """
         job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if job is None:
             raise ValueError("job not found")
         if job["status"] not in ("done", "cancelled"):
             raise ValueError(f"只能刪除已結束的任務（目前 {job['status']}）— "
                              f"進行中的請先停止")
-        spend = self.db.one(
-            "SELECT COUNT(*) AS rows, COALESCE(SUM(cost_usd), 0) AS cost "
-            "FROM usage_ledger WHERE run_id IN (SELECT id FROM runs WHERE job_id=?)",
-            (job_id,))
-        if spend["rows"]:
-            raise ValueError(
-                f"這個任務有 {spend['rows']} 筆用量紀錄（${spend['cost']:.4f}），"
-                f"刪除會讓帳目對不上 — 請改用封存")
-        runs = [r["id"] for r in
-                self.db.query("SELECT id FROM runs WHERE job_id=?", (job_id,))]
-        for table in ("run_interactions", "gate_results", "run_tokens",
-                      "test_evidence", "stage_handoffs"):
-            for run_id in runs:
-                self.db.write(f"DELETE FROM {table} WHERE run_id=?", (run_id,))
-        self.db.write("DELETE FROM runs WHERE job_id=?", (job_id,))
-        self.db.write("DELETE FROM job_deps WHERE job_id=? OR depends_on_job_id=?",
-                      (job_id, job_id))
-        self.cleanup_worktree(job_id)
-        self.db.write("DELETE FROM jobs WHERE id=?", (job_id,))
-        from . import project_lifecycle as lifecycle
-        unlinked = lifecycle.unlink_job(self.db, job["project_id"], job_id)
+        runs = self.db.one("SELECT COUNT(*) AS n FROM runs WHERE job_id=?", (job_id,))
+        self.db.write("UPDATE jobs SET archived=1, updated_at=? WHERE id=?",
+                      (now(), job_id))
         self.db.audit(actor, "job.delete", "job", job_id,
                       {"title": job["title"], "status": job["status"],
-                       "stage": job["stage"], "runs": len(runs),
-                       "plan": unlinked})
-        self._emit("job.deleted", job["project_id"], job_id=job_id)
+                       "stage": job["stage"], "runs": runs["n"],
+                       "mode": "soft", "recoverable": True})
+        self._emit("job.archived", job["project_id"], job_id=job_id,
+                   archived=True, source="delete")
         self._sync_project(job["project_id"])
-        return {"deleted": job_id, "runs": len(runs), "plan": unlinked}
+        return {"deleted": job_id, "archived": True, "recoverable": True,
+                "runs": runs["n"]}
 
     def resume_interrupted_jobs(self, actor: str = "server") -> dict:
         """Re-drive jobs whose driver died with the process.

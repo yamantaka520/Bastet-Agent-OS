@@ -5,6 +5,7 @@ export type Job = {
   title: string;
   stage: string;
   status: string;
+  archived: number;
   stages_snapshot_json: string;
   rework_count?: number;         // how many times a gate sent this card back
   // liveness (in_progress only): the latest run's last words and when

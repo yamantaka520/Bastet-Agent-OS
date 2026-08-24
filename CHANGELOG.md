@@ -8,6 +8,16 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.33.1] - 2026-08-24
+
+### Fixed
+
+- Removing a finished task card is now always recoverable: the compatibility
+  DELETE endpoint archives it while retaining runs, gates, handoffs, usage and
+  its task-plan link. The board no longer offers permanent deletion and can
+  show and restore archived cards. This prevents project history from silently
+  disappearing through a board action.
+
 ## [0.33.0] - 2026-08-24
 
 ### Added
