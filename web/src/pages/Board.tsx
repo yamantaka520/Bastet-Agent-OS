@@ -224,6 +224,7 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   const [retryAgent, setRetryAgent] = useState("");
   const [retrySpec, setRetrySpec] = useState<string | null>(null);
   const [refreshWorkflow, setRefreshWorkflow] = useState(true);
+  const [renewRecoveryLease, setRenewRecoveryLease] = useState(false);
 
   const load = useCallback(() => {
     api<JobDetail>(`/api/jobs/${jobId}`).then(async (j) => {
@@ -312,15 +313,17 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   const failure = job.runs.slice().reverse()
     .map((r) => r.error).find((e) => e && e.trim()) || "";
 
-  // one action, because they are one intent: the ruling only helps if the
-  // card runs again, and a human retry is also what refreshes the budgets
+  // One action because the ruling only helps if the card runs again. Always
+  // adopt the current execution contract; a ruling does not silently reopen
+  // spent recovery budgets.
   const ruleAndRetry = async () => {
     setRulingError("");
     try {
       await post(`/api/jobs/${jobId}/supplies`,
                  { name: "human-ruling", content: rulingText });
       await post(`/api/jobs/${jobId}/retry`, { agent_id: "", spec: "",
-                                               refresh_workflow: false });
+                                               refresh_workflow: true,
+                                               renew_recovery_lease: false });
       setRulingText("");
       onChanged();
       load();
@@ -331,7 +334,8 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
     await post(`/api/jobs/${jobId}/retry`, {
       agent_id: retryAgent,
       spec: retrySpec ?? "",                    // blank = keep the current spec
-      refresh_workflow: refreshWorkflow });
+      refresh_workflow: refreshWorkflow,
+      renew_recovery_lease: renewRecoveryLease });
     setRetrySpec(null);
     onChanged();
     load();
@@ -398,6 +402,11 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
               <input type="checkbox" checked={refreshWorkflow}
                      onChange={(e) => setRefreshWorkflow(e.target.checked)} />
               {t("board.retryRefresh")}
+            </label>
+            <label className="chk">
+              <input type="checkbox" checked={renewRecoveryLease}
+                     onChange={(e) => setRenewRecoveryLease(e.target.checked)} />
+              {t("board.retryRenewLease")}
             </label>
             <button onClick={retry}>{t("board.retry")}</button>
           </div>

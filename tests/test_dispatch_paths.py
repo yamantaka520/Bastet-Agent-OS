@@ -361,3 +361,48 @@ async def test_retry_picks_up_an_edited_template_not_just_a_swapped_one(orch, se
                                      (job_id,))["stages_snapshot_json"])
     assert snapshot[0]["gate_config"]["command"] == "exit 0"
     assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+
+
+async def test_retry_refuses_a_stale_compatible_execution_contract(orch, seeded):
+    """Opting out of refresh must not bypass a newly deployed capability path."""
+    add_template(seeded, "web", [{"name": "review", "gate": "agent-review",
+                                   "read_only": True, "on_fail": "block"}])
+    seeded.write("UPDATE projects SET default_template_id='web' WHERE id='proj1'")
+    SCRIPT.append(RunResult(status="failed", summary="old environment"))
+    job_id = orch.dispatch(req(template_id="web"))
+    await orch.wait_idle()
+
+    seeded.write("INSERT OR REPLACE INTO workflow_templates(id,name,version,stages_json) "
+                 "VALUES('web','web',2,?)", (json.dumps([{
+                     "name": "review", "gate": "agent-review", "read_only": True,
+                     "on_fail": "block", "requires": ["browser.playwright"],
+                     "gate_config": {"precheck_command": "exit 0"},
+                 }]),))
+
+    with pytest.raises(ValueError, match="refresh_workflow=true"):
+        orch.retry(job_id, refresh_workflow=False)
+    job = seeded.one("SELECT status,stages_snapshot_json FROM jobs WHERE id=?", (job_id,))
+    assert job["status"] == "blocked"
+    assert "browser.playwright" not in job["stages_snapshot_json"]
+
+
+async def test_retry_renews_recovery_budget_only_when_explicit(orch, seeded):
+    add_template(seeded, "dev", [{"name": "work", "gate": "auto"}])
+    SCRIPT.append(RunResult(status="failed", summary="boom"))
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+    seeded.write("UPDATE jobs SET rework_count=3 WHERE id=?", (job_id,))
+
+    SCRIPT.append(RunResult(status="failed", summary="still broken"))
+    out = orch.retry(job_id)
+    assert out["recovery_lease_renewed"] is False
+    await orch.wait_idle()
+    assert seeded.one("SELECT rework_count FROM jobs WHERE id=?", (job_id,))[
+        "rework_count"] == 3
+
+    SCRIPT.append(RunResult(status="succeeded", summary="fixed"))
+    out = orch.retry(job_id, renew_recovery_lease=True)
+    assert out["recovery_lease_renewed"] is True
+    await orch.wait_idle()
+    assert seeded.one("SELECT rework_count FROM jobs WHERE id=?", (job_id,))[
+        "rework_count"] == 0

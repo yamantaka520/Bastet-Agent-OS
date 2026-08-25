@@ -4,7 +4,7 @@ Last updated: 2026-08-25
 
 ## Current project status
 
-- Released: **v0.34.0**. Version arc v0.1.0 → v0.34.0 in under four weeks
+- Released: **v0.34.1**. Version arc v0.1.0 → v0.34.1 in under four weeks
   (2026-07-28 → 2026-08-22), ~125 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.
@@ -20,8 +20,9 @@ Last updated: 2026-08-25
   1. **PM-level supervision** (0.25.0): a card blocked for a *business* reason
      is diagnosed by the project's PM agent, which retries, hands the stage
      over, files a ruling into the job inbox, or escalates with an answerable
-     question. Two audit-counted interventions per episode; a human retry is a
-     fresh lease; human gates and quota waits are never touched.
+     question. Two audit-counted interventions per episode; only an explicit
+     recovery-lease renewal reopens the budget; human gates and quota waits are
+     never touched.
   2. **A depleted agent leaves the rotation** (0.26.0/0.26.1): a vendor's
      `402 … balance exhausted` marks the agent, and every routing path skips
      it — otherwise the router kept re-dispatching a dead agent and undoing the
@@ -38,7 +39,7 @@ Last updated: 2026-08-25
   6. **Interrupt the dead, not the merely quiet** (0.30.0): liveness decides
      interruption, so a 20-minute test is no longer executed at the 15-minute
      silence mark.
-- Test suite: **518 passing**, `ruff` clean; CI green on Linux/macOS and
+- Test suite: **520 passing**, `ruff` clean; CI green on Linux/macOS and
   inside the shipped Docker base image (Windows legs are declarative).
 - Releases are automated: a `v*` tag publishes to PyPI (Trusted Publishing) and
   pushes the multi-arch image to Docker Hub.

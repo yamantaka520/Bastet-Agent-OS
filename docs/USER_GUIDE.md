@@ -342,8 +342,9 @@ A crash or timeout blocks the card after the stage's `max_retries`. A vendor
 **quota / rate limit** does not: the card parks with the reset time parsed from
 the vendor's own message (`resets 1:30am (Asia/Taipei)` included) or a
 30-minute backoff, and retries itself — the Telegram message says 「會自己續跑
-—— 不需要你做什麼」. **Retry semantics**: a manual retry refills the rework
-budget and clears any quota timer; picking a different agent on retry is a
+—— 不需要你做什麼」. **Retry semantics**: a manual retry preserves the bounded
+rework/PM circuit breaker unless you explicitly renew the recovery lease; it
+still clears any quota timer. Picking a different agent on retry is a
 one-shot override that outranks the role mapping for that stage only; the
 workflow-refresh checkbox picks up in-place template edits.
 

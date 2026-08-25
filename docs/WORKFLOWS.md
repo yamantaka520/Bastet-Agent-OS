@@ -19,7 +19,7 @@ dispatch ──► stage 1 ──gate──► stage 2 ──gate──► … �
                 │
                 │ cycles exhausted / on_fail: block / nothing writable
                 ▼
-             blocked (a person decides; retry refills the loop)
+             blocked (a person decides; lease renewal reopens the loop)
 ```
 
 A job snapshots its template's stages at dispatch, so editing the template never
@@ -113,7 +113,7 @@ if the same gate keeps failing: the failing stage first (an implementer whose
 own tests fail should fix them), then the nearest earlier writable stage,
 skipping read-only reviewers, clamping at the earliest writable stage. An
 explicit `rework_target` overrides the walk entirely. Counted per stage per
-episode, so a human retry starts the walk over.
+episode. A human must explicitly renew the recovery lease to start the walk over.
 
 Standing still does not converge: with the target pinned to the failing stage,
 a live E2E gate sent the same failing test back to the tester nine times across
@@ -139,7 +139,8 @@ spent, an acceptance dispute, a missing ruling — is handed to the project's `p
 agent, which reads the spec, the gate output, the rework note and the run
 history and picks one bounded action: retry, hand the stage to another agent,
 file a ruling into the job's inbox and retry, or escalate. Hard limits: two
-audit-counted interventions per episode (a human retry refreshes them, the PM's
+audit-counted interventions per episode (an explicit recovery-lease renewal
+refreshes them, the PM's
 own retries cannot), escalations latch until a human retries, `human-approve`
 gates and quota waits are never touched, and the diagnosis run is read-only.
 Escalation is the last resort — a checkable fact (which commit is the baseline,
@@ -181,9 +182,10 @@ instead of claiming to run.
 | Action | Where | Semantics |
 |---|---|---|
 | **Approve / Reject** | drawer, chat, Telegram | decides a `human-approve` gate. Approving the last stage completes the card — with the same delivery (memory, event, push) as any other completion |
-| **Retry** | drawer, Telegram 🔁 button | re-runs the current stage. **Refills the rework budget** (a human pressing retry after fixing the world is a fresh lease), clears any quota timer, and optionally: |
+| **Retry** | drawer, Telegram 🔁 button | re-runs the current stage without silently reopening bounded recovery budgets, clears any quota timer, and optionally: |
 | — with a different agent | drawer dropdown | a **one-shot override** that outranks the role mapping for the retried stage, then clears — chosen because the mapping once kept handing a retry back to the very agent whose vendor was broken |
 | — with workflow refresh | checkbox (default on) | picks up the template's current version when its stages changed — fixing a stage's test command in place is the most common reason to retry |
+| — with recovery-lease renewal | explicit checkbox (default off) | after the environment/contract was actually repaired, resets the rework counter and opens a new bounded PM diagnosis episode |
 | — with an edited spec | drawer textarea | replaces the card's spec before re-running |
 | **任務補給 (supplies)** | drawer | hand data to a running job: deploy targets, project ids, decisions, rulings. Included in every later run's brief (marked as overriding the spec) and dropped into a live worktree's `._bastet/inbox/`. Credential-shaped content is refused — supplies travel in prompts, credentials travel as env vars |
 | **Pause / Stop** | project card | pause stops the *next* dispatch; stop cancels what is in flight |
@@ -284,7 +286,7 @@ If a card is genuinely stuck, the diagnosis order that has worked in practice:
 | ⏸ waiting for human approval | the designed stop | approve/reject (previews attached) |
 | ⏳ 額度用盡，會自己續跑 | vendor quota; timer set from the vendor's own message | nothing — or retry to beat the clock |
 | 🔧 自動返工 n 次 (in progress) | the loop is fixing a failed gate | nothing; it reports if it cannot converge |
-| 🟠 blocked: 已返工 N 次仍未通過 | the loop did not converge | read the gate output; fix the cause (or the criterion); retry refills the loop |
+| 🟠 blocked: 已返工 N 次仍未通過 | the loop did not converge | read the gate output; fix the cause, then explicitly renew the recovery lease if a new loop is justified |
 | 🟠 blocked: 設定問題 | a gate command cannot run in this repo | fix the template's command (retry offers workflow refresh) or supply the missing dependency |
 | 🟠 blocked: execution failed/timeout | the executor died | check the error; consider `timeout_s` on the stage; retry (optionally with another agent) |
 | 🟠 blocked: 服務重啟時中斷… | project was paused/closed during a restart | resume the project, then retry |

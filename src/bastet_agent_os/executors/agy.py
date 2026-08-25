@@ -9,9 +9,10 @@ Interface facts (surveyed against the local 1.0.12 binary + embedded docs):
   path is impossible — assigning an LLM resource is refused honestly
 - workdir = process cwd (this version has no --cwd); the workspace must be
   in settings.json trustedWorkspaces or agy exits with an auth-style error
-- review runs: without --dangerously-skip-permissions headless tools are
-  soft-denied (a de-facto read-only run — the diff travels in the prompt),
-  and --json-schema forces the schema-enforced verdict
+- read-only runs use plan mode + the CLI terminal sandbox. Tool approvals are
+  auto-answered inside that boundary because headless mode cannot prompt; this
+  lets PM/review tasks read context without granting edits or host shell access
+- --json-schema forces the schema-enforced verdict on actual review gates
 - exit codes: 0 ok, 1 runtime error (envelope still printed), 2 bad flags
 """
 
@@ -129,7 +130,14 @@ class AgyExecutor:
             # review gates only — binding this schema to every read-only run
             # once left the PM decomposer able to answer nothing but a verdict
             cmd += ["--json-schema", json.dumps(VERDICT_SCHEMA)]
-        if not task.read_only:
+        if task.read_only:
+            # Default headless plan mode still asks permission for `ls` and then
+            # auto-denies it, producing no PM diagnosis. Plan mode preserves the
+            # no-edit contract; --sandbox constrains terminal access; approval
+            # only removes the impossible TTY prompt inside those boundaries.
+            cmd += ["--mode", "plan", "--sandbox", "--add-dir", task.workdir,
+                    "--dangerously-skip-permissions"]
+        else:
             cmd += ["--dangerously-skip-permissions"]
         if task.llm and task.llm.get("model"):
             cmd += ["--model", task.llm["model"]]
@@ -268,4 +276,3 @@ class AgyExecutor:
                       else "reported",
             structured_verdict=verdict,
         )
-

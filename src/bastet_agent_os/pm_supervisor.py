@@ -132,15 +132,17 @@ def _infrastructure_fallback(db, job_id: str) -> dict[str, str] | None:
 
 
 def _last_human_retry_id(db, job_id: str) -> int:
-    """The audit id of the most recent HUMAN retry — automation excluded.
+    """The audit id of the most recent human-renewed recovery lease.
 
     The PM's own retries (user:pm-supervisor:*), the infra supervisor's
     (user:supervisor) and quota auto-resumes (user:server:*) must not anchor
-    the budget window, or the PM would refresh its own allowance by retrying."""
+    the budget window, or the PM would refresh its own allowance by retrying.
+    Legacy audit rows predate the explicit field and keep their old semantics."""
     row = db.one(
         "SELECT MAX(id) AS i FROM audit_log WHERE action='job.retry' "
         "AND target_id=? AND actor NOT LIKE 'user:pm-supervisor:%' "
-        "AND actor NOT LIKE 'user:server:%' AND actor <> 'user:supervisor'",
+        "AND actor NOT LIKE 'user:server:%' AND actor <> 'user:supervisor' "
+        "AND COALESCE(json_extract(detail_json, '$.recovery_lease_renewed'), 1)=1",
         (job_id,))
     return int(row["i"] or 0) if row else 0
 
@@ -148,10 +150,8 @@ def _last_human_retry_id(db, job_id: str) -> int:
 def intervention_count(db, job_id: str) -> int:
     """Interventions spent in the current episode, not over the job's life.
 
-    A human retry is a fresh lease — the same rule the rework budget follows.
-    The person fixed the environment or supplied what was missing; refusing to
-    let the PM help again because it tried twice *before* the fix would leave
-    exactly the stalls this layer exists to absorb."""
+    Only an explicitly renewed human retry opens a fresh lease. Merely pressing
+    retry must not erase the circuit breaker that stopped an unchanged loop."""
     row = db.one("SELECT COUNT(*) AS n FROM audit_log WHERE "
                  "action='job.pm_intervention' AND target_type='job' AND target_id=? "
                  "AND id > ?",

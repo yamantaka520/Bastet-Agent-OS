@@ -375,7 +375,7 @@ async def test_a_human_retry_refills_the_rework_budget(orch, seeded):
     SCRIPT.append(RunResult(status="succeeded", summary="v3 real assets this time"))
     SCRIPT.append(RunResult(status="succeeded", summary="ok",
                             structured_verdict={"verdict": "approve"}))
-    orch.retry(job_id)
+    orch.retry(job_id, renew_recovery_lease=True)
     await orch.wait_idle()
 
     job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))

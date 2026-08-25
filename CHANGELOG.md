@@ -8,6 +8,23 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.1] - 2026-08-25
+
+### Fixed
+
+- PM "ruling and retry" now adopts the project's current workflow instead of
+  replaying a stale card snapshot. A compatible changed workflow cannot be
+  bypassed with `refresh_workflow=false`, so newly deployed execution
+  capabilities and host prechecks apply to existing cards.
+- Retrying and reopening bounded rework/PM recovery budgets are separate
+  operator decisions. A plain retry preserves the circuit breaker; the WebUI
+  exposes an explicit recovery-lease checkbox when the environment truly was
+  repaired.
+- Agy read-only and PM diagnosis runs now use plan mode plus the terminal
+  sandbox, auto-answer headless permission prompts inside that boundary, and
+  add the job worktree as a readable directory. PM diagnosis can inspect the
+  project without gaining edit or unrestricted host-shell access.
+
 ## [0.34.0] - 2026-08-25
 
 ### Added

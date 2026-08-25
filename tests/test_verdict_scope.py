@@ -72,7 +72,9 @@ async def test_codex_review_is_schema_bound(tmp_path, monkeypatch):
 async def test_agy_decomposition_is_not_schema_bound(tmp_path, monkeypatch):
     argv = await _argv_of(AgyExecutor(), _plan_spec(tmp_path), monkeypatch)
     assert "--json-schema" not in argv
-    assert "--dangerously-skip-permissions" not in argv   # still soft-denied
+    assert "--mode" in argv and "plan" in argv and "--sandbox" in argv
+    assert "--add-dir" in argv and str(tmp_path) in argv
+    assert "--dangerously-skip-permissions" in argv
 
 
 async def test_grok_decomposition_keeps_read_only_tools_without_schema(tmp_path, monkeypatch):
@@ -93,8 +95,8 @@ def test_codex_start_source_keys_schema_on_expect_verdict():
 def test_agy_start_source_keys_schema_on_expect_verdict():
     source = inspect.getsource(AgyExecutor.start)
     assert "if task.expect_verdict:" in source
-    assert "if not task.read_only:" in source, \
-        "agy's soft-deny (skip-permissions withheld) must stay keyed on read_only"
+    assert "if task.read_only:" in source
+    assert '"--mode", "plan", "--sandbox", "--add-dir", task.workdir' in source
 
 
 def test_grok_start_source_splits_tools_from_schema():

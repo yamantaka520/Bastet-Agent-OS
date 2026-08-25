@@ -278,7 +278,7 @@ async def test_sweep_diagnoses_and_caps(orch, seeded):
 
 
 @pytest.mark.asyncio
-async def test_escalate_latches_until_a_human_retries(orch, seeded):
+async def test_escalate_latches_until_a_human_renews_the_recovery_lease(orch, seeded):
     _make_pm(seeded)
     _block_business(seeded)
     SCRIPT.append(_decision(action="escalate", reason="需要真機證據，機器給不了"))
@@ -293,10 +293,14 @@ async def test_escalate_latches_until_a_human_retries(orch, seeded):
     await orch.wait_idle()
     assert pm_supervisor.intervention_count(seeded, "job1") == 1
 
-    # a human retry starts a new episode: the latch clears AND the budget
-    # refreshes — the same "a human retry is a fresh lease" rule the rework
-    # budget follows
-    seeded.audit("user:root", "job.retry", "job", "job1", {})
+    # A plain human retry does not silently clear the latch.  Explicitly
+    # renewing the recovery lease starts the new diagnosis episode.
+    seeded.audit("user:root", "job.retry", "job", "job1",
+                 {"recovery_lease_renewed": False})
+    assert pm_supervisor.intervention_count(seeded, "job1") == 1, \
+        "a plain human retry silently reopened the PM circuit breaker"
+    seeded.audit("user:root", "job.retry", "job", "job1",
+                 {"recovery_lease_renewed": True})
     assert pm_supervisor.intervention_count(seeded, "job1") == 0
     SCRIPT.append(_decision(action="retry", reason="人已補了真機影片"))
     orch.retry = lambda *a, **kw: {}
@@ -319,7 +323,12 @@ async def test_the_pm_cannot_refresh_its_own_budget(orch, seeded):
         seeded.audit(actor, "job.retry", "job", "job1", {})
     assert pm_supervisor.intervention_count(seeded, "job1") == 3, \
         "an automated retry silently opened a fresh PM budget"
-    seeded.audit("user:root", "job.retry", "job", "job1", {})
+    seeded.audit("user:root", "job.retry", "job", "job1",
+                 {"recovery_lease_renewed": False})
+    assert pm_supervisor.intervention_count(seeded, "job1") == 3, \
+        "a plain human retry silently reopened the PM circuit breaker"
+    seeded.audit("user:root", "job.retry", "job", "job1",
+                 {"recovery_lease_renewed": True})
     assert pm_supervisor.intervention_count(seeded, "job1") == 0
 
 

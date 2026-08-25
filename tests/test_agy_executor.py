@@ -73,7 +73,7 @@ async def test_error_envelope_fails_even_with_rc0(fake_agy, tmp_path):
     assert result.status == "failed" and "trustedWorkspaces" in result.summary
 
 
-async def test_review_soft_denied_tools_and_schema_verdict(fake_agy, tmp_path):
+async def test_review_uses_plan_sandbox_and_schema_verdict(fake_agy, tmp_path):
     set_envelope, log = fake_agy
     set_envelope({"status": "SUCCESS",
                   "response": json.dumps({"verdict": "reject", "reasons": ["risky"]}),
@@ -82,7 +82,9 @@ async def test_review_soft_denied_tools_and_schema_verdict(fake_agy, tmp_path):
     assert result.structured_verdict == {"verdict": "reject", "reasons": ["risky"]}
     args = log.read_text()
     assert "--json-schema" in args
-    assert "--dangerously-skip-permissions" not in args  # tools stay soft-denied
+    assert "--mode plan" in args and "--sandbox" in args
+    assert f"--add-dir {tmp_path}" in args or "--add-dir /private" in args
+    assert "--dangerously-skip-permissions" in args
 
 
 async def test_gateway_path_is_refused(tmp_path):

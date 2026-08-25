@@ -205,6 +205,8 @@ class RetryIn(BaseModel):
     agent_id: str = ""             # blank = the same agent that failed
     spec: str = ""                 # blank = keep the current spec
     refresh_workflow: bool = True  # re-snapshot the project's current template
+    # Retrying and reopening bounded recovery budgets are separate decisions.
+    renew_recovery_lease: bool = False
 
 
 class ApproveIn(BaseModel):
@@ -2133,7 +2135,8 @@ def create_app(home: Home) -> FastAPI:
         try:
             return orch.retry(job_id, agent_id=body.agent_id, user=auth.name,
                               spec=body.spec,
-                              refresh_workflow=body.refresh_workflow)
+                              refresh_workflow=body.refresh_workflow,
+                              renew_recovery_lease=body.renew_recovery_lease)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
