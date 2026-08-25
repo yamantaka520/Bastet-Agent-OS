@@ -86,6 +86,10 @@ class StageDef:
     # because a heavy stage (a 50-70 min Three.js optimisation pass, live) kept
     # hitting the fixed 3600s and losing an hour of work to the kill.
     timeout_s: int = 0
+    # Capabilities the CONTROL PLANE must provide before an Agent attempt is
+    # allowed to start.  This is intentionally not a promise about a CLI
+    # sandbox: browser gates run through Bastet's trusted host process.
+    requires: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -94,6 +98,7 @@ class StageDef:
             "isolation": self.isolation, "max_retries": self.max_retries,
             "on_fail": self.on_fail, "rework_target": self.rework_target,
             "max_cycles": self.max_cycles, "timeout_s": self.timeout_s,
+            "requires": self.requires,
         }
 
 
@@ -116,6 +121,10 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
         on_fail = item.get("on_fail", "rework")
         if on_fail not in ON_FAIL:
             raise ValueError(f"stage {name!r}: on_fail must be one of {sorted(ON_FAIL)}")
+        requires = item.get("requires") or []
+        if not isinstance(requires, list) or any(
+                not isinstance(cap, str) or not cap.strip() for cap in requires):
+            raise ValueError(f"stage {name!r}: requires must be a list of capability ids")
         stages.append(StageDef(
             name=name,
             role=item.get("role"),
@@ -128,6 +137,7 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
             rework_target=item.get("rework_target") or "",
             max_cycles=int(item.get("max_cycles", DEFAULT_MAX_CYCLES)),
             timeout_s=max(0, int(item.get("timeout_s", 0) or 0)),
+            requires=list(dict.fromkeys(cap.strip() for cap in requires)),
         ))
     names = {s.name for s in stages}
     for stage in stages:
@@ -229,6 +239,9 @@ class GateOutcome:
     # attempts on it — and the operator must be sent to the template, not the
     # agent's output.
     config_error: bool = False
+    # Stable machine classification. Infrastructure/capability failures are
+    # blocked and supplied by the control plane; they never enter rework.
+    failure_kind: str = ""
 
 
 def clear_verdict(workdir: str) -> None:
@@ -294,6 +307,8 @@ def evaluate_gate(stage: StageDef, workdir: str,
         # assertion; keep enough that the failure is visible without the log.
         output = proc.stdout + proc.stderr
         tail = output[-OUTPUT_TAIL:]
+        from .execution_capabilities import classify_failure
+        failure_kind = classify_failure(output)
         # TAP and other streaming runners can report the actual failure long
         # before their final summary. A tail-only record hid the one `not ok`
         # line in a 457-test suite and left operators staring at passing tests.
@@ -303,6 +318,12 @@ def evaluate_gate(stage: StageDef, workdir: str,
             tail = "Failure summary:\n" + "\n".join(failure_lines[-20:]) + "\n…\n" + tail
         if proc.returncode == 0:
             return GateOutcome("passed", tail)
+        if failure_kind:
+            return GateOutcome(
+                "failed",
+                "Bastet 的可信任主機 runner 無法提供工作流要求的瀏覽器能力。"
+                "這是執行能力故障，不是產品驗收失敗，也不會消耗返工額度。\n"
+                f"{tail}", failure_kind=failure_kind)
         if _command_unavailable(proc.returncode, tail):
             return GateOutcome(
                 "failed",

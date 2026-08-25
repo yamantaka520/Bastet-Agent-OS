@@ -69,18 +69,21 @@ PRESETS = [
     {
         "id": "web-dev",
         "name": "網頁開發",
-        "description": "以頁面為單位的網站開發：版型 → 實作 → 無障礙/響應式檢查 → "
-                       "E2E → 上線核准。",
+        "description": "以頁面為單位的網站開發：版型 → 實作 → 可信任瀏覽器取證 → "
+                       "無障礙/響應式審查 → 上線核准。",
         "stages": [
             {"name": "需求與版型", "role": "designer", "gate": "human-approve",
              "desc": "確認頁面結構與視覺方向"},
             {"name": "頁面實作", "role": "frontend-engineer", "gate": "auto",
              "max_retries": 1, "timeout_s": 7200, "desc": "切版與互動邏輯"},
             {"name": "響應式與無障礙檢查", "role": "reviewer", "gate": "agent-review",
+             "gate_config": {"precheck_command": "npm run test:e2e"},
+             "requires": ["browser.playwright"],
              "read_only": True, "rework_target": "頁面實作",
-             "desc": "檢視 RWD 斷點、對比、鍵盤操作與語意標籤"},
+             "desc": "Bastet 先在 sandbox 外跑 E2E，再交證據審查 RWD、無障礙與語意"},
             {"name": "E2E 測試", "role": "tester", "gate": "tests-pass",
              "gate_config": {"command": "npm run test:e2e"},
+             "requires": ["browser.playwright"],
              "rework_target": "頁面實作",
              "desc": "瀏覽器流程自動化測試"},
             {"name": "上線核准", "role": "pm", "gate": "human-approve",

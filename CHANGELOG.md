@@ -8,6 +8,29 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.0] - 2026-08-25
+
+### Added
+
+- Workflow stages can declare execution `requires`, beginning with
+  `browser.playwright`. Bastet performs a real Chromium launch-and-render
+  preflight through its host runner before starting an Agent and exposes live
+  execution-capability health through the API.
+- Agent-review stages can declare an operator-controlled
+  `gate_config.precheck_command`. Bastet executes it outside the LLM sandbox
+  and injects the auditable output into the reviewer's context. The Web
+  workflow uses this path for browser E2E evidence.
+
+### Fixed
+
+- Chrome/Playwright sandbox failures (`Crashpad` permission denial, `SIGTRAP`,
+  missing browser executables) are execution-capability outages. They stop
+  identical retries, preserve rework cycles, and post an actionable escalation
+  to the project room.
+- A failed PM diagnosis no longer selects the same broken path indefinitely.
+  The next diagnosis uses another project executor; two transport failures trip
+  a deterministic circuit breaker and publish the escalation in the room.
+
 ## [0.33.4] - 2026-08-25
 
 ### Fixed

@@ -43,6 +43,7 @@ MAX_INTERVENTIONS = 2
 MAX_LIFETIME_INTERVENTIONS = 6
 DIAGNOSIS_TIMEOUT_S = 600
 DIAGNOSIS_RETRY_COOLDOWN_S = 900
+MAX_DIAGNOSIS_TRANSPORT_FAILURES = 2
 ACTIONS = ("retry", "retry_other_agent", "supply_then_retry", "escalate")
 
 DIAGNOSIS_INSTRUCTIONS = """\
@@ -166,6 +167,74 @@ def lifetime_intervention_count(db, job_id: str) -> int:
     return int(row["n"] if row else 0)
 
 
+def diagnosis_failures(db, job_id: str) -> list[dict[str, str]]:
+    """Diagnosis transport failures in this human-controlled episode."""
+    rows = db.query(
+        "SELECT actor,detail_json FROM audit_log WHERE action='job.pm_diagnosis_failed' "
+        "AND target_id=? AND id>? ORDER BY id", (job_id, _last_human_retry_id(db, job_id)))
+    out = []
+    for row in rows:
+        try:
+            detail = json.loads(row["detail_json"] or "{}")
+        except json.JSONDecodeError:
+            detail = {}
+        out.append({"agent_id": row["actor"].removeprefix("pm-supervisor:"),
+                    "status": str(detail.get("status") or ""),
+                    "raw": str(detail.get("raw") or "")})
+    return out
+
+
+def _diagnostic_agent(db, project_id: str, excluded: set[str],
+                      *, allow_deputy: bool = False):
+    """Use another PM first, then a project deputy with a different executor."""
+    placeholders = ",".join("?" for _ in excluded)
+    exclusion = f" AND a.id NOT IN ({placeholders})" if excluded else ""
+    params = (project_id, *sorted(excluded))
+    row = db.one(
+        "SELECT a.* FROM project_agent_roles par JOIN agents a ON a.id=par.agent_id "
+        "WHERE par.project_id=? AND par.role='pm' AND a.enabled=1 "
+        "AND a.depleted_at IS NULL" + exclusion +
+        " ORDER BY par.preference DESC LIMIT 1", params)
+    if row is not None:
+        return row
+    if not allow_deputy:
+        return None
+    return db.one(
+        "SELECT DISTINCT a.* FROM project_agent_roles par JOIN agents a "
+        "ON a.id=par.agent_id WHERE par.project_id=? AND a.enabled=1 "
+        "AND a.depleted_at IS NULL" + exclusion +
+        " ORDER BY par.preference DESC LIMIT 1", params)
+
+
+def _transport_escalation(orch, job, failures: list[dict[str, str]]) -> dict[str, str]:
+    """Latch after two broken diagnosis paths; never silently poll forever."""
+    from . import collaboration
+
+    decision = {
+        "action": "escalate",
+        "reason": ("PM 診斷通道已連續失敗兩次；引擎已停止相同路徑重試。"
+                   "請修復 PM executor 權限，或指派另一個可用 PM。"),
+        "agent_id": "", "supply": "",
+    }
+    db = orch.db
+    cycle = intervention_count(db, job["id"]) + 1
+    db.audit("pm-supervisor:engine", "job.pm_intervention", "job", job["id"],
+             {"cycle": cycle, "max": MAX_INTERVENTIONS, "fallback": True,
+              "decision": decision, "diagnosis_failures": failures[-2:]})
+    collaboration.post(
+        db, job["project_id"], author_type="system", author_id="pm-supervisor",
+        kind="escalation",
+        content=(f"⚠️ PM 無法接管任務「{job['title']}」：兩條診斷執行路徑均失敗。"
+                 "引擎已啟動 circuit breaker，不會繼續每 15 分鐘空轉。\n"
+                 f"需要處理：{decision['reason']}"),
+        meta={"job_id": job["id"], "failures": failures[-2:]})
+    orch._emit("job.pm_intervention", job["project_id"], job_id=job["id"],
+               title=job["title"], stage=job["stage"], action="escalate",
+               reason=decision["reason"], pm="engine", cycle=cycle,
+               max_cycles=MAX_INTERVENTIONS)
+    return decision
+
+
 def _diagnosis_prompt(db, job) -> str:
     gate = db.one(
         "SELECT g.gate_type, g.verdict, g.detail_md FROM gate_results g JOIN runs r "
@@ -209,10 +278,17 @@ async def diagnose(orch, job) -> dict[str, Any]:
     counts as an intervention — a PM that answers garbage twice has had its
     chances, and the card stays for the human)."""
     from .executors.base import TaskSpec, get_executor
-    from .project_runner import pm_agent
-
     db = orch.db
-    agent = pm_agent(db, job["project_id"])
+    failures = diagnosis_failures(db, job["id"])
+    if len(failures) >= MAX_DIAGNOSIS_TRANSPORT_FAILURES:
+        return _transport_escalation(orch, job, failures)
+    agent = _diagnostic_agent(db, job["project_id"],
+                              {failure["agent_id"] for failure in failures},
+                              allow_deputy=bool(failures))
+    # If the project has no alternate, one final attempt on the assigned PM is
+    # allowed; its second failure will trip the deterministic breaker above.
+    if agent is None and failures:
+        agent = _diagnostic_agent(db, job["project_id"], set())
     if agent is None:
         return {"action": "skipped", "reason": "no pm role assigned"}
 
@@ -253,6 +329,15 @@ async def diagnose(orch, job) -> dict[str, Any]:
         db.audit(f"pm-supervisor:{agent['id']}", "job.pm_diagnosis_failed", "job",
                  job["id"], {"status": result.status,
                               "raw": (result.summary or "")[:300]})
+        from . import collaboration
+        collaboration.post(
+            db, job["project_id"], author_type="system", author_id="pm-supervisor",
+            kind="warning",
+            content=(f"PM 診斷任務「{job['title']}」失敗（{agent['id']} / "
+                     f"{agent['executor_type']}）。本次不消耗介入額度；下一輪將改用"
+                     "其他專案成員／executor，若再失敗即由引擎 circuit breaker 接管。"),
+            meta={"job_id": job["id"], "agent_id": agent["id"],
+                  "status": result.status})
         run_memory.remember(
             db, job["project_id"],
             f"PM 監督：任務「{job['title']}」的診斷輸出無法解析（第 {cycle}/"

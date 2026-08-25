@@ -38,6 +38,7 @@ EVENT_TYPES = {
     "chat.message",
     "budget.warning", "budget.exceeded",
     "resource.health_changed",
+    "capability.unavailable",
     "agent.depleted",
     "channel.paired",
 }

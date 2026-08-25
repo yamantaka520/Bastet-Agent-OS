@@ -147,6 +147,46 @@ async def test_unparseable_business_diagnosis_preserves_the_budget(orch, seeded)
 
 
 @pytest.mark.asyncio
+async def test_second_diagnosis_uses_a_different_project_executor(orch, seeded):
+    _make_pm(seeded)
+    _block_business(seeded)
+    seeded.write("INSERT INTO agents(id,amos_agent_id,name,executor_type,enabled,"
+                 "config_json,created_at,updated_at) VALUES('deputy','deputy','Deputy',"
+                 "'fake',1,'{}',?,?)", (now(), now()))
+    seeded.write("INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+                 "VALUES('proj1','deputy','engineer',50)")
+    seeded.audit("pm-supervisor:fakebot", "job.pm_diagnosis_failed", "job", "job1",
+                 {"status": "failed", "raw": "permission denied"})
+    SCRIPT.append(_decision(action="escalate", reason="需要確認 runner"))
+
+    outcome = await pm_supervisor.diagnose(
+        orch, seeded.one("SELECT * FROM jobs WHERE id='job1'"))
+
+    assert outcome["action"] == "escalate"
+    audit = seeded.one("SELECT actor FROM audit_log WHERE action='job.pm_intervention' "
+                       "ORDER BY id DESC LIMIT 1")
+    assert audit["actor"] == "pm-supervisor:deputy"
+
+
+@pytest.mark.asyncio
+async def test_two_broken_pm_paths_trip_circuit_breaker_and_post_to_room(orch, seeded):
+    _make_pm(seeded)
+    _block_business(seeded)
+    for agent in ("fakebot", "deputy"):
+        seeded.audit(f"pm-supervisor:{agent}", "job.pm_diagnosis_failed", "job", "job1",
+                     {"status": "failed", "raw": "permission denied"})
+
+    outcome = await pm_supervisor.diagnose(
+        orch, seeded.one("SELECT * FROM jobs WHERE id='job1'"))
+
+    assert outcome["action"] == "escalate"
+    assert "兩次" in outcome["reason"]
+    assert not SCRIPT, "the circuit breaker must not invoke the same broken transport"
+    room = seeded.one("SELECT content FROM room_messages ORDER BY rowid DESC LIMIT 1")
+    assert room and "circuit breaker" in room["content"]
+
+
+@pytest.mark.asyncio
 async def test_unparseable_pm_uses_infrastructure_fallback(orch, seeded):
     """Permission failure in the PM must not strand repeated executor timeouts."""
     _make_pm(seeded)

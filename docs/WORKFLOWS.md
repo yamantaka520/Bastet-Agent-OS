@@ -41,6 +41,7 @@ which is explicit.
   on_fail: rework               # rework (default) | block
   rework_target: 頁面實作        # who fixes a failed gate; default: nearest earlier writable stage
   max_cycles: 3                 # rework budget before stopping for a human
+  requires: [browser.playwright] # control-plane capability contract
 ```
 
 **`timeout_s`** exists because a heavy stage (a 50–70 minute Three.js
@@ -51,6 +52,28 @@ hour of work each time. The run token's TTL follows the effective budget.
 executor failure (process crash, timeout); cycles count how many times a
 *failed gate* may hand the card back to an earlier stage. They solve different
 problems and are budgeted separately.
+
+**`requires` is an execution contract, not prompt text.** Before an Agent
+attempt begins, Bastet probes every requirement through the control-plane
+provider. `browser.playwright` launches Chromium and renders a page from the
+Bastet host process. Merely finding a Chrome binary does not pass the probe.
+The stage must also provide a managed delivery path: either a `tests-pass`
+command or an operator-controlled `gate_config.precheck_command`. A missing or
+crashing capability blocks immediately, preserves `max_retries` and
+`max_cycles`, and posts the diagnosis in the project room.
+
+For a browser-backed AI review, use a trusted precheck:
+
+```yaml
+gate: agent-review
+requires: [browser.playwright]
+gate_config:
+  precheck_command: npm run test:e2e
+```
+
+Bastet runs the command outside the Agent sandbox and injects its output into
+the review prompt. The reviewer may reason over that evidence but cannot forge
+or silently replace it.
 
 ## 3. Gate semantics
 

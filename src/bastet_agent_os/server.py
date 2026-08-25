@@ -1882,8 +1882,19 @@ def create_app(home: Home) -> FastAPI:
     @app.get("/api/workflow-catalog", dependencies=[Depends(require_role("viewer"))])
     def workflow_catalog():
         """Built-in presets plus the role/gate vocabulary the builder offers."""
+        from .execution_capabilities import catalog as capability_catalog
         from .workflow_presets import GATES, PRESETS, ROLES
-        return {"presets": PRESETS, "roles": ROLES, "gates": GATES}
+        return {"presets": PRESETS, "roles": ROLES, "gates": GATES,
+                "capabilities": capability_catalog()}
+
+    @app.get("/api/execution-capabilities",
+             dependencies=[Depends(require_role("viewer"))])
+    async def execution_capability_health():
+        """Live host probes; unlike the catalog, these prove the operation works."""
+        from .execution_capabilities import CATALOG, probe
+        statuses = await asyncio.gather(*(
+            asyncio.to_thread(probe, capability) for capability in CATALOG))
+        return [status.__dict__ for status in statuses]
 
     @app.delete("/api/templates/{template_id}")
     def delete_template(template_id: str, auth: Auth = Depends(require_role("operator"))):

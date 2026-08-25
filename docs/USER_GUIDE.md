@@ -302,6 +302,8 @@ stages:
 | `role` | which role runs this stage |
 | `gate` | `auto` / `tests-pass` / `agent-review` / `human-approve` |
 | `gate_config.command` | required for `tests-pass`; runs on the Bastet host |
+| `gate_config.precheck_command` | trusted host check whose evidence is injected into an `agent-review` stage |
+| `requires` | capabilities Bastet must probe and provide before the Agent starts, e.g. `[browser.playwright]` |
 | `read_only` | the stage may not write (reviewers, auditors) |
 | `isolation` | `worktree` (default) or `container` |
 | `max_retries` | retries for an *executor* failure (crash, timeout) |

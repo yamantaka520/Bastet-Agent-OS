@@ -1,10 +1,10 @@
 # Bastet Agent OS Progress
 
-Last updated: 2026-08-22
+Last updated: 2026-08-25
 
 ## Current project status
 
-- Released: **v0.33.4**. Version arc v0.1.0 → v0.33.4 in under four weeks
+- Released: **v0.34.0**. Version arc v0.1.0 → v0.34.0 in under four weeks
   (2026-07-28 → 2026-08-22), ~125 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.
@@ -38,7 +38,7 @@ Last updated: 2026-08-22
   6. **Interrupt the dead, not the merely quiet** (0.30.0): liveness decides
      interruption, so a 20-minute test is no longer executed at the 15-minute
      silence mark.
-- Test suite: **479 passing**, `ruff` clean; CI green on Linux/macOS and
+- Test suite: **518 passing**, `ruff` clean; CI green on Linux/macOS and
   inside the shipped Docker base image (Windows legs are declarative).
 - Releases are automated: a `v*` tag publishes to PyPI (Trusted Publishing) and
   pushes the multi-arch image to Docker Hub.

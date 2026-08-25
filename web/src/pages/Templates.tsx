@@ -6,13 +6,16 @@ import { Section, useList } from "../ui";
 
 type Stage = {
   name: string; role?: string | null; gate: string;
-  gate_config?: { command?: string }; read_only?: boolean;
+  gate_config?: { command?: string; precheck_command?: string }; read_only?: boolean;
+  requires?: string[];
   max_retries?: number; desc?: string;
 };
 type Preset = { id: string; name: string; description: string; stages: Stage[] };
 type Role = { id: string; label: string; hint: string };
 type Gate = { id: string; label: string; icon: string; hint: string };
-type Catalog = { presets: Preset[]; roles: Role[]; gates: Gate[] };
+type Capability = { id: string; label: string; description: string };
+type Catalog = { presets: Preset[]; roles: Role[]; gates: Gate[];
+                 capabilities: Capability[] };
 type Template = { id: string; version: number; stages_json: string;
                   assigned_projects: string[] };
 type Project = { id: string; team_id: string; default_template_id: string | null;
@@ -78,8 +81,11 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
         gate: s.gate,
         ...(s.gate === "tests-pass"
           ? { gate_config: { command: s.gate_config?.command || "echo no-command" } }
-          : {}),
+          : s.gate_config?.precheck_command
+            ? { gate_config: { precheck_command: s.gate_config.precheck_command } }
+            : {}),
         ...(s.read_only ? { read_only: true } : {}),
+        ...(s.requires?.length ? { requires: s.requires } : {}),
         ...(s.max_retries ? { max_retries: Number(s.max_retries) } : {}),
         ...(s.desc ? { desc: s.desc } : {}),
       }));
@@ -255,6 +261,8 @@ function Flow({ stages, roleLabel, gateInfo, t }: {
             <span className="flow-role">👤 {roleLabel(s.role)}</span>
             <span className="flow-gate">{gateInfo(s.gate).icon} {gateInfo(s.gate).label}</span>
             {s.read_only && <span className="flow-tag">{t("tpl.readOnlyTag")}</span>}
+            {s.requires?.map((cap) =>
+              <span className="flow-tag" key={cap}>⚙ {cap}</span>)}
           </div>
           {i < stages.length - 1 && <span className="flow-arrow">→</span>}
         </div>
@@ -399,11 +407,29 @@ function Builder({ builder, catalog, setBuilder, onSave, onCancel, roleLabel,
                      value={s.gate_config?.command ?? ""}
                      onChange={(e) => update(i, { gate_config: { command: e.target.value } })} />
             )}
+            {s.gate === "agent-review" && s.requires?.length ? (
+              <input placeholder="Bastet host precheck command" style={{ width: "18rem" }}
+                     value={s.gate_config?.precheck_command ?? ""}
+                     onChange={(e) => update(i, { gate_config: {
+                       ...s.gate_config, precheck_command: e.target.value,
+                     } })} />
+            ) : null}
             <label className="chk">
               <input type="checkbox" checked={!!s.read_only}
                      onChange={(e) => update(i, { read_only: e.target.checked })} />
               {t("tpl.readOnly")}
             </label>
+            {catalog.capabilities.map((cap) => (
+              <label className="chk" key={cap.id} title={cap.description}>
+                <input type="checkbox" checked={!!s.requires?.includes(cap.id)}
+                       onChange={(e) => update(i, {
+                         requires: e.target.checked
+                           ? [...(s.requires ?? []), cap.id]
+                           : (s.requires ?? []).filter((x) => x !== cap.id),
+                       })} />
+                ⚙ {cap.label}
+              </label>
+            ))}
             <label className="chk">{t("tpl.retries")}
               <input type="number" min={0} max={3} style={{ width: "4rem" }}
                      value={s.max_retries ?? 0}
