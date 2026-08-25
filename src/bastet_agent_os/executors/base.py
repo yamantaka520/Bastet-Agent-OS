@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
@@ -39,6 +40,38 @@ class TaskSpec:
     container_image: str | None = None   # image for isolation=container
     extra_env: dict[str, str] = field(default_factory=dict)
     mcp_config: str | None = None        # path to an mcpServers JSON (pool resources)
+
+
+class ProgressDeadline:
+    """A bounded run deadline that gives demonstrably active work time to finish.
+
+    ``timeout_s`` remains the no-progress budget.  Each real executor output
+    renews half that budget (at most 30 minutes), while a hard 2x ceiling keeps
+    noisy or wedged processes from living forever.  A process heartbeat alone
+    never renews this lease: being alive is not evidence of forward progress.
+    """
+
+    MAX_RENEWAL_S = 1800
+    HARD_MULTIPLIER = 2
+
+    def __init__(self, timeout_s: int, *, clock=time.monotonic):
+        self._clock = clock
+        started = clock()
+        budget = max(1, int(timeout_s))
+        self._renewal_s = min(self.MAX_RENEWAL_S, max(1, budget // 2))
+        self._deadline = started + budget
+        self._hard_deadline = started + budget * self.HARD_MULTIPLIER
+
+    def note_progress(self) -> None:
+        self._deadline = min(self._hard_deadline,
+                             max(self._deadline, self._clock() + self._renewal_s))
+
+    def remaining(self) -> float:
+        return min(self._deadline, self._hard_deadline) - self._clock()
+
+    @classmethod
+    def hard_timeout_s(cls, timeout_s: int) -> int:
+        return max(1, int(timeout_s)) * cls.HARD_MULTIPLIER
 
 
 @dataclass

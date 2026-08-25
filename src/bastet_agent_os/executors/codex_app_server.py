@@ -21,6 +21,7 @@ from ..pricing import Usage
 from .base import (
     STREAM_LIMIT,
     SUMMARY_LIMIT,
+    ProgressDeadline,
     RunEvent,
     RunResult,
     TaskSpec,
@@ -158,12 +159,12 @@ class CodexAppServerExecutor:
     async def stream(self, handle: CodexAppServerHandle) -> AsyncIterator[RunEvent]:
         assert handle.process.stdout
         handle.stderr_task = asyncio.create_task(self._drain_stderr(handle))
-        deadline = asyncio.get_running_loop().time() + handle.task.timeout_s
+        deadline = ProgressDeadline(handle.task.timeout_s)
         while not handle.finished:
             if handle.pending:
                 message = handle.pending.pop(0)
             else:
-                remaining = deadline - asyncio.get_running_loop().time()
+                remaining = deadline.remaining()
                 if remaining <= 0:
                     handle.timed_out = True
                     await self.cancel(handle)
@@ -176,6 +177,7 @@ class CodexAppServerExecutor:
                 if not raw:
                     handle.failed_reason = "codex app-server exited before turn completion"
                     return
+                deadline.note_progress()
                 message = parse_event(raw) or {}
             async for event in self._events(handle, message):
                 yield event

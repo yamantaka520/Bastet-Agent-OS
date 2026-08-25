@@ -42,6 +42,7 @@ MAX_INTERVENTIONS = 2
 # and 38 runs because manual retries repeatedly reopened automatic retries.
 MAX_LIFETIME_INTERVENTIONS = 6
 DIAGNOSIS_TIMEOUT_S = 600
+DIAGNOSIS_RETRY_COOLDOWN_S = 900
 ACTIONS = ("retry", "retry_other_agent", "supply_then_retry", "escalate")
 
 DIAGNOSIS_INSTRUCTIONS = """\
@@ -104,6 +105,29 @@ def parse_decision(text: str) -> dict[str, str] | None:
                     "agent_id": str(value.get("agent_id") or "").strip(),
                     "supply": str(value.get("supply") or "")[:4000]}
     return None
+
+
+def _infrastructure_fallback(db, job_id: str) -> dict[str, str] | None:
+    """Recover when the PM executor itself cannot produce a decision.
+
+    This fallback is intentionally narrow: only executor/infrastructure
+    failures are mechanically decidable.  Acceptance failures still require a
+    parseable PM ruling, otherwise we could accidentally weaken a gate.
+    """
+    rows = db.query(
+        "SELECT status FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 2",
+        (job_id,))
+    if not rows or rows[0]["status"] not in ("timeout", "failed", "orphaned"):
+        return None
+    repeated = len(rows) > 1 and rows[1]["status"] == rows[0]["status"]
+    return {
+        "action": "retry_other_agent" if repeated else "retry",
+        "reason": ("PM 診斷執行器無法回覆；最近兩次為同型基礎設施失敗，改由其他 Agent 接手"
+                   if repeated else
+                   "PM 診斷執行器無法回覆；最近一次為可機械恢復的基礎設施失敗"),
+        "agent_id": "",
+        "supply": "",
+    }
 
 
 def _last_human_retry_id(db, job_id: str) -> int:
@@ -217,21 +241,30 @@ async def diagnose(orch, job) -> dict[str, Any]:
         pass
     result = await executor.result(handle)
     decision = parse_decision(result.summary or "")
-
-    # the intervention is recorded BEFORE acting: if the action itself dies,
-    # the budget is still spent — a crashing action must not grant a free retry
-    db.audit(f"pm-supervisor:{agent['id']}", "job.pm_intervention", "job", job["id"],
-             {"cycle": cycle, "max": MAX_INTERVENTIONS,
-              "decision": decision or {"action": "unparseable",
-                                       "raw": (result.summary or "")[:300]}})
+    fallback = False
+    if decision is None:
+        decision = _infrastructure_fallback(db, job["id"])
+        fallback = decision is not None
 
     if decision is None:
+        # The diagnosis transport/model failed before making a decision.  That
+        # is not an intervention and must not spend the card's final recovery
+        # chance.  Record it separately so supervision can back off/alert.
+        db.audit(f"pm-supervisor:{agent['id']}", "job.pm_diagnosis_failed", "job",
+                 job["id"], {"status": result.status,
+                              "raw": (result.summary or "")[:300]})
         run_memory.remember(
             db, job["project_id"],
             f"PM 監督：任務「{job['title']}」的診斷輸出無法解析（第 {cycle}/"
-            f"{MAX_INTERVENTIONS} 次介入額度已計），卡片留給人工。",
+            f"{MAX_INTERVENTIONS} 次；未消耗介入額度），卡片保留並等待後續診斷。",
             kind="warning", importance=0.7)
         return {"action": "skipped", "reason": "diagnosis unparseable"}
+
+    # A real decision (including the narrow deterministic fallback) spends the
+    # bounded intervention budget before its action is attempted.
+    db.audit(f"pm-supervisor:{agent['id']}", "job.pm_intervention", "job", job["id"],
+             {"cycle": cycle, "max": MAX_INTERVENTIONS,
+              "fallback": fallback, "decision": decision})
 
     action, reason = decision["action"], decision["reason"]
     orch._emit("job.pm_intervention", job["project_id"], job_id=job["id"],

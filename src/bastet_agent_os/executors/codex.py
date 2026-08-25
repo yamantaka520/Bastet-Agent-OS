@@ -34,6 +34,7 @@ from ..pricing import Usage
 from .base import (
     STREAM_LIMIT,
     SUMMARY_LIMIT,
+    ProgressDeadline,
     RunEvent,
     RunResult,
     TaskSpec,
@@ -167,9 +168,9 @@ class CodexExecutor:
         assert handle.process and handle.process.stdout
         stderr_task = asyncio.get_event_loop().create_task(self._drain_stderr(handle))
         handle.stderr_task = stderr_task
-        deadline = asyncio.get_event_loop().time() + handle.task.timeout_s
+        deadline = ProgressDeadline(handle.task.timeout_s)
         while True:
-            remaining = deadline - asyncio.get_event_loop().time()
+            remaining = deadline.remaining()
             if remaining <= 0:
                 handle.timed_out = True
                 await self.cancel(handle)
@@ -189,6 +190,7 @@ class CodexExecutor:
                 continue
             if not raw:
                 return
+            deadline.note_progress()
             event = parse_event(raw)
             if event is None:
                 continue

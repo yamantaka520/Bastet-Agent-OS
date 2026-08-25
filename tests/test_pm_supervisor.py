@@ -130,8 +130,8 @@ async def test_retry_other_agent_validates_the_choice(orch, seeded):
 
 
 @pytest.mark.asyncio
-async def test_unparseable_diagnosis_spends_the_budget(orch, seeded):
-    """A PM that answers prose has had its chance — no free retries."""
+async def test_unparseable_business_diagnosis_preserves_the_budget(orch, seeded):
+    """A broken diagnosis transport is not a real intervention."""
     _make_pm(seeded)
     _block_business(seeded)
     SCRIPT.append(RunResult(status="succeeded", summary="我覺得應該沒問題吧"))
@@ -141,7 +141,37 @@ async def test_unparseable_diagnosis_spends_the_budget(orch, seeded):
         "SELECT * FROM jobs WHERE id='job1'"))
 
     assert outcome["action"] == "skipped"
-    assert pm_supervisor.intervention_count(seeded, "job1") == 1
+    assert pm_supervisor.intervention_count(seeded, "job1") == 0
+    assert seeded.one("SELECT * FROM audit_log WHERE "
+                      "action='job.pm_diagnosis_failed'") is not None
+
+
+@pytest.mark.asyncio
+async def test_unparseable_pm_uses_infrastructure_fallback(orch, seeded):
+    """Permission failure in the PM must not strand repeated executor timeouts."""
+    _make_pm(seeded)
+    seeded.write("UPDATE jobs SET status='blocked' WHERE id='job1'")
+    seeded.write("UPDATE runs SET status='timeout', error='execution timeout' "
+                 "WHERE id='run1'")
+    seeded.write("INSERT INTO runs(id,job_id,stage,attempt,agent_id,executor_type,"
+                 "status,tokens_in,tokens_out,cost_usd,started_at,finished_at,error) "
+                 "VALUES('run2','job1','implement',2,'fakebot','fake','timeout',"
+                 "0,0,0,?,?, 'execution timeout')", (now(), now()))
+    SCRIPT.append(RunResult(status="failed", summary="permission check failed for ls"))
+    called = []
+    orch.retry = lambda job_id, agent_id="", user="": called.append(
+        (job_id, agent_id, user)) or {}
+    orch._alternate_agent = lambda job, last: "backup"
+
+    outcome = await pm_supervisor.diagnose(orch, seeded.one(
+        "SELECT * FROM jobs WHERE id='job1'"))
+
+    assert outcome["action"] == "retry_other_agent"
+    assert called == [("job1", "backup", "pm-supervisor:fakebot")]
+    detail = json.loads(seeded.one(
+        "SELECT detail_json FROM audit_log WHERE action='job.pm_intervention'"
+    )["detail_json"])
+    assert detail["fallback"] is True
 
 
 @pytest.mark.asyncio

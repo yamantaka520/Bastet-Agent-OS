@@ -23,6 +23,7 @@ from typing import Any
 from .base import (
     STREAM_LIMIT,
     SUMMARY_LIMIT,
+    ProgressDeadline,
     RunEvent,
     RunResult,
     TaskSpec,
@@ -118,11 +119,11 @@ class ClaudeCodeExecutor:
 
     async def stream(self, handle: ClaudeCodeHandle) -> AsyncIterator[RunEvent]:
         assert handle.process and handle.process.stdout
-        deadline = asyncio.get_event_loop().time() + handle.task.timeout_s
+        deadline = ProgressDeadline(handle.task.timeout_s)
         stderr_task = asyncio.create_task(self._drain_stderr(handle))
         try:
             while True:
-                remaining = deadline - asyncio.get_event_loop().time()
+                remaining = deadline.remaining()
                 if remaining <= 0:
                     handle.timed_out = True
                     await self.cancel(handle)
@@ -143,6 +144,7 @@ class ClaudeCodeExecutor:
                     continue
                 if not raw:
                     return  # EOF
+                deadline.note_progress()
                 event = parse_event(raw)
                 if event is None:
                     continue

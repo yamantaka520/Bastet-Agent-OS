@@ -28,6 +28,7 @@ from ..workflow import read_verdict
 from .base import (
     STREAM_LIMIT,
     SUMMARY_LIMIT,
+    ProgressDeadline,
     RunEvent,
     RunResult,
     TaskSpec,
@@ -112,11 +113,11 @@ class HermesExecutor:
 
     async def stream(self, handle: HermesHandle) -> AsyncIterator[RunEvent]:
         assert handle.process and handle.process.stdout
-        deadline = asyncio.get_event_loop().time() + handle.task.timeout_s
+        deadline = ProgressDeadline(handle.task.timeout_s)
         stderr_task = asyncio.create_task(self._drain_stderr(handle))
         try:
             while True:
-                remaining = deadline - asyncio.get_event_loop().time()
+                remaining = deadline.remaining()
                 if remaining <= 0:
                     handle.timed_out = True
                     await self.cancel(handle)
@@ -136,6 +137,7 @@ class HermesExecutor:
                     continue
                 if not raw:
                     return
+                deadline.note_progress()
                 line = raw.decode(errors="replace").rstrip()
                 if line:
                     handle.stdout_text += line + "\n"

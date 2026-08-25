@@ -616,6 +616,13 @@ class Orchestrator:
                 pm_supervisor.lifetime_intervention_count(self.db, job["id"]) >= \
                 pm_supervisor.MAX_LIFETIME_INTERVENTIONS:
             return
+        diagnosis_cutoff = (datetime.now(UTC) - timedelta(
+            seconds=pm_supervisor.DIAGNOSIS_RETRY_COOLDOWN_S)).isoformat()
+        if self.db.one(
+                "SELECT 1 AS x FROM audit_log WHERE action='job.pm_diagnosis_failed' "
+                "AND target_id=? AND at>? ORDER BY id DESC LIMIT 1",
+                (job["id"], diagnosis_cutoff)):
+            return
         # an escalation is a terminal PM answer for this stall: "a human must
         # look". Re-diagnosing the same unchanged card every sweep would burn
         # tokens restating it — the latch clears when a human retries (their

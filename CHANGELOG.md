@@ -8,6 +8,20 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.33.4] - 2026-08-25
+
+### Fixed
+
+- Active executor output now renews a bounded soft deadline while a hard 2x
+  ceiling still terminates noisy or wedged processes. Long benchmarks no
+  longer lose completed work at the fixed one-hour boundary.
+- PM diagnosis transport or permission failures no longer consume a recovery
+  intervention. Repeated executor failures use a narrow deterministic
+  alternate-Agent fallback, with cooldown to prevent retry storms.
+- Web review and E2E failures return explicitly to the implementation stage,
+  whose two-hour budget covers browser and performance validation; they no
+  longer drift backward into the design stage on later rework cycles.
+
 ## [0.33.3] - 2026-08-24
 
 ### Fixed

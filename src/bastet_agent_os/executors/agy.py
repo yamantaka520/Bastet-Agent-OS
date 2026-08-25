@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from .base import (
     STREAM_LIMIT,
     SUMMARY_LIMIT,
+    ProgressDeadline,
     RunEvent,
     RunResult,
     TaskSpec,
@@ -123,7 +124,7 @@ class AgyExecutor:
         # stage ran 53 minutes with no sign of life). The schema still binds the
         # final result — `--json-schema` documents exactly that for stream mode.
         cmd = ["agy", "--output-format", "stream-json",
-               "--print-timeout", f"{task.timeout_s}s"]
+               "--print-timeout", f"{ProgressDeadline.hard_timeout_s(task.timeout_s)}s"]
         if task.expect_verdict:
             # review gates only — binding this schema to every read-only run
             # once left the PM decomposer able to answer nothing but a verdict
@@ -147,11 +148,11 @@ class AgyExecutor:
 
     async def stream(self, handle: AgyHandle) -> AsyncIterator[RunEvent]:
         assert handle.process and handle.process.stdout
-        deadline = asyncio.get_event_loop().time() + handle.task.timeout_s + 30
+        deadline = ProgressDeadline(handle.task.timeout_s)
         stderr_task = asyncio.create_task(self._drain_stderr(handle))
         try:
             while True:
-                remaining = deadline - asyncio.get_event_loop().time()
+                remaining = deadline.remaining()
                 if remaining <= 0:
                     handle.timed_out = True
                     await self.cancel(handle)
@@ -171,6 +172,7 @@ class AgyExecutor:
                     continue
                 if not raw:
                     return
+                deadline.note_progress()
                 line = raw.decode(errors="replace")
                 handle.raw_stdout += line
                 text = _progress_text(parse_event(line))
@@ -266,5 +268,4 @@ class AgyExecutor:
                       else "reported",
             structured_verdict=verdict,
         )
-
 

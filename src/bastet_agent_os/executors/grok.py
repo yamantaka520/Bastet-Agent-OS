@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from .base import (
     STREAM_LIMIT,
     SUMMARY_LIMIT,
+    ProgressDeadline,
     RunEvent,
     RunResult,
     TaskSpec,
@@ -124,11 +125,11 @@ class GrokExecutor:
 
     async def stream(self, handle: GrokHandle) -> AsyncIterator[RunEvent]:
         assert handle.process and handle.process.stdout
-        deadline = asyncio.get_event_loop().time() + handle.task.timeout_s
+        deadline = ProgressDeadline(handle.task.timeout_s)
         stderr_task = asyncio.create_task(self._drain_stderr(handle))
         try:
             while True:
-                remaining = deadline - asyncio.get_event_loop().time()
+                remaining = deadline.remaining()
                 if remaining <= 0:
                     handle.timed_out = True
                     await self.cancel(handle)
@@ -148,6 +149,7 @@ class GrokExecutor:
                     continue
                 if not raw:
                     return
+                deadline.note_progress()
                 line = raw.decode(errors="replace")
                 handle.raw_stdout += line
                 event = parse_event(line)
@@ -234,5 +236,4 @@ class GrokExecutor:
             precision="estimated",
             structured_verdict=verdict,
         )
-
 
