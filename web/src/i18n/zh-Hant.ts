@@ -526,7 +526,7 @@ const zhHant = {
   "board.pmAsks": "PM 需要你的裁定",
   "board.rulingPh": "回答上面的問題 —— 它會進到任務收件匣，卡片接著重跑",
   "board.ruleAndRetry": "送出裁定並重試",
-  "board.rulingHint": "裁定會套用最新工作流，但不會自動重置返工與 PM 額度",
+  "board.rulingHint": "裁定會套用最新工作流並回到可寫的返工階段，但不會自動重置返工與 PM 額度",
   "board.retry": "重新執行這個階段",
   "board.retrySameAgent": "用原本的 Agent 重試",
   "board.retryHint": "會重跑目前這個階段（不會跳過已完成的階段）。若失敗原因是 Agent 本身（未登入、額度用完），可在左邊改用別的 Agent。",

@@ -86,13 +86,15 @@ async def test_supply_then_retry_files_a_ruling(orch, seeded):
     SCRIPT.append(_decision(action="supply_then_retry",
                             reason="fps 條件用節流模擬取證",
                             supply="裁定：審查接受 CPU 節流模擬的 fps 數據，真機留給上線核准。"))
-    orch.retry = lambda *a, **kw: {}
+    retried = {}
+    orch.retry = lambda *a, **kw: retried.update(kw) or {}
 
     await pm_supervisor.diagnose(orch, seeded.one("SELECT * FROM jobs WHERE id='job1'"))
 
     supply = seeded.one("SELECT * FROM job_supplies WHERE job_id='job1'")
     assert supply is not None and "節流模擬" in supply["content"]
     assert supply["created_by"] == "pm-supervisor:fakebot"
+    assert retried["restart_from_rework_target"] is True
 
 
 @pytest.mark.asyncio

@@ -527,7 +527,7 @@ const zhHans: Dict = {
   "board.pmAsks": "PM 需要你的裁定",
   "board.rulingPh": "回答上面的问题 —— 它会进到任务收件箱，卡片接着重跑",
   "board.ruleAndRetry": "送出裁定并重试",
-  "board.rulingHint": "裁定会套用最新工作流，但不会自动重置返工与 PM 额度",
+  "board.rulingHint": "裁定会套用最新工作流并回到可写的返工阶段，但不会自动重置返工与 PM 额度",
   "board.retry": "重新运行这个阶段",
   "board.retrySameAgent": "用原本的 Agent 重试",
   "board.retryHint": "会重跑当前这个阶段（不会跳过已完成的阶段）。若失败原因是 Agent 本身（未登录、配额用完），可在左边改用别的 Agent。",

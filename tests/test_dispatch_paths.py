@@ -406,3 +406,36 @@ async def test_retry_renews_recovery_budget_only_when_explicit(orch, seeded):
     await orch.wait_idle()
     assert seeded.one("SELECT rework_count FROM jobs WHERE id=?", (job_id,))[
         "rework_count"] == 0
+
+
+async def test_ruling_retry_starts_at_the_writable_rework_target(orch, seeded):
+    """A ruling is work for the implementer, not another look at the old diff."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "auto"},
+        {"name": "review", "gate": "agent-review", "read_only": True,
+         "rework_target": "implement", "on_fail": "block"},
+    ])
+    SCRIPT.append(RunResult(status="succeeded", summary="old implementation"))
+    SCRIPT.append(RunResult(
+        status="succeeded", summary="reject",
+        structured_verdict={"verdict": "reject", "reasons": ["change script"]}))
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+    assert seeded.one("SELECT stage,status FROM jobs WHERE id=?", (job_id,))[
+        "status"] == "blocked"
+
+    SCRIPT.append(RunResult(status="succeeded", summary="ruling implemented"))
+    SCRIPT.append(RunResult(
+        status="succeeded", summary="approve",
+        structured_verdict={"verdict": "approve", "reasons": []}))
+    out = orch.retry(job_id, restart_from_rework_target=True)
+    assert out["stage"] == "implement"
+    assert out["restart_from_rework_target"] is True
+    await orch.wait_idle()
+
+    rows = seeded.query(
+        "SELECT stage FROM runs WHERE job_id=? ORDER BY rowid", (job_id,))
+    assert [row["stage"] for row in rows] == [
+        "implement", "review", "implement", "review"]
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))[
+        "status"] == "done"

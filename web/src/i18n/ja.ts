@@ -507,7 +507,7 @@ const ja: Dict = {
   "board.pmAsks": "PM が判断を求めています",
   "board.rulingPh": "上の質問に回答 —— タスクの受信箱に入り、カードが再実行されます",
   "board.ruleAndRetry": "判断を送って再実行",
-  "board.rulingHint": "判断は最新ワークフローを適用しますが、再作業と PM の回数は自動リセットしません",
+  "board.rulingHint": "判断は最新ワークフローを適用して書き込み可能な再作業段階へ戻りますが、再作業と PM の回数は自動リセットしません",
   "board.retry": "このステージを再実行",
   "board.retrySameAgent": "同じ Agent で再試行",
   "board.retryHint": "現在のステージだけを再実行します（完了済みステージは繰り返しません）。失敗原因が Agent 側（未ログイン・上限到達）なら、左で別の Agent を選べます。",

@@ -207,6 +207,9 @@ class RetryIn(BaseModel):
     refresh_workflow: bool = True  # re-snapshot the project's current template
     # Retrying and reopening bounded recovery budgets are separate decisions.
     renew_recovery_lease: bool = False
+    # A ruling normally tells the writer how to fix a rejected result.  Start
+    # at that writable rework target instead of re-running the same reviewer.
+    restart_from_rework_target: bool = False
 
 
 class ApproveIn(BaseModel):
@@ -2136,7 +2139,9 @@ def create_app(home: Home) -> FastAPI:
             return orch.retry(job_id, agent_id=body.agent_id, user=auth.name,
                               spec=body.spec,
                               refresh_workflow=body.refresh_workflow,
-                              renew_recovery_lease=body.renew_recovery_lease)
+                              renew_recovery_lease=body.renew_recovery_lease,
+                              restart_from_rework_target=(
+                                  body.restart_from_rework_target))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -147,6 +147,10 @@ Escalation is the last resort — a checkable fact (which commit is the baseline
 how to obtain evidence) the PM is expected to settle itself, and its escalation
 `reason` must be phrased as a question, because the card presents it as one with
 a box for the answer and one button that files the ruling and retries.
+That ruling retry starts at the failed stage's writable `rework_target`; a
+ruling that asks for a code change must not merely re-run the read-only
+reviewer. It preserves the spent recovery budget unless the operator separately
+renews the recovery lease.
 
 ## 5. Execution failures are not gate failures
 
@@ -183,6 +187,7 @@ instead of claiming to run.
 |---|---|---|
 | **Approve / Reject** | drawer, chat, Telegram | decides a `human-approve` gate. Approving the last stage completes the card — with the same delivery (memory, event, push) as any other completion |
 | **Retry** | drawer, Telegram 🔁 button | re-runs the current stage without silently reopening bounded recovery budgets, clears any quota timer, and optionally: |
+| **File ruling & retry** | stuck-card PM question | stores the ruling, adopts the current workflow, and restarts at the failed stage's writable `rework_target`; recovery budgets remain unchanged |
 | — with a different agent | drawer dropdown | a **one-shot override** that outranks the role mapping for the retried stage, then clears — chosen because the mapping once kept handing a retry back to the very agent whose vendor was broken |
 | — with workflow refresh | checkbox (default on) | picks up the template's current version when its stages changed — fixing a stage's test command in place is the most common reason to retry |
 | — with recovery-lease renewal | explicit checkbox (default off) | after the environment/contract was actually repaired, resets the rework counter and opens a new bounded PM diagnosis episode |

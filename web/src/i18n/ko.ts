@@ -507,7 +507,7 @@ const ko: Dict = {
   "board.pmAsks": "PM이 결정을 요청합니다",
   "board.rulingPh": "위 질문에 답하세요 — 작업 수신함에 들어가고 카드가 다시 실행됩니다",
   "board.ruleAndRetry": "결정 전달 후 재시도",
-  "board.rulingHint": "결정은 최신 워크플로를 적용하지만 재작업과 PM 예산을 자동 초기화하지 않습니다",
+  "board.rulingHint": "결정은 최신 워크플로를 적용하고 쓰기 가능한 재작업 단계로 돌아가지만 재작업과 PM 예산을 자동 초기화하지 않습니다",
   "board.retry": "이 단계 다시 실행",
   "board.retrySameAgent": "같은 Agent 로 재시도",
   "board.retryHint": "현재 단계만 다시 실행합니다（완료된 단계는 반복하지 않습니다）. 실패 원인이 Agent 쪽（미로그인·한도 초과）이면 왼쪽에서 다른 Agent 를 고르세요.",

@@ -346,7 +346,10 @@ the vendor's own message (`resets 1:30am (Asia/Taipei)` included) or a
 rework/PM circuit breaker unless you explicitly renew the recovery lease; it
 still clears any quota timer. Picking a different agent on retry is a
 one-shot override that outranks the role mapping for that stage only; the
-workflow-refresh checkbox picks up in-place template edits.
+workflow-refresh checkbox picks up in-place template edits. A PM/human ruling
+is different from an environment retry: it restarts at the rejected stage's
+writable `rework_target`, so the requested code change reaches an implementer
+instead of re-running the reviewer against the same diff.
 
 ## 6. Resources at run time
 

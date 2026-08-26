@@ -8,6 +8,19 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.2] - 2026-08-27
+
+### Fixed
+
+- A PM or human ruling now restarts a rejected card at the stage's writable
+  `rework_target`. Previously `supply_then_retry` re-ran the same read-only
+  reviewer against an unchanged diff, ignored the ruling's requested code
+  change, and could exhaust all recovery cycles without giving an implementer
+  a chance to act.
+- Ordinary environment retries still re-run the current stage. Returning to a
+  rework target does not silently renew the bounded rework or PM recovery
+  lease, so routing intent and circuit-breaker authority remain separate.
+
 ## [0.34.1] - 2026-08-25
 
 ### Fixed

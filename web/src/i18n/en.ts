@@ -507,7 +507,7 @@ const en: Dict = {
   "board.pmAsks": "The PM needs your ruling",
   "board.rulingPh": "Answer the question above — it reaches the job inbox and the card runs again",
   "board.ruleAndRetry": "File ruling & retry",
-  "board.rulingHint": "a ruling adopts the latest workflow without silently resetting recovery budgets",
+  "board.rulingHint": "a ruling adopts the latest workflow and returns to its writable rework stage without silently resetting recovery budgets",
   "board.retry": "Run this stage again",
   "board.retrySameAgent": "retry with the same agent",
   "board.retryHint": "Re-runs the current stage (finished stages are not repeated). If the agent itself was the problem — not logged in, out of quota — pick a different one on the left.",

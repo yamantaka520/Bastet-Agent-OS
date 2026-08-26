@@ -1182,7 +1182,8 @@ class Orchestrator:
 
     def retry(self, job_id: str, agent_id: str = "", user: str = "user",
               spec: str = "", refresh_workflow: bool = True,
-              renew_recovery_lease: bool = False) -> dict:
+              renew_recovery_lease: bool = False,
+              restart_from_rework_target: bool = False) -> dict:
         """Run the current stage again after a failure.
 
         A blocked card with no way forward is a dead end: the operator fixed the
@@ -1240,6 +1241,22 @@ class Orchestrator:
             job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if job["stage"] not in [s.name for s in stages]:
             raise ValueError(f"job {job_id} is at unknown stage {job['stage']!r}")
+        retried_from = job["stage"]
+        if restart_from_rework_target:
+            current_idx = next(i for i, item in enumerate(stages)
+                               if item.name == job["stage"])
+            target_idx = rework_target_for(
+                stages, current_idx,
+                attempt=self._handbacks_for(job_id, job["stage"]))
+            if target_idx is None:
+                raise ValueError(
+                    f"stage {job['stage']!r} has no writable rework target")
+            target = stages[target_idx]
+            if target.name != job["stage"]:
+                self.db.write(
+                    "UPDATE jobs SET stage=?, agent_override=NULL, updated_at=? "
+                    "WHERE id=?", (target.name, now(), job_id))
+                job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         # Retrying and renewing the bounded recovery lease are separate human
         # decisions.  The old implicit refill let a ruling on a stale workflow
         # reopen three identical cycles. Automation can never renew the lease.
@@ -1271,6 +1288,9 @@ class Orchestrator:
                       (now(), job_id))
         self.db.audit(f"user:{user}", "job.retry", "job", job_id,
                       {"stage": job["stage"], "agent": agent,
+                       "retried_from": retried_from,
+                       "restart_from_rework_target": bool(
+                           restart_from_rework_target),
                        "workflow_refreshed": refreshed_from,
                        "spec_edited": bool(spec.strip()),
                        "recovery_lease_renewed": bool(
@@ -1282,6 +1302,8 @@ class Orchestrator:
         self._spawn(self._drive_job(job_id, req))
         return {"job_id": job_id, "status": "in_progress", "stage": job["stage"],
                 "workflow_refreshed": refreshed_from,
+                "restart_from_rework_target": bool(
+                    restart_from_rework_target),
                 "recovery_lease_renewed": bool(
                     renew_recovery_lease and not automated)}
 

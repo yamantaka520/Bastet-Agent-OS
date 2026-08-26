@@ -323,7 +323,8 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
                  { name: "human-ruling", content: rulingText });
       await post(`/api/jobs/${jobId}/retry`, { agent_id: "", spec: "",
                                                refresh_workflow: true,
-                                               renew_recovery_lease: false });
+                                               renew_recovery_lease: false,
+                                               restart_from_rework_target: true });
       setRulingText("");
       onChanged();
       load();

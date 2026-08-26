@@ -390,8 +390,14 @@ async def diagnose(orch, job) -> dict[str, Any]:
             agent_override = (wanted if valid else
                               orch._alternate_agent(job, latest["agent_id"]
                                                     if latest else ""))
-        orch.retry(job["id"], agent_id=agent_override,
-                   user=f"pm-supervisor:{agent['id']}")
+        retry_options = (
+            {"restart_from_rework_target": True}
+            if action == "supply_then_retry"
+            else {}
+        )
+        orch.retry(
+            job["id"], agent_id=agent_override,
+            user=f"pm-supervisor:{agent['id']}", **retry_options)
     except ValueError as exc:
         # retry refused (project paused, job already moving) — record, done
         db.audit(f"pm-supervisor:{agent['id']}", "job.pm_intervention_failed",
