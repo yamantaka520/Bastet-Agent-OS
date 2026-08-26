@@ -19,19 +19,32 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # A tag push can land while GitHub drops the Actions webhook.  Keep the
+  # release reproducible by allowing the exact existing tag to be dispatched.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v* tag to publish
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Tag must match the package version
         run: |
           PKG=$(python -c "import re;print(re.search(r'__version__ = \"([^\"]+)\"', open('src/bastet_agent_os/__init__.py').read()).group(1))")
-          TAG="${GITHUB_REF_NAME#v}"
+          TAG="${RELEASE_TAG#v}"
           test "$PKG" = "$TAG" || { echo "tag v$TAG != __version__ $PKG"; exit 1; }
       - run: pip install build && python -m build
       - uses: actions/upload-artifact@v4
@@ -71,7 +84,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --generate-notes \
@@ -87,6 +100,8 @@ jobs:
         run: echo "::notice::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN are not set — skipping the image build and push. See this workflow's header."
       - if: env.CONFIGURED == 'true'
         uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - if: env.CONFIGURED == 'true'
         uses: docker/setup-buildx-action@v3
       - if: env.CONFIGURED == 'true'
@@ -96,7 +111,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - id: version
         if: env.CONFIGURED == 'true'
-        run: echo "v=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "v=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
       - if: env.CONFIGURED == 'true'
         uses: docker/build-push-action@v6
         with:
