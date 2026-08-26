@@ -1,8 +1,9 @@
 """SQLite data layer for Bastet (SPEC §3).
 
-Single-writer discipline: the control plane and gateway share one process; all
-writes go through Db.write() which serializes on a lock and keeps transactions
-short. Reads use the same connection (WAL makes readers cheap).
+Single-connection discipline: the control plane and gateway share one process;
+every operation on the process-wide SQLite connection is serialized.  WAL
+still protects interoperability with backup/diagnostic connections, but a
+single sqlite3.Connection must not be used concurrently by worker threads.
 """
 
 from __future__ import annotations
@@ -498,7 +499,15 @@ class Db:
                 self._conn.execute(sql, params)
 
     def query(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
-        return self._conn.execute(sql, params).fetchall()
+        # FastAPI sync handlers and the orchestrator run in different worker
+        # threads.  check_same_thread=False permits that ownership model; it
+        # does *not* make overlapping calls on one sqlite3.Connection safe.
+        # Without this lock, UI polling could corrupt cursor/row state and
+        # intermittently raise InterfaceError, return no project, or even
+        # expose a row with the wrong shape while a job transition was being
+        # committed.
+        with self._lock:
+            return self._conn.execute(sql, params).fetchall()
 
     def one(self, sql: str, params: tuple = ()) -> sqlite3.Row | None:
         rows = self.query(sql, params)

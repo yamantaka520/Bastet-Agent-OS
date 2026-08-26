@@ -4,8 +4,8 @@ Last updated: 2026-08-27
 
 ## Current project status
 
-- Released: **v0.34.2**. Version arc v0.1.0 → v0.34.2 in one month
-  (2026-07-28 → 2026-08-27), ~126 commits. See [CHANGELOG.md](CHANGELOG.md) for
+- Released: **v0.34.3**. Version arc v0.1.0 → v0.34.3 in one month
+  (2026-07-28 → 2026-08-27), ~128 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.
 - v0.32.0 adds a durable maintenance/drain fence, explicit handoff delivery and

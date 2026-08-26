@@ -8,6 +8,18 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.3] - 2026-08-27
+
+### Fixed
+
+- Serialize reads as well as writes on Bastet's process-wide SQLite connection.
+  Concurrent WebUI lifecycle polling and orchestrator state transitions could
+  otherwise overlap calls on the same connection, intermittently raising
+  `sqlite3.InterfaceError`, returning malformed rows, and showing a completed
+  card or an existing project as blocked/missing until a later reconciliation.
+- Add a concurrency regression test proving a read waits for the connection's
+  current operation instead of entering SQLite concurrently.
+
 ## [0.34.2] - 2026-08-27
 
 ### Fixed
