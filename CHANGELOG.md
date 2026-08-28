@@ -8,6 +8,26 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.4] - 2026-08-29
+
+### Fixed
+
+- PM replacement decisions now return rejected work to the writable fixing
+  stage and select the alternate for that stage's role. Previously a PM could
+  correctly blame the implementer but Bastet replaced the reviewer and spent
+  both intervention attempts rechecking the unchanged defect.
+- Project-room handoffs are operational contracts rather than prose-only logs.
+  Every receiving or replacement Agent gets an independent durable receipt;
+  assignments and completion acknowledgements are posted to the room, and PM
+  retries, replacements, supplies, and escalations state their reason, target
+  stage, and assignee there.
+- Automatic gates now record only `execution: succeeded` and explicitly warn
+  that Agent-reported checks are not authoritative test evidence. Only the
+  configured workflow gate can claim acceptance passed.
+- Preserve and commit repository-tracked files under `._bastet/preview` when an
+  Agent refreshes acceptance evidence; only untracked engine scratch remains
+  excluded from job commits.
+
 ## [0.34.3] - 2026-08-27
 
 ### Fixed
