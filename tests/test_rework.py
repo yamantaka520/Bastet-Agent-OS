@@ -608,8 +608,10 @@ async def test_a_repository_tracked_preview_is_updated_not_deleted(
     tracked.parent.mkdir(parents=True)
     tracked.write_text("old evidence")
     subprocess.run(["git", "-C", str(repo), "add", "-f", str(tracked)], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "track evidence"],
-                   check=True)
+    subprocess.run([
+        "git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t",
+        "commit", "-qm", "track evidence",
+    ], check=True)
 
     def updates_tracked_evidence(task):
         from pathlib import Path
