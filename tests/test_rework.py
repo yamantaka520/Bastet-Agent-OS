@@ -597,3 +597,31 @@ async def test_the_engines_scratch_dir_is_never_committed(orch, seeded, repo):
     assert "product.txt" in listing, "the actual work was not committed"
     assert "._bastet" not in listing, \
         f"the engine's scratch area was committed and will dirty every later run:\n{listing}"
+
+
+async def test_a_repository_tracked_preview_is_updated_not_deleted(
+        orch, seeded, repo):
+    """Tracked acceptance evidence is repository data, not engine scratch."""
+    import subprocess
+    add_template(seeded, "dev", [{"name": "implement", "gate": "auto"}])
+    tracked = repo / "._bastet" / "preview" / "acceptance.txt"
+    tracked.parent.mkdir(parents=True)
+    tracked.write_text("old evidence")
+    subprocess.run(["git", "-C", str(repo), "add", "-f", str(tracked)], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "track evidence"],
+                   check=True)
+
+    def updates_tracked_evidence(task):
+        from pathlib import Path
+        (Path(task.workdir) / "._bastet" / "preview" /
+         "acceptance.txt").write_text("fresh evidence")
+        return RunResult(status="succeeded", summary="updated")
+    SCRIPT.append(updates_tracked_evidence)
+
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True))
+    await orch.wait_idle()
+    shown = subprocess.run(
+        ["git", "-C", str(repo), "show",
+         f"bastet/{job_id}:._bastet/preview/acceptance.txt"],
+        capture_output=True, text=True, check=True).stdout
+    assert shown == "fresh evidence"
