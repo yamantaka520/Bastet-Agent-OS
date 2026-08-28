@@ -8,6 +8,25 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.5] - 2026-08-29
+
+### Fixed
+
+- Maintenance drain now parks a card durably before every new stage or
+  executor retry. A completed attempt can no longer create a ghost run behind
+  the fence; releasing maintenance resumes the parked card from its recorded
+  boundary.
+- Grok thought and tool lifecycle events now count as real activity and update
+  `progress_at` independently of the process heartbeat. A live PID whose work
+  stream has frozen can therefore be distinguished from an active long run.
+- After two PM interventions, the deterministic supervisor performs one
+  bounded evidence reassessment per human-renewed episode. It compares the
+  latest gate, terminal run and PM handoffs, routes rejected work to a writable
+  fixing stage or replaces a failed executor, and records the decision in the
+  project room and audit log without renewing the PM lease or looping forever.
+- The second PM diagnosis includes earlier intervention decisions so it cannot
+  blindly repeat an ineffective handoff.
+
 ## [0.34.4] - 2026-08-29
 
 ### Fixed
