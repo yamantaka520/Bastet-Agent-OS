@@ -44,7 +44,9 @@ the honest states are the point (a yellow 有新版 for the Claude Agent SDK, an
 
 Before an upgrade, acquire the durable drain fence with
 `bastet maintenance enter --wait`. New dispatch, retries, PM intervention and
-driver recovery pause while existing runs finish. Component updates remain
+driver recovery pause while an active attempt finishes. A card that reaches a
+stage boundary while the fence is held is durably parked before another run is
+created, then resumed after maintenance is released. Component updates remain
 disabled until the fence reports `drained`; release it with
 `bastet maintenance leave` after restart verification.
 

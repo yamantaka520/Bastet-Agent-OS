@@ -164,7 +164,13 @@ class GrokExecutor:
                     handle.session_id = str(event.get("sessionId") or "")
                 elif etype == "error":
                     handle.failed_reason = str(event.get("message", ""))[:500]
-                # unknown event types are ignored by design (docs: non-exhaustive)
+                elif etype:
+                    # Grok emits thought/tool lifecycle envelopes that carry no
+                    # user-facing text.  They are still proof of real work.  If
+                    # we drop them, Bastet's PID heartbeat says "healthy" while
+                    # progress_at stays empty for the whole run, exactly hiding
+                    # a live production stall after inference_done.
+                    yield RunEvent("activity", {"kind": str(etype)[:80]})
         finally:
             stderr_task.cancel()
 
@@ -236,4 +242,3 @@ class GrokExecutor:
             precision="estimated",
             structured_verdict=verdict,
         )
-

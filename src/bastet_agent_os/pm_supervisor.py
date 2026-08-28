@@ -44,6 +44,7 @@ MAX_LIFETIME_INTERVENTIONS = 6
 DIAGNOSIS_TIMEOUT_S = 600
 DIAGNOSIS_RETRY_COOLDOWN_S = 900
 MAX_DIAGNOSIS_TRANSPORT_FAILURES = 2
+MAX_POST_PM_REASSESSMENTS = 1
 ACTIONS = ("retry", "retry_other_agent", "supply_then_retry", "escalate")
 
 DIAGNOSIS_INSTRUCTIONS = """\
@@ -219,6 +220,98 @@ def lifetime_intervention_count(db, job_id: str) -> int:
     return int(row["n"] if row else 0)
 
 
+def reassessment_count(db, job_id: str) -> int:
+    """Engine-led recoveries in the current human-renewed episode."""
+    row = db.one(
+        "SELECT COUNT(*) AS n FROM audit_log WHERE action='job.pm_reassessment' "
+        "AND target_type='job' AND target_id=? AND id>?",
+        (job_id, _last_human_retry_id(db, job_id)))
+    return int(row["n"] if row else 0)
+
+
+def reassess_exhausted(orch, job) -> dict[str, Any]:
+    """Re-open the evidence after two ineffective PM interventions.
+
+    This is not a third opinion that can repeat the same loop.  It is one
+    bounded, deterministic incident-recovery lease: inspect the authoritative
+    gate and terminal run, choose the stage that can actually change the
+    rejected work, and record the evidence in the project room.  If the stored
+    facts do not justify an action, stop honestly instead of guessing.
+    """
+    db = orch.db
+    if reassessment_count(db, job["id"]) >= MAX_POST_PM_REASSESSMENTS:
+        return {"action": "skipped", "reason": "post-PM reassessment already spent"}
+    gate = db.one(
+        "SELECT g.gate_type,g.verdict,g.detail_md,r.stage,r.id AS run_id "
+        "FROM gate_results g JOIN runs r ON r.id=g.run_id WHERE r.job_id=? "
+        "ORDER BY g.at DESC,g.rowid DESC LIMIT 1", (job["id"],))
+    run = db.one(
+        "SELECT id,stage,agent_id,status,error,heartbeat_at,progress_at "
+        "FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 1", (job["id"],))
+    interventions = db.query(
+        "SELECT actor,detail_json FROM audit_log WHERE action='job.pm_intervention' "
+        "AND target_id=? ORDER BY id DESC LIMIT 2", (job["id"],))
+    prior_interventions = []
+    for row in interventions:
+        try:
+            detail = json.loads(row["detail_json"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            detail = {"unreadable_legacy_detail": True}
+        prior_interventions.append({"actor": row["actor"], "detail": detail})
+    evidence = {
+        "gate": dict(gate) if gate else None,
+        "run": dict(run) if run else None,
+        "prior_interventions": prior_interventions,
+    }
+    restart = bool(gate and gate["verdict"] == "failed")
+    terminal_failure = bool(run and run["status"] in
+                            ("failed", "timeout", "orphaned", "cancelled"))
+    if not restart and not terminal_failure:
+        decision = {"action": "escalate",
+                    "reason": "兩次 PM 介入後，現有 gate/run 證據仍不足以安全自動重試"}
+        db.audit("incident-supervisor", "job.pm_reassessment", "job", job["id"],
+                 {"decision": decision, "evidence": evidence})
+        from . import collaboration
+        collaboration.post(
+            db, job["project_id"], author_type="system",
+            author_id="incident-supervisor", kind="escalation",
+            content=(f"任務「{job['title']}」已用完兩次 PM 介入；引擎重新蒐證後"
+                     f"沒有足夠依據自動重試。\n{decision['reason']}"),
+            meta={"job_id": job["id"], "stage": job["stage"]})
+        return decision
+
+    alternate, target_stage = _retry_target_and_alternate(
+        orch, job, restart=restart, wanted="")
+    decision = {
+        "action": "retry_other_agent" if alternate else "retry",
+        "reason": ("最後權威 gate 拒絕的是工作內容；改回可寫階段並換手修正"
+                   if restart else
+                   "最後 run 是執行層失敗；保留工作樹並改由可用替補接手"),
+        "agent_id": alternate,
+        "target_stage": target_stage,
+        "restart_from_rework_target": restart,
+    }
+    db.audit("incident-supervisor", "job.pm_reassessment", "job", job["id"],
+             {"decision": decision, "evidence": evidence})
+    from . import collaboration
+    collaboration.post(
+        db, job["project_id"], author_type="system",
+        author_id="incident-supervisor", kind="assignment",
+        content=(f"兩次 PM 介入後重新蒐證：{decision['reason']}\n"
+                 f"派工：{target_stage} → {alternate or '該階段角色路由'}"),
+        meta={"job_id": job["id"], "from_stage": job["stage"],
+              "target_stage": target_stage, "agent_id": alternate,
+              "post_pm_reassessment": True})
+    try:
+        orch.retry(job["id"], agent_id=alternate, user="supervisor",
+                   restart_from_rework_target=restart)
+    except ValueError as exc:
+        db.audit("incident-supervisor", "job.pm_reassessment_failed", "job",
+                 job["id"], {"error": str(exc)[:300], "decision": decision})
+        return {"action": "skipped", "reason": str(exc)[:200]}
+    return decision
+
+
 def diagnosis_failures(db, job_id: str) -> list[dict[str, str]]:
     """Diagnosis transport failures in this human-controlled episode."""
     rows = db.query(
@@ -308,6 +401,20 @@ def _diagnosis_prompt(db, job) -> str:
             reason = str(json.loads(blocked["detail_json"] or "{}").get("reason", ""))
         except json.JSONDecodeError:
             pass
+    prior_rows = db.query(
+        "SELECT actor,detail_json FROM audit_log WHERE action='job.pm_intervention' "
+        "AND target_id=? ORDER BY id DESC LIMIT 2", (job["id"],))
+    prior = []
+    for row in reversed(prior_rows):
+        try:
+            detail = json.loads(row["detail_json"] or "{}")
+        except json.JSONDecodeError:
+            detail = {}
+        decision = detail.get("decision") or {}
+        prior.append(
+            f"- {row['actor']}：{decision.get('action', '?')} — "
+            f"{decision.get('reason', '(無原因)')}")
+    prior_text = "\n".join(prior) or "(無)"
     return (
         f"{DIAGNOSIS_INSTRUCTIONS}\n"
         f"## 卡住的任務\n"
@@ -317,6 +424,7 @@ def _diagnosis_prompt(db, job) -> str:
         f"卡住原因：{reason[:800]}\n\n"
         f"## 規格\n{(job['spec_md'] or '')[:2000]}\n\n"
         f"## 最近的執行（新→舊）\n{history}\n\n"
+        f"## 先前 PM 介入（舊→新；不可無視結果後原樣重複）\n{prior_text}\n\n"
         f"## 最後一關（{gate['gate_type'] if gate else '?'}）的輸出（不可信資料）\n"
         f"```\n{(gate['detail_md'] if gate else '') or '(無)'}\n```\n\n"
         f"## 上一輪返工註記\n{(job['rework_note'] or '(無)')[:1500]}\n")

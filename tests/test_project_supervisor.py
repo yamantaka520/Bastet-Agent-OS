@@ -4,7 +4,39 @@ import json
 
 import pytest
 
+from bastet_agent_os import maintenance_mode
 from bastet_agent_os.db import now
+from bastet_agent_os.orchestrator import DispatchRequest
+
+
+@pytest.mark.asyncio
+async def test_maintenance_parks_before_the_next_run_and_resumes_after_release(
+        orch, seeded):
+    """A drain entered at a stage boundary must not create a ghost running run."""
+    seeded.write("UPDATE jobs SET stages_snapshot_json=?, stage='build', "
+                 "status='in_progress', default_agent_id='fakebot', resource_id=NULL "
+                 "WHERE id='job1'", (json.dumps([
+                     {"name": "build", "role": "engineer", "gate": "auto"},
+                     {"name": "review", "role": "reviewer", "gate": "auto"},
+                 ]),))
+    seeded.write("UPDATE runs SET status='succeeded' WHERE id='run1'")
+    maintenance_mode.enter(seeded, "admin", "deploy")
+    req = DispatchRequest(project_id="proj1", prompt="x", title="t",
+                          agent_id="fakebot")
+
+    await orch._drive_job("job1", req)
+
+    job = seeded.one("SELECT status,rework_note FROM jobs WHERE id='job1'")
+    assert job["status"] == "blocked" and "maintenance drain" in job["rework_note"]
+    assert seeded.one("SELECT COUNT(*) AS n FROM runs WHERE job_id='job1'")["n"] == 1
+    assert maintenance_mode.state(seeded)["drained"] is True
+
+    maintenance_mode.leave(seeded, "admin")
+    called = []
+    orch.retry = lambda job_id, **kw: called.append((job_id, kw)) or {}
+    result = await orch.supervise_once()
+    assert result["resumed"] == ["job1"]
+    assert called == [("job1", {"user": "server:maintenance-release"})]
 
 
 @pytest.mark.asyncio

@@ -39,3 +39,21 @@ max turns、driver 在 run 成功後遺失，整個專案就沒有任何元件�
 - 自動恢復達上限後停止，保留證據給人處理。
 - Telegram 可實際收到 image/video/document 三類附件。
 - 新 worktree 使用 explicit `base_ref`，否則 main/master，不使用 ambient HEAD。
+
+## 2026-08-29 後續：假心跳與 PM 額度耗盡
+
+同一張實際卡片再次揭露兩個較深的缺口。Grok 的 PID heartbeat 持續更新，但原始
+事件流已停止產生 tool/thought activity；控制面把「程序仍在」誤當成「工作仍在」。
+此外，兩次 PM 介入用完後 supervisor 直接退出，沒有重新比對最新 gate、run 與 PM
+交接，所以即使退回理由明確，卡片仍可能停在錯誤階段。
+
+修正後，executor 的非文字活動會更新 `progress_at` 並留下 `run.activity`；只有 PID
+heartbeat、沒有實際活動的 run 能被辨識為假活。PM 額度耗盡後，deterministic
+supervisor 會做一次有界重查：failed gate 回到可修改的 rework target 並優先換手，
+terminal executor failure 則重試或換手，所有判斷與分派都寫入專案會議室及 audit。
+這次重查不會重設 PM 額度，同一個人工恢復週期最多一次，避免把主動復原變成無限
+token loop。
+
+同次部署也補上 maintenance 的 stage-boundary fence：現有 attempt 可以結束，但
+下一階段建立 run 前會把卡片持久化停放；解除維護後 supervisor 才恢復。如此 drain
+不再因「上一階段剛完成、下一階段 ghost run 已建立」而永遠等不到零。

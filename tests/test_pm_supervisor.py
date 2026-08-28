@@ -60,6 +60,8 @@ async def test_pm_prompt_carries_the_evidence(orch, seeded):
     the rework note, and the run history all have to be in the prompt."""
     _make_pm(seeded)
     _block_business(seeded, note="迴圈不收斂")
+    seeded.audit("pm-supervisor:older", "job.pm_intervention", "job", "job1",
+                 {"decision": {"action": "retry", "reason": "先前只重跑同一關"}})
     captured = {}
 
     def check(task):
@@ -73,6 +75,7 @@ async def test_pm_prompt_carries_the_evidence(orch, seeded):
 
     assert "未提供實測證據" in captured["prompt"]       # the gate's actual output
     assert "迴圈不收斂" in captured["prompt"]           # the rework note
+    assert "先前只重跑同一關" in captured["prompt"]     # do not repeat blindly
     assert captured["read_only"] is True
     # the verdict-schema bug class: a diagnosis whose answer is a JSON decision
     # must never be forced into {verdict, reasons, comments}
@@ -313,7 +316,15 @@ async def test_sweep_skips_quota_waits(orch, seeded):
 async def test_sweep_diagnoses_and_caps(orch, seeded):
     _make_pm(seeded)
     _block_business(seeded)
-    orch.retry = lambda **kw: {}
+    seeded.write("UPDATE jobs SET stage='review', stages_snapshot_json=? "
+                 "WHERE id='job1'", (json.dumps([
+                     {"name": "implement", "role": "engineer", "gate": "auto"},
+                     {"name": "review", "role": "reviewer", "gate": "agent-review",
+                      "read_only": True, "rework_target": "implement"},
+                 ]),))
+    retried = []
+    orch.retry = lambda *args, **kw: retried.append((args, kw)) or {}
+    orch._alternate_agent = lambda job, last: "backup-writer"
     SCRIPT.append(_decision(action="retry", reason="1"))
     SCRIPT.append(_decision(action="retry", reason="2"))
 
@@ -325,11 +336,23 @@ async def test_sweep_diagnoses_and_caps(orch, seeded):
     await orch.wait_idle()
     assert pm_supervisor.intervention_count(seeded, "job1") == 2
 
-    # budget spent: the third sweep must not spawn a diagnosis (SCRIPT is empty —
-    # a pop from it would raise inside the driver and fail the test via audit)
+    # Budget spent: do not ask the PM a third time. Re-open authoritative
+    # evidence once, route the rejected work to its writer, and record why.
     await orch.supervise_once()
     await orch.wait_idle()
     assert pm_supervisor.intervention_count(seeded, "job1") == 2
+    assert retried[-1] == (("job1",), {
+        "agent_id": "backup-writer", "user": "supervisor",
+        "restart_from_rework_target": True})
+    reassessment = seeded.one(
+        "SELECT detail_json FROM audit_log WHERE action='job.pm_reassessment'")
+    assert reassessment and "最後權威 gate" in reassessment["detail_json"]
+
+    # The incident lease is bounded too; unchanged evidence cannot loop forever.
+    before = len(retried)
+    await orch.supervise_once()
+    await orch.wait_idle()
+    assert len(retried) == before
 
 
 @pytest.mark.asyncio

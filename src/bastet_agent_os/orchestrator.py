@@ -48,6 +48,11 @@ log = logging.getLogger("bastet.orchestrator")
 SINGLE_STAGE = [{"name": "work", "gate": "auto"}]
 EXEC_FAILURES = {"failed", "cancelled", "timeout", "orphaned"}
 DIFF_PROMPT_LIMIT = 8000
+MAINTENANCE_PARK_REASON = "maintenance drain：已在階段邊界暫停；解除維護後自動接續"
+
+
+class _MaintenanceParked(RuntimeError):
+    """Control-flow signal: the durable drain fence owns the next dispatch."""
 
 
 @dataclass
@@ -545,6 +550,12 @@ class Orchestrator:
             return {"interrupted": interrupted, "retried": retried, "resumed": resumed}
 
         for job in self.db.query("SELECT * FROM jobs WHERE status='blocked' AND archived=0"):
+            if self._is_maintenance_parked(job["id"]):
+                self.db.write("UPDATE jobs SET rework_note=NULL WHERE id=?",
+                              (job["id"],))
+                self.retry(job["id"], user="server:maintenance-release")
+                resumed.append(job["id"])
+                continue
             recoverable, reason = self._recoverable_block(job)
             count = self._supervisor_retry_count(job["id"])
             if not recoverable or count >= self.MAX_SUPERVISOR_RETRIES:
@@ -612,8 +623,10 @@ class Orchestrator:
         if job["id"] in self._pm_diagnosing:
             return
         if pm_supervisor.intervention_count(self.db, job["id"]) >= \
-                pm_supervisor.MAX_INTERVENTIONS or \
-                pm_supervisor.lifetime_intervention_count(self.db, job["id"]) >= \
+                pm_supervisor.MAX_INTERVENTIONS:
+            pm_supervisor.reassess_exhausted(self, job)
+            return
+        if pm_supervisor.lifetime_intervention_count(self.db, job["id"]) >= \
                 pm_supervisor.MAX_LIFETIME_INTERVENTIONS:
             return
         diagnosis_cutoff = (datetime.now(UTC) - timedelta(
@@ -696,6 +709,8 @@ class Orchestrator:
         self._driving_jobs.add(job_id)
         try:
             await self._advance_until_blocked(job_id, req)
+        except _MaintenanceParked:
+            log.info("job %s parked at a maintenance stage boundary", job_id)
         except Exception:
             log.exception("job %s driver crashed", job_id)
             self.db.write("UPDATE jobs SET status='blocked', updated_at=? WHERE id=?",
@@ -711,6 +726,11 @@ class Orchestrator:
             names = [s.name for s in stages]
             idx = names.index(job["stage"])
             stage = stages[idx]
+
+            from .maintenance_mode import enabled as maintenance_enabled
+            if maintenance_enabled(self.db):
+                self._park_for_maintenance(job, stage.name)
+                raise _MaintenanceParked
 
             result, run_id = await self._run_stage_with_retries(job, stage, req)
             if result.status in EXEC_FAILURES:
@@ -1324,9 +1344,41 @@ class Orchestrator:
                 return result, run_id
             if result.status not in EXEC_FAILURES or attempt > stage.max_retries:
                 return result, run_id
+            from .maintenance_mode import enabled as maintenance_enabled
+            if maintenance_enabled(self.db):
+                self._park_for_maintenance(job, stage.name)
+                raise _MaintenanceParked
             log.info("job %s stage %s attempt %d failed (%s); retrying",
                      job["id"], stage.name, attempt, result.status)
             attempt += 1
+
+    def _park_for_maintenance(self, job, stage_name: str) -> None:
+        """Make a stage-boundary pause drainable and durably resumable.
+
+        Leaving the card ``in_progress`` makes maintenance wait forever even
+        though no executor exists.  Creating the next run first is worse: the
+        board shows a ghost ``running`` run with no handle.  A blocked marker
+        is terminal for drain accounting and the audit row is the restart
+        lease used after maintenance is released.
+        """
+        self.db.write(
+            "UPDATE jobs SET status='blocked', rework_note=?, updated_at=? "
+            "WHERE id=? AND status='in_progress'",
+            (MAINTENANCE_PARK_REASON, now(), job["id"]))
+        self.db.audit("orchestrator", "job.maintenance_parked", "job", job["id"],
+                      {"stage": stage_name})
+        self._emit("job.maintenance_parked", job["project_id"],
+                   job_id=job["id"], stage=stage_name)
+
+    def _is_maintenance_parked(self, job_id: str) -> bool:
+        parked = self.db.one(
+            "SELECT MAX(id) AS i FROM audit_log WHERE action='job.maintenance_parked' "
+            "AND target_id=?", (job_id,))
+        retried = self.db.one(
+            "SELECT MAX(id) AS i FROM audit_log WHERE action='job.retry' "
+            "AND target_id=?", (job_id,))
+        return bool(parked and parked["i"] and
+                    int(parked["i"]) > int((retried and retried["i"]) or 0))
 
     async def _run_stage(self, job, stage: StageDef, req: DispatchRequest,
                          attempt: int) -> tuple[RunResult, str]:
@@ -1512,6 +1564,19 @@ class Orchestrator:
                             self._emit("run.progress", job["project_id"],
                                        job_id=job["id"], run_id=run_id,
                                        stage=stage.name, text=text[:200])
+                    elif event.type == "activity":
+                        clock = asyncio.get_event_loop().time()
+                        if clock - last_beat >= 2.0:
+                            last_beat = clock
+                            stamp = now()
+                            self.db.write(
+                                "UPDATE runs SET heartbeat_at=?, progress_at=? "
+                                "WHERE id=?", (stamp, stamp, run_id))
+                            self._emit(
+                                "run.activity", job["project_id"],
+                                job_id=job["id"], run_id=run_id,
+                                stage=stage.name,
+                                kind=str(event.data.get("kind") or "activity")[:80])
                     elif event.type == "interaction_request":
                         self._record_interaction(job, run_id, event.data)
             finally:

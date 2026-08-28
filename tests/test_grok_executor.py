@@ -65,6 +65,22 @@ async def test_streaming_success(fake_grok, tmp_path):
     assert "--no-auto-update" in args
 
 
+async def test_non_text_envelopes_report_real_activity(fake_grok, tmp_path):
+    set_output, _ = fake_grok
+    set_output([
+        {"type": "thought", "text": "checking evidence"},
+        {"type": "tool_result", "tool": "run_terminal_command"},
+        {"type": "end", "stopReason": "EndTurn"},
+    ])
+    executor = GrokExecutor()
+    handle = await executor.start(spec(tmp_path))
+    events = [event async for event in executor.stream(handle)]
+    await executor.result(handle)
+
+    assert [event.data["kind"] for event in events
+            if event.type == "activity"] == ["thought", "tool_result"]
+
+
 async def test_error_event_fails(fake_grok, tmp_path):
     set_output, _ = fake_grok
     set_output([{"type": "error", "message": "auth expired"}])
