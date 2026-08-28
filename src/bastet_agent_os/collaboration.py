@@ -101,14 +101,29 @@ def project_handoffs(db, project_id: str, limit: int = 100) -> list[dict[str, An
 
 
 def deliver_handoffs(db, job_id: str, stage: str, agent_id: str) -> list[str]:
-    """Record exactly which next-stage agent received each pending contract."""
-    rows = db.query("SELECT id FROM stage_handoffs WHERE job_id=? AND to_stage=? "
-                    "AND delivered_at IS NULL ORDER BY at", (job_id, stage))
+    """Record every agent that receives a handoff, including replacements."""
+    rows = db.query("SELECT id,project_id FROM stage_handoffs WHERE job_id=? "
+                    "AND to_stage=? ORDER BY at", (job_id, stage))
     stamp = now()
+    delivered = []
     for row in rows:
-        db.write("UPDATE stage_handoffs SET delivered_at=?,delivered_to_agent_id=? "
-                 "WHERE id=? AND delivered_at IS NULL", (stamp, agent_id, row["id"]))
-    return [row["id"] for row in rows]
+        cursor = db.write(
+            "INSERT OR IGNORE INTO handoff_receipts(id,handoff_id,job_id,stage,"
+            "agent_id,delivered_at) VALUES(?,?,?,?,?,?)",
+            (new_id("hrc"), row["id"], job_id, stage, agent_id, stamp))
+        if cursor.rowcount:
+            delivered.append(row["id"])
+            db.write("UPDATE stage_handoffs SET delivered_at=?,"
+                     "delivered_to_agent_id=? WHERE id=?",
+                     (stamp, agent_id, row["id"]))
+    if delivered:
+        post(db, rows[0]["project_id"], author_type="system",
+             author_id="orchestrator", kind="assignment",
+             content=(f"指派 {agent_id} 執行「{stage}」，已交付 "
+                      f"{len(delivered)} 份前階段交接：{', '.join(delivered)}。"),
+             meta={"job_id": job_id, "stage": stage, "agent_id": agent_id,
+                   "handoff_ids": delivered})
+    return delivered
 
 
 def acknowledge_handoff(db, handoff_id: str, *, agent_id: str,
@@ -116,9 +131,17 @@ def acknowledge_handoff(db, handoff_id: str, *, agent_id: str,
     row = db.one("SELECT * FROM stage_handoffs WHERE id=?", (handoff_id,))
     if row is None:
         raise ValueError(f"unknown handoff {handoff_id!r}")
+    receipt = db.one("SELECT id FROM handoff_receipts WHERE handoff_id=? "
+                     "AND agent_id=? ORDER BY delivered_at DESC LIMIT 1",
+                     (handoff_id, agent_id))
     expected = row["delivered_to_agent_id"]
-    if expected and expected != agent_id:
+    if receipt is None and expected and expected != agent_id:
         raise ValueError(f"handoff was delivered to {expected}, not {agent_id}")
+    if receipt is not None:
+        db.write("UPDATE handoff_receipts SET acknowledged_at=?,acknowledgement=?,"
+                 "questions_json=? WHERE id=?",
+                 (now(), acknowledgement.strip(),
+                  json.dumps(questions or [], ensure_ascii=False), receipt["id"]))
     db.write("UPDATE stage_handoffs SET acknowledged_at=?,acknowledged_by=?,"
              "acknowledgement=?,questions_json=? WHERE id=?",
              (now(), agent_id, acknowledgement.strip(),
@@ -127,6 +150,22 @@ def acknowledge_handoff(db, handoff_id: str, *, agent_id: str,
          kind="handoff_ack", content=acknowledgement.strip() or "已接收交接",
          meta={"handoff_id": handoff_id, "questions": questions or []})
     return dict(db.one("SELECT * FROM stage_handoffs WHERE id=?", (handoff_id,)))
+
+
+def acknowledge_delivered_handoffs(db, *, job_id: str, stage: str,
+                                    agent_id: str, summary: str) -> list[str]:
+    """Close delivered receipts using the receiving Agent's own stage report."""
+    rows = db.query(
+        "SELECT handoff_id FROM handoff_receipts WHERE job_id=? AND stage=? "
+        "AND agent_id=? AND acknowledged_at IS NULL ORDER BY delivered_at",
+        (job_id, stage, agent_id))
+    acknowledgement = (
+        "已接收並完成本階段處理。以下為接收者自己的執行回報：\n"
+        + (summary.strip()[:2000] or "（Agent 未提供文字摘要）"))
+    for row in rows:
+        acknowledge_handoff(db, row["handoff_id"], agent_id=agent_id,
+                            acknowledgement=acknowledgement)
+    return [row["handoff_id"] for row in rows]
 
 
 def path_matches(path: str, patterns: list[str]) -> bool:

@@ -150,12 +150,13 @@ def _gather(db: Db, job, stage_name: str, bucket: str, amos_query: str | None,
         for row in rows:
             paths = json.loads(row["changed_paths_json"] or "[]")
             checks = json.loads(row["verification_json"] or "[]")
-            lines.append(f"- {row['from_stage']} → {row['to_stage'] or '完成'}: "
+            lines.append(f"- [handoff:{row['id']}] {row['from_stage']} → "
+                         f"{row['to_stage'] or '完成'}: "
                          f"{row['summary']}\n  changed: {', '.join(paths) or 'none'}"
                          + (f"\n  verified: {', '.join(checks)}" if checks else ""))
         return ("## Stage handoffs\n" + "\n".join(lines)
-                + "\n\nAcknowledge each handoff in the project room; state your "
-                  "understanding and any questions before handing off again.")
+                + "\n\n逐項說明你對 handoff 的理解與問題；Bastet 會用你的階段完成回報"
+                  "在專案會議室登記接收確認。不要宣稱未由權威 gate 產生的測試結果。")
 
     if bucket == "test_evidence":
         rows = db.query(

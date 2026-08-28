@@ -127,7 +127,7 @@ def _failed_acceptance_gate(db, job_id: str) -> bool:
 
 
 def _retry_target_and_alternate(orch, job, *, restart: bool,
-                                wanted: str) -> str:
+                                wanted: str) -> tuple[str, str]:
     """Pick the replacement for the stage that will actually run.
 
     Previously the PM said "replace the implementer", but routing looked at
@@ -138,9 +138,6 @@ def _retry_target_and_alternate(orch, job, *, restart: bool,
     valid = wanted and db.one(
         "SELECT id FROM agents WHERE id=? AND enabled=1 AND depleted_at IS NULL",
         (wanted,))
-    if valid:
-        return wanted
-
     routed_job = dict(job)
     target_stage = job["stage"]
     if restart:
@@ -154,11 +151,13 @@ def _retry_target_and_alternate(orch, job, *, restart: bool,
         if target_idx is not None:
             target_stage = stages[target_idx].name
             routed_job["stage"] = target_stage
+    if valid:
+        return wanted, target_stage
     latest = db.one(
         "SELECT agent_id FROM runs WHERE job_id=? AND stage=? "
         "ORDER BY rowid DESC LIMIT 1", (job["id"], target_stage))
-    return orch._alternate_agent(
-        routed_job, latest["agent_id"] if latest else "")
+    return (orch._alternate_agent(
+        routed_job, latest["agent_id"] if latest else ""), target_stage)
 
 
 def _infrastructure_fallback(db, job_id: str) -> dict[str, str] | None:
@@ -416,6 +415,14 @@ async def diagnose(orch, job) -> dict[str, Any]:
         kind="procedure", importance=0.8)
 
     if action == "escalate":
+        from . import collaboration
+        collaboration.post(
+            db, job["project_id"], author_type="agent", author_id=agent["id"],
+            kind="escalation",
+            content=(f"PM 介入任務「{job['title']}」：需要人工處理。\n"
+                     f"原因：{reason}"),
+            meta={"job_id": job["id"], "stage": job["stage"],
+                  "action": action, "cycle": cycle})
         return decision
 
     try:
@@ -434,15 +441,35 @@ async def diagnose(orch, job) -> dict[str, Any]:
                 (new_id("sup"), job["id"], f"pm-ruling-{cycle}",
                  decision["supply"], f"pm-supervisor:{agent['id']}", now()))
         agent_override = ""
+        target_stage = job["stage"]
         restart_from_rework_target = action == "supply_then_retry"
         if action == "retry_other_agent":
             explicit_restart = decision.get("restart_from_rework_target")
             restart_from_rework_target = (
                 explicit_restart if isinstance(explicit_restart, bool)
                 else _failed_acceptance_gate(db, job["id"]))
-            agent_override = _retry_target_and_alternate(
+            agent_override, target_stage = _retry_target_and_alternate(
                 orch, job, restart=restart_from_rework_target,
                 wanted=decision["agent_id"])
+        elif restart_from_rework_target:
+            try:
+                _, target_stage = _retry_target_and_alternate(
+                    orch, job, restart=True, wanted="")
+            except (ValueError, StopIteration):
+                # retry() remains the authority and will report a malformed
+                # workflow; room posting must not swallow an otherwise valid
+                # mocked/legacy retry path before that boundary.
+                target_stage = job["stage"]
+        from . import collaboration
+        collaboration.post(
+            db, job["project_id"], author_type="agent", author_id=agent["id"],
+            kind="assignment",
+            content=(f"PM 介入任務「{job['title']}」並執行 {action}。\n"
+                     f"原因：{reason}\n派工：{target_stage} → "
+                     f"{agent_override or '該階段角色路由'}"),
+            meta={"job_id": job["id"], "from_stage": job["stage"],
+                  "target_stage": target_stage, "action": action,
+                  "agent_id": agent_override, "cycle": cycle})
         retry_options = ({"restart_from_rework_target": True}
                          if restart_from_rework_target else {})
         orch.retry(

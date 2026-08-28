@@ -1,6 +1,7 @@
 from bastet_agent_os import collaboration, maintenance_mode
 from bastet_agent_os.context_engine import build_context
 from bastet_agent_os.context_eval import evaluate
+from bastet_agent_os.db import now
 
 
 async def test_human_approval_publishes_handoff_to_project_room(orch, seeded):
@@ -79,3 +80,28 @@ def test_handoff_delivery_ack_and_context_golden_case(seeded):
     assert result["passed"] is True
     assert seeded.one("SELECT passed FROM context_evaluations WHERE id=?",
                       (result["id"],))["passed"] == 1
+
+
+def test_replacement_agent_gets_own_receipt_and_completion_ack(seeded):
+    handoff_id = collaboration.record_handoff(
+        seeded, project_id="proj1", job_id="job1", run_id="run1",
+        from_stage="plan", to_stage="work", agent_id="ag1",
+        summary="Use the approved baseline", paths=["spec.md"])
+    collaboration.deliver_handoffs(seeded, "job1", "work", "ag1")
+    seeded.write("INSERT INTO agents(id,amos_agent_id,name,executor_type,created_at,"
+                 "updated_at) VALUES('ag2','ag2','Agent Two','fake',?,?)",
+                 (now(), now()))
+    collaboration.deliver_handoffs(seeded, "job1", "work", "ag2")
+
+    receipts = seeded.query("SELECT agent_id FROM handoff_receipts "
+                            "WHERE handoff_id=? ORDER BY agent_id", (handoff_id,))
+    assert [row["agent_id"] for row in receipts] == ["ag1", "ag2"]
+    collaboration.acknowledge_delivered_handoffs(
+        seeded, job_id="job1", stage="work", agent_id="ag2",
+        summary="Understood baseline; implemented against it")
+    receipt = seeded.one("SELECT * FROM handoff_receipts WHERE handoff_id=? "
+                         "AND agent_id='ag2'", (handoff_id,))
+    assert receipt["acknowledged_at"] and "implemented" in receipt["acknowledgement"]
+    room = seeded.one("SELECT content FROM room_messages WHERE kind='handoff_ack' "
+                      "ORDER BY rowid DESC LIMIT 1")
+    assert "implemented" in room["content"]

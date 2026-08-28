@@ -178,6 +178,10 @@ async def test_failed_review_replacement_returns_to_writer_stage(orch, seeded):
     assert routed == {"stage": "implement", "last": "writer"}
     assert retried["agent_id"] == "backup-writer"
     assert retried["restart_from_rework_target"] is True
+    room = seeded.one("SELECT kind,content,meta_json FROM room_messages "
+                      "WHERE kind='assignment' ORDER BY rowid DESC LIMIT 1")
+    assert room and "implement → backup-writer" in room["content"]
+    assert json.loads(room["meta_json"])["target_stage"] == "implement"
 
 
 @pytest.mark.asyncio

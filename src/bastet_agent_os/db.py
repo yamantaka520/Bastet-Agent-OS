@@ -319,6 +319,21 @@ CREATE TABLE IF NOT EXISTS stage_handoffs (
 );
 CREATE INDEX IF NOT EXISTS idx_handoffs_job ON stage_handoffs(job_id, at);
 
+CREATE TABLE IF NOT EXISTS handoff_receipts (
+  id TEXT PRIMARY KEY,
+  handoff_id TEXT NOT NULL REFERENCES stage_handoffs(id) ON DELETE CASCADE,
+  job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  stage TEXT NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  delivered_at TEXT NOT NULL,
+  acknowledged_at TEXT,
+  acknowledgement TEXT,
+  questions_json TEXT NOT NULL DEFAULT '[]',
+  UNIQUE(handoff_id, stage, agent_id)
+);
+CREATE INDEX IF NOT EXISTS idx_handoff_receipts_job
+  ON handoff_receipts(job_id, stage, delivered_at);
+
 -- A durable dispatch fence for safe upgrades.  The row exists even while the
 -- fence is open so status checks never depend on process-local state.
 CREATE TABLE IF NOT EXISTS maintenance_lock (

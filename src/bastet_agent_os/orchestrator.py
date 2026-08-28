@@ -793,12 +793,15 @@ class Orchestrator:
 
         next_stage = stages[idx + 1].name if idx + 1 < len(stages) else None
         paths = collaboration.changed_paths(workdir)
+        authoritative = (f"{stage.gate}: {outcome.verdict}"
+                         if stage.gate != "auto" else "execution: succeeded")
+        risks = ([] if stage.gate != "auto" else
+                 ["本階段沒有權威驗收 gate；Agent 自述的測試結果不算通過證據"])
         collaboration.record_handoff(
             self.db, project_id=job["project_id"], job_id=job["id"],
             run_id=run_id, from_stage=stage.name, to_stage=next_stage,
             agent_id=self._run_agent(run_id), summary=summary[:3000], paths=paths,
-            verification=([f"{stage.gate}: {outcome.verdict}"]
-                          if stage.gate != "auto" else []))
+            verification=[authoritative], risks=risks)
         self.db.audit("orchestrator", "stage.handoff", "job", job["id"],
                       {"from": stage.name, "to": next_stage,
                        "changed_paths": paths[:50]})
@@ -1515,6 +1518,11 @@ class Orchestrator:
                 watchdog.cancel()
                 self._live.pop(run_id, None)
             result = await executor.result(handle)
+            if result.status not in EXEC_FAILURES:
+                from . import collaboration
+                collaboration.acknowledge_delivered_handoffs(
+                    self.db, job_id=job["id"], stage=stage.name,
+                    agent_id=agent["id"], summary=result.summary)
             self._finalize_run(job["id"], run_id, workdir, result)
             # commit at the stage boundary, not only when the card finishes.
             # Leaving a stage's output uncommitted meant every later stage
