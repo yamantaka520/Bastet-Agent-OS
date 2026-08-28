@@ -117,18 +117,67 @@ async def test_secret_shaped_supply_is_refused(orch, seeded):
 async def test_retry_other_agent_validates_the_choice(orch, seeded):
     _make_pm(seeded)
     _block_business(seeded)
+    seeded.write("UPDATE jobs SET stage='work', stages_snapshot_json=? "
+                 "WHERE id='job1'", (json.dumps([
+                     {"name": "work", "gate": "agent-review"}]),))
     seeded.write("INSERT INTO agents(id,amos_agent_id,name,executor_type,enabled,"
                  "config_json,created_at,updated_at) "
                  "VALUES('backup','backup','B','fake',1,'{}',?,?)", (now(), now()))
     SCRIPT.append(_decision(action="retry_other_agent", reason="連續同型失敗",
                             agent_id="ghost-agent"))    # does not exist
     called = []
-    orch.retry = lambda job_id, agent_id="", user="": called.append(agent_id) or {}
+    orch.retry = lambda job_id, agent_id="", user="", **kw: called.append(agent_id) or {}
     orch._alternate_agent = lambda job, last: "backup"
 
     await pm_supervisor.diagnose(orch, seeded.one("SELECT * FROM jobs WHERE id='job1'"))
 
     assert called == ["backup"], "an invalid agent choice must fall back, not crash"
+
+
+@pytest.mark.asyncio
+async def test_failed_review_replacement_returns_to_writer_stage(orch, seeded):
+    """A live PM correctly blamed the implementer, but the router replaced the
+    reviewer and reviewed the same broken diff twice. A failed acceptance gate
+    defaults to the writable rework target and selects that role's alternate."""
+    _make_pm(seeded)
+    stages = [
+        {"name": "implement", "role": "engineer", "gate": "auto"},
+        {"name": "review", "role": "reviewer", "gate": "agent-review",
+         "read_only": True},
+    ]
+    seeded.write("UPDATE jobs SET status='blocked', stage='review', "
+                 "rework_count=3, stages_snapshot_json=? WHERE id='job1'",
+                 (json.dumps(stages),))
+    for agent_id in ("writer", "reviewer"):
+        seeded.write("INSERT INTO agents(id,amos_agent_id,name,executor_type,enabled,"
+                     "config_json,created_at,updated_at) VALUES(?,?,?,'fake',1,'{}',?,?)",
+                     (agent_id, agent_id, agent_id, now(), now()))
+    seeded.write("UPDATE runs SET stage='review', agent_id='reviewer', "
+                 "status='succeeded' WHERE id='run1'")
+    seeded.write("INSERT INTO runs(id,job_id,stage,attempt,agent_id,executor_type,"
+                 "status) VALUES('run0','job1','implement',1,'writer','fake',"
+                 "'succeeded')")
+    seeded.write("INSERT INTO gate_results(id,run_id,gate_type,verdict,reviewer_kind,"
+                 "reviewer_id,detail_md,at) VALUES('g1','run1','agent-review',"
+                 "'failed','agent','reviewer','implementation defect',?)", (now(),))
+    SCRIPT.append(_decision(action="retry_other_agent",
+                            reason="implementer did not fix the defect"))
+    routed = {}
+
+    def alternate(route_job, last):
+        routed.update(stage=route_job["stage"], last=last)
+        return "backup-writer"
+
+    retried = {}
+    orch._alternate_agent = alternate
+    orch.retry = lambda job_id, **kw: retried.update(job_id=job_id, **kw) or {}
+
+    await pm_supervisor.diagnose(
+        orch, seeded.one("SELECT * FROM jobs WHERE id='job1'"))
+
+    assert routed == {"stage": "implement", "last": "writer"}
+    assert retried["agent_id"] == "backup-writer"
+    assert retried["restart_from_rework_target"] is True
 
 
 @pytest.mark.asyncio

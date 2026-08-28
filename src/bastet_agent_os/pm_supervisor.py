@@ -74,7 +74,10 @@ DIAGNOSIS_INSTRUCTIONS = """\
 可選行動：
 - "retry"：暫時性故障或環境已恢復，原 agent 再跑一次。
 - "retry_other_agent"：目前的 agent 明顯是瓶頸（連續同型失敗），換人接手。
-  在 "agent_id" 給出建議人選（可留空，系統會依角色挑替補）。
+  在 "agent_id" 給出建議人選（可留空，系統會依角色挑替補）。如果最後一關是
+  驗收拒絕，而且問題出在被審查的工作內容，必須設
+  "restart_from_rework_target": true，讓替補者回到可寫階段修正；只有 reviewer／
+  executor 本身故障、工作內容不需要改時才設 false。
 - "supply_then_retry"：卡片缺一個事實或裁定（例如：以哪個基線為準、某個
   無法驗證的條件如何取證）。把補給內容寫在 "supply"（純文字，禁止機敏資料），
   它會進到任務的收件匣，然後重跑。
@@ -86,11 +89,11 @@ DIAGNOSIS_INSTRUCTIONS = """\
   因為卡片會把它當成待你裁定的提問顯示出來。
 
 只輸出一個 JSON 物件，不要其他文字：
-{"action": "...", "reason": "一句話講清楚為什麼", "agent_id": "", "supply": ""}
+{"action": "...", "reason": "一句話講清楚為什麼", "agent_id": "", "supply": "", "restart_from_rework_target": false}
 """
 
 
-def parse_decision(text: str) -> dict[str, str] | None:
+def parse_decision(text: str) -> dict[str, Any] | None:
     """The first JSON object carrying a valid action — prose around it is fine."""
     decoder = json.JSONDecoder()
     for index, char in enumerate(text or ""):
@@ -101,11 +104,61 @@ def parse_decision(text: str) -> dict[str, str] | None:
         except json.JSONDecodeError:
             continue
         if isinstance(value, dict) and value.get("action") in ACTIONS:
+            restart = value.get("restart_from_rework_target")
             return {"action": str(value["action"]),
                     "reason": str(value.get("reason") or "")[:500],
                     "agent_id": str(value.get("agent_id") or "").strip(),
-                    "supply": str(value.get("supply") or "")[:4000]}
+                    "supply": str(value.get("supply") or "")[:4000],
+                    "restart_from_rework_target": (
+                        restart if isinstance(restart, bool) else None)}
     return None
+
+
+def _failed_acceptance_gate(db, job_id: str) -> bool:
+    """Whether the blocked episode is a rejection of completed work.
+
+    This distinction is the routing boundary: executor failures retry the
+    current stage, while a failed acceptance gate normally needs a writer.
+    """
+    row = db.one(
+        "SELECT g.verdict FROM gate_results g JOIN runs r ON r.id=g.run_id "
+        "WHERE r.job_id=? ORDER BY g.at DESC, g.rowid DESC LIMIT 1", (job_id,))
+    return bool(row and row["verdict"] == "failed")
+
+
+def _retry_target_and_alternate(orch, job, *, restart: bool,
+                                wanted: str) -> str:
+    """Pick the replacement for the stage that will actually run.
+
+    Previously the PM said "replace the implementer", but routing looked at
+    the currently blocked reviewer stage and replaced the reviewer instead.
+    The unchanged diff was reviewed twice and the PM budget was exhausted.
+    """
+    db = orch.db
+    valid = wanted and db.one(
+        "SELECT id FROM agents WHERE id=? AND enabled=1 AND depleted_at IS NULL",
+        (wanted,))
+    if valid:
+        return wanted
+
+    routed_job = dict(job)
+    target_stage = job["stage"]
+    if restart:
+        from .workflow import parse_stages, rework_target_for
+        stages = parse_stages(json.loads(job["stages_snapshot_json"]))
+        current_idx = next(i for i, stage in enumerate(stages)
+                           if stage.name == job["stage"])
+        target_idx = rework_target_for(
+            stages, current_idx,
+            attempt=orch._handbacks_for(job["id"], job["stage"]))
+        if target_idx is not None:
+            target_stage = stages[target_idx].name
+            routed_job["stage"] = target_stage
+    latest = db.one(
+        "SELECT agent_id FROM runs WHERE job_id=? AND stage=? "
+        "ORDER BY rowid DESC LIMIT 1", (job["id"], target_stage))
+    return orch._alternate_agent(
+        routed_job, latest["agent_id"] if latest else "")
 
 
 def _infrastructure_fallback(db, job_id: str) -> dict[str, str] | None:
@@ -381,20 +434,17 @@ async def diagnose(orch, job) -> dict[str, Any]:
                 (new_id("sup"), job["id"], f"pm-ruling-{cycle}",
                  decision["supply"], f"pm-supervisor:{agent['id']}", now()))
         agent_override = ""
+        restart_from_rework_target = action == "supply_then_retry"
         if action == "retry_other_agent":
-            wanted = decision["agent_id"]
-            valid = wanted and db.one(
-                "SELECT id FROM agents WHERE id=? AND enabled=1", (wanted,))
-            latest = db.one("SELECT agent_id FROM runs WHERE job_id=? "
-                            "ORDER BY rowid DESC LIMIT 1", (job["id"],))
-            agent_override = (wanted if valid else
-                              orch._alternate_agent(job, latest["agent_id"]
-                                                    if latest else ""))
-        retry_options = (
-            {"restart_from_rework_target": True}
-            if action == "supply_then_retry"
-            else {}
-        )
+            explicit_restart = decision.get("restart_from_rework_target")
+            restart_from_rework_target = (
+                explicit_restart if isinstance(explicit_restart, bool)
+                else _failed_acceptance_gate(db, job["id"]))
+            agent_override = _retry_target_and_alternate(
+                orch, job, restart=restart_from_rework_target,
+                wanted=decision["agent_id"])
+        retry_options = ({"restart_from_rework_target": True}
+                         if restart_from_rework_target else {})
         orch.retry(
             job["id"], agent_id=agent_override,
             user=f"pm-supervisor:{agent['id']}", **retry_options)
