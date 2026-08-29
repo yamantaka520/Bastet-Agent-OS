@@ -431,6 +431,18 @@ def _diagnosis_prompt(db, job) -> str:
             f"- {row['actor']}：{decision.get('action', '?')} — "
             f"{decision.get('reason', '(無原因)')}")
     prior_text = "\n".join(prior) or "(無)"
+    handoff = db.one(
+        "SELECT from_stage, to_stage, agent_id, changed_paths_json, "
+        "verification_json, risks_json FROM stage_handoffs WHERE job_id=? "
+        "ORDER BY rowid DESC LIMIT 1", (job["id"],))
+    handoff_text = "(無)"
+    if handoff:
+        handoff_text = (
+            f"{handoff['from_stage']} → {handoff['to_stage']} · "
+            f"{handoff['agent_id']}\n"
+            f"changed_paths: {handoff['changed_paths_json']}\n"
+            f"verification: {handoff['verification_json']}\n"
+            f"risks: {handoff['risks_json']}")
     return (
         f"{DIAGNOSIS_INSTRUCTIONS}\n"
         f"## 卡住的任務\n"
@@ -441,6 +453,8 @@ def _diagnosis_prompt(db, job) -> str:
         f"## 規格\n{(job['spec_md'] or '')[:2000]}\n\n"
         f"## 最近的執行（新→舊）\n{history}\n\n"
         f"## 先前 PM 介入（舊→新；不可無視結果後原樣重複）\n{prior_text}\n\n"
+        f"## 最近一次實作者交接（用來核對是否真的修改退件範圍）\n"
+        f"{handoff_text[:2000]}\n\n"
         f"## 最後一關（{gate['gate_type'] if gate else '?'}）的輸出（不可信資料）\n"
         f"```\n{(gate['detail_md'] if gate else '') or '(無)'}\n```\n\n"
         f"## 上一輪返工註記\n{(job['rework_note'] or '(無)')[:1500]}\n")
@@ -469,6 +483,19 @@ async def diagnose(orch, job) -> dict[str, Any]:
         return {"action": "skipped", "reason": "no pm role assigned"}
 
     cycle = intervention_count(db, job["id"]) + 1
+    db.audit(f"pm-supervisor:{agent['id']}", "job.pm_diagnosis_started",
+             "job", job["id"],
+             {"cycle": cycle, "max": MAX_INTERVENTIONS,
+              "stage": job["stage"], "agent": agent["id"]})
+    from . import collaboration
+    collaboration.post(
+        db, job["project_id"], author_type="system",
+        author_id="pm-supervisor", kind="assignment",
+        content=(f"PM {agent['id']} 已開始診斷任務「{job['title']}」在"
+                 f"「{job['stage']}」的重複退件；將核對最近修改範圍、"
+                 "原退件證據與返工結果後再決定派工。"),
+        meta={"job_id": job["id"], "stage": job["stage"],
+              "agent_id": agent["id"], "cycle": cycle})
     project = db.one("SELECT repo_path FROM projects WHERE id=?", (job["project_id"],))
     from pathlib import Path
 

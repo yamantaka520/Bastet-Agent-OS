@@ -8,6 +8,21 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.12] - 2026-08-29
+
+### Fixed
+
+- A writable `auto` stage receiving rejected work must now pass the original
+  acceptance stage's deterministic test/precheck command before Bastet can
+  send the card to a reviewer again. A successful Agent exit no longer
+  self-certifies a repair; failed repair verification keeps the card at the
+  writable stage with the exact output and starts PM diagnosis.
+- Exhausting the rework budget starts PM diagnosis immediately instead of
+  relying only on a later supervisor sweep. Diagnosis start is persisted and
+  posted in the project room, and the PM brief includes the latest handoff's
+  actual changed paths, verification and risks so it can detect a repair that
+  did not touch the rejected scope.
+
 ## [0.34.11] - 2026-08-29
 
 ### Fixed

@@ -793,6 +793,59 @@ class Orchestrator:
             # for files in a directory the stage never wrote to.
             job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
             workdir = job["worktree_path"] or self._project_repo(job)
+            repair_stage = self._repair_verification_stage(job, stages, stage)
+            repair_verified = False
+            if repair_stage is not None:
+                # A writable auto stage is not allowed to self-certify a
+                # rework. Re-run the deterministic command that produced the
+                # rejection before paying for another reviewer pass. The live
+                # failure this closes: the writer claimed the two findings
+                # were fixed, changed only one test file, auto passed, and the
+                # same hidden #lang-toggle assertion was reviewed repeatedly.
+                repair_outcome = await asyncio.to_thread(
+                    self._judge, repair_stage, workdir, result,
+                    job=job, run_id=run_id)
+                self._record_gate(
+                    run_id, repair_stage, repair_outcome,
+                    reviewer_kind="agent", reviewer_id="workflow-engine")
+                self.db.audit(
+                    "orchestrator",
+                    f"repair.verification.{repair_outcome.verdict}",
+                    "job", job_id,
+                    {"stage": stage.name,
+                     "source_stage": repair_stage.name.split(":", 1)[0],
+                     "command": repair_stage.gate_config.get("command", ""),
+                     "config_error": repair_outcome.config_error,
+                     "detail": repair_outcome.detail[:1200]})
+                if repair_outcome.verdict != "passed":
+                    if repair_outcome.failure_kind:
+                        self._capability_block(
+                            job, stage, repair_outcome.detail,
+                            repair_outcome.failure_kind)
+                        return
+                    note = rework_brief(
+                        failed_stage=repair_stage.name.split(":", 1)[0],
+                        gate="repair-tests-pass",
+                        cycle=max(1, int(job["rework_count"] or 0)),
+                        max_cycles=max(1, int(job["rework_count"] or 0)),
+                        detail=repair_outcome.detail,
+                        config_error=repair_outcome.config_error)
+                    self.db.write(
+                        "UPDATE jobs SET rework_note=? WHERE id=?",
+                        (note, job_id))
+                    self._block(
+                        job_id,
+                        f"{stage.name} 修復後仍未通過原退件驗證；"
+                        "保持在可寫階段，不再重送 reviewer："
+                        f"{repair_outcome.detail[:1200]}",
+                        stage=stage.name, gate="repair-tests-pass",
+                        config_error=repair_outcome.config_error,
+                        detail=repair_outcome.detail,
+                        cycles=job["rework_count"])
+                    self._maybe_pm_diagnose(
+                        self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,)), "")
+                    return
+                repair_verified = True
             # Deterministic gates may run a long browser/E2E command.  They are
             # intentionally synchronous at the workflow boundary (also used by
             # CLI revalidation), but must never occupy the control-plane event
@@ -827,23 +880,70 @@ class Orchestrator:
                     return
                 if self._rework(job, stages, idx, outcome):
                     continue          # sent back to be fixed; keep driving
+                # Exhausting a business rework loop is exactly when the PM is
+                # needed. Start it now and persist that start in pm_supervisor,
+                # rather than hoping a later 30-second sweep runs before a
+                # restart or maintenance window.
+                self._maybe_pm_diagnose(
+                    self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,)), "")
                 return
 
             if self._accept_passed_stage(job, stages, idx, stage, workdir,
-                                         run_id, result.summary, outcome):
+                                         run_id, result.summary, outcome,
+                                         repair_verified=repair_verified):
                 return
+
+    def _repair_verification_stage(self, job, stages: list[StageDef],
+                                   stage: StageDef) -> StageDef | None:
+        """Return the rejected stage's deterministic command for a fixer.
+
+        ``rework_note`` exists only while a card is at the writable target. The
+        matching audit row gives us the source acceptance stage without adding
+        another mutable job field. Agent-review stages use their host precheck;
+        tests-pass stages use their gate command.
+        """
+        if stage.read_only or stage.gate != "auto" or not job["rework_note"]:
+            return None
+        row = self.db.one(
+            "SELECT detail_json FROM audit_log WHERE action='job.rework' "
+            "AND target_id=? ORDER BY id DESC LIMIT 1", (job["id"],))
+        if row is None:
+            return None
+        try:
+            detail = json.loads(row["detail_json"] or "{}")
+        except json.JSONDecodeError:
+            return None
+        if detail.get("back_to") != stage.name:
+            return None
+        source = next((item for item in stages
+                       if item.name == detail.get("failed_stage")), None)
+        if source is None:
+            return None
+        command = str(
+            source.gate_config.get("precheck_command")
+            or (source.gate_config.get("command")
+                if source.gate == "tests-pass" else "")
+            or "").strip()
+        if not command:
+            return None
+        return StageDef(
+            name=f"{source.name}:repair-verification",
+            gate="tests-pass", gate_config={"command": command})
 
     def _accept_passed_stage(self, job, stages: list[StageDef], idx: int,
                              stage: StageDef, workdir: str, run_id: str,
-                             summary: str, outcome: GateOutcome) -> bool:
+                             summary: str, outcome: GateOutcome,
+                             *, repair_verified: bool = False) -> bool:
         """Publish the handoff and advance after either a run or revalidation."""
         from . import collaboration
 
         next_stage = stages[idx + 1].name if idx + 1 < len(stages) else None
         paths = collaboration.changed_paths(workdir)
-        authoritative = (f"{stage.gate}: {outcome.verdict}"
-                         if stage.gate != "auto" else "execution: succeeded")
-        risks = ([] if stage.gate != "auto" else
+        authoritative = (
+            "repair-tests-pass: passed" if repair_verified
+            else f"{stage.gate}: {outcome.verdict}"
+            if stage.gate != "auto" else "execution: succeeded")
+        risks = ([] if stage.gate != "auto" or repair_verified else
                  ["本階段沒有權威驗收 gate；Agent 自述的測試結果不算通過證據"])
         collaboration.record_handoff(
             self.db, project_id=job["project_id"], job_id=job["id"],

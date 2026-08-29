@@ -116,6 +116,62 @@ async def test_a_read_only_reviewer_hands_back_to_the_writer(orch, seeded):
     assert audit(seeded, "job.rework")[0]["back_to"] == "implement"
 
 
+async def test_rework_writer_must_pass_original_precheck_before_re_review(
+        orch, seeded):
+    """A writer's successful exit is not proof that rejected work was fixed.
+
+    The original host command must pass while the card is still at the writable
+    stage. Otherwise another reviewer would only inspect the same broken diff.
+    """
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "auto"},
+        {"name": "review", "gate": "agent-review", "read_only": True,
+         "rework_target": "implement",
+         "gate_config": {"precheck_command": "test -f fixed.txt"}},
+    ])
+    SCRIPT.append(RunResult(status="succeeded", summary="first implementation"))
+    SCRIPT.append(RunResult(
+        status="succeeded", summary="reject",
+        structured_verdict={"verdict": "reject", "reasons": ["missing fix"]}))
+    SCRIPT.append(RunResult(
+        status="succeeded", summary="claimed fixed but changed the wrong file"))
+
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+    assert (job["status"], job["stage"]) == ("blocked", "implement")
+    assert stages_of(seeded, job_id) == ["implement", "review", "implement"]
+    verification = audit(seeded, "repair.verification.failed")[-1]
+    assert verification["source_stage"] == "review"
+    assert verification["command"] == "test -f fixed.txt"
+    blocked = audit(seeded, "job.blocked")[-1]
+    assert blocked["gate"] == "repair-tests-pass"
+    assert "不再重送 reviewer" in blocked["reason"]
+
+
+async def test_exhausted_rework_starts_pm_immediately(
+        orch, seeded, monkeypatch):
+    """Max rework is a PM event, not a later sweep that may never happen."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "tests-pass", "max_cycles": 1,
+         "gate_config": {"command": "exit 1"}},
+    ])
+    SCRIPT.append(RunResult(status="succeeded", summary="attempt one"))
+    SCRIPT.append(RunResult(status="succeeded", summary="attempt two"))
+    diagnosed = []
+    monkeypatch.setattr(
+        orch, "_maybe_pm_diagnose",
+        lambda job, reason: diagnosed.append((job["id"], reason)))
+
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    assert diagnosed == [(job_id, "")]
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] \
+        == "blocked"
+
+
 async def test_the_loop_is_capped_and_then_asks_a_human(orch, seeded):
     """An agent that has failed three times is not converging. The cap is what
     keeps 'self-healing' from meaning 'burns tokens forever'."""
