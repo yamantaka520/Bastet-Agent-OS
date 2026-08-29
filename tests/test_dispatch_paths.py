@@ -439,3 +439,27 @@ async def test_ruling_retry_starts_at_the_writable_rework_target(orch, seeded):
         "implement", "review", "implement", "review"]
     assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))[
         "status"] == "done"
+
+
+async def test_ruling_retry_preserves_repair_evidence_and_prechecks(orch, seeded):
+    """A PM restart is still a repair and cannot regain auto self-approval."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "auto"},
+        {"name": "review", "gate": "agent-review", "read_only": True,
+         "rework_target": "implement", "on_fail": "block",
+         "gate_config": {"precheck_command": "test -f repaired.txt"}},
+    ])
+    SCRIPT.append(RunResult(status="succeeded", summary="old implementation"))
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    SCRIPT.append(RunResult(status="succeeded", summary="claimed repair"))
+    orch.retry(job_id, restart_from_rework_target=True)
+    await orch.wait_idle()
+
+    job = seeded.one("SELECT status,stage,rework_note FROM jobs WHERE id=?", (job_id,))
+    assert (job["status"], job["stage"]) == ("blocked", "implement")
+    assert job["rework_note"]
+    assert seeded.one(
+        "SELECT 1 FROM audit_log WHERE action='repair.verification.failed' "
+        "AND target_id=?", (job_id,))

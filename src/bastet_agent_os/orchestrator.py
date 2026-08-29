@@ -902,21 +902,45 @@ class Orchestrator:
         another mutable job field. Agent-review stages use their host precheck;
         tests-pass stages use their gate command.
         """
-        if stage.read_only or stage.gate != "auto" or not job["rework_note"]:
+        if stage.read_only or stage.gate != "auto":
             return None
-        row = self.db.one(
-            "SELECT detail_json FROM audit_log WHERE action='job.rework' "
-            "AND target_id=? ORDER BY id DESC LIMIT 1", (job["id"],))
-        if row is None:
-            return None
-        try:
-            detail = json.loads(row["detail_json"] or "{}")
-        except json.JSONDecodeError:
-            return None
-        if detail.get("back_to") != stage.name:
+        # A repair can arrive through the ordinary handback, a PM/incident
+        # restart, or a retry after deterministic repair verification failed.
+        # Requiring only ``rework_note`` lost the PM path because retry() used
+        # to clear/omit that note, silently turning the fixer back into an
+        # unverified auto stage.
+        source_name = ""
+        rows = self.db.query(
+            "SELECT action,detail_json FROM audit_log WHERE target_id=? AND "
+            "action IN ('job.rework','job.retry','repair.verification.failed') "
+            "ORDER BY id DESC LIMIT 12", (job["id"],))
+        for row in rows:
+            try:
+                detail = json.loads(row["detail_json"] or "{}")
+            except json.JSONDecodeError:
+                continue
+            if row["action"] == "job.retry":
+                direct_restart = (
+                    detail.get("restart_from_rework_target") is True
+                    and detail.get("stage") == stage.name)
+                if direct_restart:
+                    source_name = str(detail.get("retried_from") or "")
+                    break
+                if not job["rework_note"]:
+                    return None
+                continue
+            if row["action"] == "job.rework" and \
+                    detail.get("back_to") == stage.name:
+                source_name = str(detail.get("failed_stage") or "")
+                break
+            if row["action"] == "repair.verification.failed" and \
+                    detail.get("stage") == stage.name:
+                source_name = str(detail.get("source_stage") or "")
+                break
+        if not source_name:
             return None
         source = next((item for item in stages
-                       if item.name == detail.get("failed_stage")), None)
+                       if item.name == source_name), None)
         if source is None:
             return None
         command = str(
@@ -1404,9 +1428,25 @@ class Orchestrator:
                     f"stage {job['stage']!r} has no writable rework target")
             target = stages[target_idx]
             if target.name != job["stage"]:
+                failed = self.db.one(
+                    "SELECT g.gate_type,g.detail_md,r.stage FROM gate_results g "
+                    "JOIN runs r ON r.id=g.run_id WHERE r.job_id=? "
+                    "AND g.verdict='failed' ORDER BY g.at DESC,g.rowid DESC LIMIT 1",
+                    (job_id,))
+                repair_note = job["rework_note"] or ""
+                if not repair_note and failed:
+                    source = next((item for item in stages
+                                   if item.name == failed["stage"]), None)
+                    repair_note = rework_brief(
+                        failed_stage=failed["stage"], gate=failed["gate_type"],
+                        cycle=max(1, int(job["rework_count"] or 0)),
+                        max_cycles=(source.max_cycles if source else
+                                    max(1, int(job["rework_count"] or 0))),
+                        detail=failed["detail_md"] or "")
                 self.db.write(
-                    "UPDATE jobs SET stage=?, agent_override=NULL, updated_at=? "
-                    "WHERE id=?", (target.name, now(), job_id))
+                    "UPDATE jobs SET stage=?, rework_note=?, agent_override=NULL, "
+                    "updated_at=? WHERE id=?",
+                    (target.name, repair_note, now(), job_id))
                 job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         # Retrying and renewing the bounded recovery lease are separate human
         # decisions.  The old implicit refill let a ruling on a stale workflow

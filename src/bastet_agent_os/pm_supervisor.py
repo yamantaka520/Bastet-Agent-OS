@@ -320,7 +320,14 @@ def reassess_exhausted(orch, job) -> dict[str, Any]:
         "handoff": dict(handoff) if handoff else None,
         "prior_interventions": prior_interventions,
     }
-    restart = bool(gate and gate["verdict"] == "failed")
+    repair_failure = db.one(
+        "SELECT detail_json FROM audit_log WHERE "
+        "action='repair.verification.failed' AND target_id=? AND "
+        "id>COALESCE((SELECT MAX(id) FROM audit_log WHERE action='job.retry' "
+        "AND target_id=?),0) ORDER BY id DESC LIMIT 1", (job["id"], job["id"]))
+    # A failed repair verifier is already sitting at the writable target. Going
+    # "back" again would incorrectly jump to an even earlier design stage.
+    restart = bool(gate and gate["verdict"] == "failed" and not repair_failure)
     terminal_failure = bool(run and run["status"] in
                             ("failed", "timeout", "orphaned", "cancelled"))
     if not restart and not terminal_failure:
@@ -344,6 +351,8 @@ def reassess_exhausted(orch, job) -> dict[str, Any]:
         "action": "retry_other_agent" if alternate else "retry",
         "reason": ("最後權威 gate 拒絕的是工作內容；改回可寫階段並換手修正"
                    if restart else
+                   "修復仍未通過原始驗證；留在目前可寫階段換手修正"
+                   if repair_failure else
                    "最後 run 是執行層失敗；保留工作樹並改由可用替補接手"),
         "agent_id": alternate,
         "target_stage": target_stage,

@@ -8,6 +8,16 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.14] - 2026-08-29
+
+### Fixed
+
+- PM and incident retries that return a rejected card to its writable target
+  now preserve the rejection brief and are recognized as repairs, so their
+  `auto` stage must pass the original deterministic acceptance command before
+  re-review. A failed repair verification remains at the current writable
+  stage instead of being routed one stage too far backward.
+
 ## [0.34.13] - 2026-08-29
 
 ### Fixed
