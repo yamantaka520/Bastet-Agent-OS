@@ -8,6 +8,17 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.11] - 2026-08-29
+
+### Fixed
+
+- Direct Pi card runs now deterministically bridge the selected account's
+  `auth.json` API key into the extension provider environment. This fixes the
+  case where the same independent Pi profile passed an interactive inference
+  but an unattended card process intermittently reported `No API key found`.
+  The selected account credential takes precedence over inherited service or
+  project variables, and the key value is never logged.
+
 ## [0.34.10] - 2026-08-29
 
 ### Fixed

@@ -4,12 +4,13 @@ Last updated: 2026-08-29
 
 ## Current project status
 
-- Released: **v0.34.10**. Version arc v0.1.0 → v0.34.10 in one month
+- Released: **v0.34.11**. Version arc v0.1.0 → v0.34.11 in one month
   (2026-07-28 → 2026-08-29), ~131 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.
-- v0.34.10 safely loads account-profile Pi provider packages while keeping
-  repository extensions disabled, and resolves the exact provider/model route.
+- v0.34.11 makes Pi account credentials deterministic for extension providers;
+  v0.34.10 safely loads account-profile Pi provider packages while keeping
+  repository extensions disabled and resolves the exact provider/model route.
 - v0.34.9 adds model-specific Pi credential admission, non-blocking E2E gates,
   per-Agent login/model terminals, and atomic editable Agent ids.
 - v0.32.0 adds a durable maintenance/drain fence, explicit handoff delivery and

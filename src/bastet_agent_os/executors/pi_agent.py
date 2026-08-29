@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import signal
 import sys
 from collections.abc import AsyncIterator
@@ -41,6 +42,11 @@ WRITE_TOOLS = "read,bash,edit,write,grep,find,ls"
 log = logging.getLogger("bastet.executor")
 
 
+def _profile_dir(env: dict[str, str]) -> Path:
+    return Path(env.get("PI_CODING_AGENT_DIR") or
+                (Path(env.get("HOME") or Path.home()) / ".pi" / "agent"))
+
+
 def _trusted_profile_extensions(env: dict[str, str]) -> list[str]:
     """Return explicitly installed Pi packages from the selected account profile.
 
@@ -51,8 +57,7 @@ def _trusted_profile_extensions(env: dict[str, str]) -> list[str]:
     only npm packages named in that profile's settings, and only from its own
     node_modules directory.
     """
-    profile = Path(env.get("PI_CODING_AGENT_DIR") or
-                   (Path(env.get("HOME") or Path.home()) / ".pi" / "agent"))
+    profile = _profile_dir(env)
     settings_path = profile / "settings.json"
     try:
         settings = json.loads(settings_path.read_text())
@@ -91,6 +96,32 @@ def _trusted_profile_extensions(env: dict[str, str]) -> list[str]:
             continue
         paths.append(str(package_dir))
     return paths
+
+
+def _profile_api_key(env: dict[str, str], provider: str) -> str | None:
+    """Resolve one provider key from the selected Pi account profile.
+
+    Pi normally resolves extension provider credentials from ``auth.json``.
+    That implicit bridge has proved unreliable in unattended child processes:
+    the same profile can pass an interactive inference and then report no key
+    in a card run. Exporting only the selected provider's own API key makes the
+    account binding deterministic. The child could already read this file
+    through ``PI_CODING_AGENT_DIR``; this does not widen secret access.
+    """
+    try:
+        auth = json.loads((_profile_dir(env) / "auth.json").read_text())
+    except (OSError, ValueError, TypeError):
+        return None
+    entry = auth.get(provider) if isinstance(auth, dict) else None
+    if not isinstance(entry, dict) or entry.get("type") != "api_key":
+        return None
+    key = entry.get("key")
+    return key if isinstance(key, str) and key else None
+
+
+def _provider_key_env(provider: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", provider).strip("_").upper()
+    return f"{normalized}_API_KEY"
 
 
 def _listed_model(output: str, requested: str) -> tuple[str, str] | None:
@@ -229,6 +260,11 @@ class PiExecutor:
                     "Open Login & model settings for this Pi agent."
                     + (f" Pi model lookup: {detail[:500]}" if detail else ""))
             provider, model = selected
+            profile_key = _profile_api_key(env, provider)
+            if profile_key:
+                # The explicitly selected account owns this route. Its key
+                # must win over any inherited service or project environment.
+                env[_provider_key_env(provider)] = profile_key
             cmd += extension_args + ["--provider", provider, "--model", model]
         cmd += ["--", prompt]
 

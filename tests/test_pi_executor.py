@@ -14,6 +14,8 @@ FAKE_PI = """#!/bin/sh
   printf 'ARGS:'; printf ' %s' "$@"; printf '\n'
   printf 'PROFILE:%s\n' "$PI_CODING_AGENT_DIR"
   printf 'TOKEN:%s\n' "$BASTET_RUN_TOKEN"
+  [ -z "$OLLAMA_CLOUD_API_KEY" ] || printf 'OLLAMA_KEY_PRESENT:true\n'
+  [ "$OLLAMA_CLOUD_API_KEY" != "$EXPECTED_OLLAMA_KEY" ] || printf 'OLLAMA_KEY_MATCH:true\n'
 } > "$FAKE_LOG"
 for arg in "$@"; do
   if [ "$arg" = "--list-models" ]; then
@@ -148,6 +150,9 @@ async def test_direct_selected_model_loads_only_trusted_profile_provider(
     (profile / "settings.json").write_text(json.dumps({
         "packages": ["npm:pi-ollama-cloud-provider"],
     }))
+    (profile / "auth.json").write_text(json.dumps({
+        "ollama-cloud": {"type": "api_key", "key": "profile-secret"},
+    }))
     (package / "package.json").write_text(json.dumps({
         "name": "pi-ollama-cloud-provider",
         "pi": {"extensions": ["./index.ts"]},
@@ -158,6 +163,8 @@ async def test_direct_selected_model_loads_only_trusted_profile_provider(
         "ollama-cloud  glm-5.3-flash  1.0M     131.1K\n")
     monkeypatch.setenv("FAKE_MODEL_LIST", str(models))
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(profile))
+    monkeypatch.setenv("OLLAMA_CLOUD_API_KEY", "stale-project-secret")
+    monkeypatch.setenv("EXPECTED_OLLAMA_KEY", "profile-secret")
     output({"type": "message_end", "message": {
         "role": "assistant", "content": [{"type": "text", "text": "ok"}],
         "usage": {}, "stopReason": "stop"}})
@@ -170,6 +177,8 @@ async def test_direct_selected_model_loads_only_trusted_profile_provider(
     assert "--no-extensions" in text
     assert f"-e {package}" in text
     assert "--provider ollama-cloud --model glm-5.3-flash" in text
+    assert "OLLAMA_KEY_PRESENT:true" in text
+    assert "OLLAMA_KEY_MATCH:true" in text
 
 
 async def test_direct_selected_model_rejects_an_unavailable_profile_route(
