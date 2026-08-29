@@ -119,6 +119,57 @@ def _profile_api_key(env: dict[str, str], provider: str) -> str | None:
     return key if isinstance(key, str) and key else None
 
 
+def _profile_model_route(env: dict[str, str]) -> tuple[str, str] | None:
+    """Return the account's persisted/default or most recent interactive route.
+
+    Pi's ``/model`` picker records a ``model_change`` in the session JSONL but,
+    for extension providers, does not necessarily write ``defaultProvider`` /
+    ``defaultModel`` to settings.json.  The WebUI calls this surface "Login &
+    model settings", so an unattended card must use the route the operator just
+    proved in that same isolated account instead of silently falling back to an
+    unrelated built-in model.
+    """
+    profile = _profile_dir(env)
+    try:
+        settings = json.loads((profile / "settings.json").read_text())
+    except (OSError, ValueError, TypeError):
+        settings = {}
+    if isinstance(settings, dict):
+        provider = settings.get("defaultProvider") or settings.get("provider")
+        model = settings.get("defaultModel") or settings.get("model")
+        if isinstance(provider, str) and provider and isinstance(model, str) and model:
+            return provider, model
+
+    try:
+        sessions = sorted(
+            (profile / "sessions").glob("**/*.jsonl"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return None
+    for path in sessions[:20]:
+        route: tuple[str, str] | None = None
+        try:
+            # Login/model sessions are small.  Cap the read so corrupt or stale
+            # profiles cannot turn route discovery into an unbounded operation.
+            if path.stat().st_size > 2_000_000:
+                continue
+            for line in path.read_text(errors="replace").splitlines():
+                row = json.loads(line)
+                if not isinstance(row, dict) or row.get("type") != "model_change":
+                    continue
+                provider, model = row.get("provider"), row.get("modelId")
+                if isinstance(provider, str) and provider and \
+                        isinstance(model, str) and model:
+                    route = (provider, model)
+        except (OSError, ValueError, TypeError):
+            continue
+        if route:
+            return route
+    return None
+
+
 def _provider_key_env(provider: str) -> str:
     normalized = re.sub(r"[^A-Za-z0-9]+", "_", provider).strip("_").upper()
     return f"{normalized}_API_KEY"
@@ -229,7 +280,7 @@ class PiExecutor:
             env.update(PI_CODING_AGENT_DIR=str(profile_dir),
                        BASTET_RUN_TOKEN=task.run_token or "")
             cmd += ["--provider", "bastet", "--model", task.llm["model"]]
-        elif task.llm and task.llm.get("model"):
+        else:
             # Keep repository extension discovery disabled, but explicitly load
             # provider packages the operator installed in this account profile.
             # Some providers (including pi-ollama-cloud-provider) are invisible
@@ -238,9 +289,23 @@ class PiExecutor:
             # catalogue the actual run uses.
             extension_args = [item for path in _trusted_profile_extensions(env)
                               for item in ("-e", path)]
+            requested = (task.llm or {}).get("model")
+            remembered_route = None if requested else _profile_model_route(env)
+            if remembered_route:
+                requested = "/".join(remembered_route)
+            if not requested:
+                cmd += ["--", prompt]
+                handle.process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    limit=STREAM_LIMIT,
+                    cwd=task.workdir, env=env,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    start_new_session=(sys.platform != "win32"))
+                return handle
             lookup = await asyncio.create_subprocess_exec(
                 "pi", "--no-extensions", *extension_args,
-                "--list-models", task.llm["model"],
+                "--list-models", requested,
                 cwd=task.workdir, env=env,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -252,7 +317,7 @@ class PiExecutor:
                 await lookup.wait()
                 raise RuntimeError("Pi model/provider preflight timed out") from exc
             listing = model_out.decode(errors="replace")
-            selected = _listed_model(listing, task.llm["model"])
+            selected = _listed_model(listing, requested)
             if lookup.returncode != 0 or selected is None:
                 detail = (model_out + model_err).decode(errors="replace").strip()
                 raise RuntimeError(

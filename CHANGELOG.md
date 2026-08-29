@@ -8,6 +8,17 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.16] - 2026-08-29
+
+### Fixed
+
+- A direct Pi card whose Agent has no explicit model now reuses the most recent
+  `model_change` proven in that isolated account's Login & model settings
+  terminal. Bastet validates the exact provider/model against the account's
+  trusted extension catalogue and exports only that provider's saved key. It
+  no longer falls back to an unrelated unauthenticated Pi default after the
+  operator successfully tested an extension model interactively.
+
 ## [0.34.15] - 2026-08-29
 
 ### Fixed

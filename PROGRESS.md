@@ -4,11 +4,13 @@ Last updated: 2026-08-29
 
 ## Current project status
 
-- Released: **v0.34.15**. Version arc v0.1.0 → v0.34.15 in one month
+- Released: **v0.34.16**. Version arc v0.1.0 → v0.34.16 in one month
   (2026-07-28 → 2026-08-29), ~131 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.
-- v0.34.15 reuses identical repair/precheck evidence at the same clean HEAD;
+- v0.34.16 carries the Pi account's last interactively proven provider/model
+  route into unattended card runs when the Agent has no explicit model;
+  v0.34.15 reuses identical repair/precheck evidence at the same clean HEAD;
   v0.34.14 carries repair evidence through PM/incident retries; v0.34.13 makes
   exhausted PM recovery evidence-aware instead of permanently
   count-latched; v0.34.12 closes the rework loop with mandatory original-gate verification
@@ -49,7 +51,7 @@ Last updated: 2026-08-29
   6. **Interrupt the dead, not the merely quiet** (0.30.0): liveness decides
      interruption, so a 20-minute test is no longer executed at the 15-minute
      silence mark.
-- Test suite: **560 passing**, `ruff` clean; CI green on Linux/macOS and
+- Test suite: **561 passing**, `ruff` clean; CI green on Linux/macOS and
   inside the shipped Docker base image (Windows legs are declarative).
 - Releases are automated: a `v*` tag publishes to PyPI (Trusted Publishing) and
   pushes the multi-arch image to Docker Hub.

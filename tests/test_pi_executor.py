@@ -181,6 +181,49 @@ async def test_direct_selected_model_loads_only_trusted_profile_provider(
     assert "OLLAMA_KEY_MATCH:true" in text
 
 
+async def test_direct_unset_model_reuses_latest_profile_model_change(
+        fake_pi, tmp_path, monkeypatch):
+    output, log = fake_pi
+    profile = tmp_path / "profile"
+    package = profile / "npm" / "node_modules" / "pi-ollama-cloud-provider"
+    package.mkdir(parents=True)
+    (profile / "settings.json").write_text(json.dumps({
+        "packages": ["npm:pi-ollama-cloud-provider"],
+    }))
+    (profile / "auth.json").write_text(json.dumps({
+        "ollama-cloud": {"type": "api_key", "key": "profile-secret"},
+    }))
+    (package / "package.json").write_text(json.dumps({
+        "name": "pi-ollama-cloud-provider",
+        "pi": {"extensions": ["./index.ts"]},
+    }))
+    session_dir = profile / "sessions" / "project"
+    session_dir.mkdir(parents=True)
+    (session_dir / "latest.jsonl").write_text("\n".join([
+        json.dumps({"type": "session", "id": "s1"}),
+        json.dumps({"type": "model_change", "provider": "ollama-cloud",
+                    "modelId": "glm-5.3-flash"}),
+    ]) + "\n")
+    models = tmp_path / "models.txt"
+    models.write_text(
+        "provider      model          context  max-out\n"
+        "ollama-cloud  glm-5.3-flash  1.0M     131.1K\n")
+    monkeypatch.setenv("FAKE_MODEL_LIST", str(models))
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(profile))
+    monkeypatch.setenv("EXPECTED_OLLAMA_KEY", "profile-secret")
+    output({"type": "message_end", "message": {
+        "role": "assistant", "content": [{"type": "text", "text": "ok"}],
+        "usage": {}, "stopReason": "stop"}})
+
+    result, _, _ = await drive(spec(tmp_path))
+
+    assert result.status == "succeeded"
+    text = log.read_text()
+    assert f"-e {package}" in text
+    assert "--provider ollama-cloud --model glm-5.3-flash" in text
+    assert "OLLAMA_KEY_MATCH:true" in text
+
+
 async def test_direct_selected_model_rejects_an_unavailable_profile_route(
         fake_pi, tmp_path):
     _, _ = fake_pi
