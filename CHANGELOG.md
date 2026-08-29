@@ -8,6 +8,16 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.13] - 2026-08-29
+
+### Fixed
+
+- An exhausted PM/incident circuit no longer strands a card forever when a
+  materially different authoritative failure appears later. Reassessment is
+  keyed by a stable fingerprint of the gate failure, terminal run, and latest
+  handoff scope: unchanged evidence remains latched, while new evidence gets a
+  bounded recovery attempt. A lifetime cap still prevents infinite churn.
+
 ## [0.34.12] - 2026-08-29
 
 ### Fixed

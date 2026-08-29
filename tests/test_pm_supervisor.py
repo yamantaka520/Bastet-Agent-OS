@@ -369,6 +369,19 @@ async def test_sweep_diagnoses_and_caps(orch, seeded):
     await orch.wait_idle()
     assert len(retried) == before
 
+    # A later, materially different authoritative failure is a new incident,
+    # not the already-spent one.  The circuit may reopen once for that evidence
+    # while the unchanged fingerprint above remains latched.
+    seeded.write(
+        "INSERT INTO gate_results(id,run_id,gate_type,verdict,reviewer_kind,"
+        "reviewer_id,detail_md,at) VALUES('g2','run1','agent-review','failed',"
+        "'agent','fakebot','new deterministic failure',?)", (now(),))
+    await orch.supervise_once()
+    await orch.wait_idle()
+    assert len(retried) == before + 1
+    assert len(seeded.query(
+        "SELECT id FROM audit_log WHERE action='job.pm_reassessment'")) == 2
+
 
 @pytest.mark.asyncio
 async def test_escalate_latches_until_a_human_renews_the_recovery_lease(orch, seeded):

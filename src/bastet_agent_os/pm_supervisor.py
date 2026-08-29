@@ -27,6 +27,7 @@ Hard limits, because a supervisor that loops is worse than none:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import Any
@@ -45,6 +46,7 @@ DIAGNOSIS_TIMEOUT_S = 600
 DIAGNOSIS_RETRY_COOLDOWN_S = 900
 MAX_DIAGNOSIS_TRANSPORT_FAILURES = 2
 MAX_POST_PM_REASSESSMENTS = 1
+MAX_LIFETIME_REASSESSMENTS = 4
 ACTIONS = ("retry", "retry_other_agent", "supply_then_retry", "escalate")
 
 DIAGNOSIS_INSTRUCTIONS = """\
@@ -229,6 +231,36 @@ def reassessment_count(db, job_id: str) -> int:
     return int(row["n"] if row else 0)
 
 
+def _evidence_fingerprint(gate, run, handoff=None) -> str:
+    """Stable identity for the facts that justify incident recovery.
+
+    Attempt ids, timestamps and agent names are deliberately excluded: merely
+    rerunning the same failure with another agent is not new evidence.  A new
+    authoritative gate result, failure class, or changed/verified scope is.
+    """
+    facts = {
+        "gate": ({key: gate.get(key) for key in
+                  ("gate_type", "verdict", "detail_md", "stage")}
+                 if gate else None),
+        "run": ({key: run.get(key) for key in
+                 ("stage", "status", "error")}
+                if run else None),
+        "handoff": ({key: handoff.get(key) for key in
+                     ("changed_paths_json", "verification_json", "risks_json")}
+                    if handoff else None),
+    }
+    raw = json.dumps(facts, ensure_ascii=False, sort_keys=True,
+                     separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _latest_reassessment(db, job_id: str):
+    return db.one(
+        "SELECT detail_json FROM audit_log WHERE action='job.pm_reassessment' "
+        "AND target_id=? AND id>? ORDER BY id DESC LIMIT 1",
+        (job_id, _last_human_retry_id(db, job_id)))
+
+
 def reassess_exhausted(orch, job) -> dict[str, Any]:
     """Re-open the evidence after two ineffective PM interventions.
 
@@ -239,8 +271,6 @@ def reassess_exhausted(orch, job) -> dict[str, Any]:
     facts do not justify an action, stop honestly instead of guessing.
     """
     db = orch.db
-    if reassessment_count(db, job["id"]) >= MAX_POST_PM_REASSESSMENTS:
-        return {"action": "skipped", "reason": "post-PM reassessment already spent"}
     gate = db.one(
         "SELECT g.gate_type,g.verdict,g.detail_md,r.stage,r.id AS run_id "
         "FROM gate_results g JOIN runs r ON r.id=g.run_id WHERE r.job_id=? "
@@ -248,6 +278,32 @@ def reassess_exhausted(orch, job) -> dict[str, Any]:
     run = db.one(
         "SELECT id,stage,agent_id,status,error,heartbeat_at,progress_at "
         "FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 1", (job["id"],))
+    handoff = db.one(
+        "SELECT changed_paths_json,verification_json,risks_json "
+        "FROM stage_handoffs WHERE job_id=? ORDER BY rowid DESC LIMIT 1",
+        (job["id"],))
+    fingerprint = _evidence_fingerprint(
+        dict(gate) if gate else None, dict(run) if run else None,
+        dict(handoff) if handoff else None)
+    lifetime = db.one(
+        "SELECT COUNT(*) AS n FROM audit_log WHERE action='job.pm_reassessment' "
+        "AND target_id=?", (job["id"],))
+    if int(lifetime["n"] if lifetime else 0) >= MAX_LIFETIME_REASSESSMENTS:
+        return {"action": "skipped", "reason": "lifetime reassessment cap reached"}
+    latest = _latest_reassessment(db, job["id"])
+    if latest:
+        try:
+            previous = json.loads(latest["detail_json"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            previous = {}
+        previous_fingerprint = previous.get("evidence_fingerprint")
+        if not previous_fingerprint:
+            evidence = previous.get("evidence") or {}
+            previous_fingerprint = _evidence_fingerprint(
+                evidence.get("gate"), evidence.get("run"),
+                evidence.get("handoff"))
+        if previous_fingerprint == fingerprint:
+            return {"action": "skipped", "reason": "unchanged evidence already reassessed"}
     interventions = db.query(
         "SELECT actor,detail_json FROM audit_log WHERE action='job.pm_intervention' "
         "AND target_id=? ORDER BY id DESC LIMIT 2", (job["id"],))
@@ -261,6 +317,7 @@ def reassess_exhausted(orch, job) -> dict[str, Any]:
     evidence = {
         "gate": dict(gate) if gate else None,
         "run": dict(run) if run else None,
+        "handoff": dict(handoff) if handoff else None,
         "prior_interventions": prior_interventions,
     }
     restart = bool(gate and gate["verdict"] == "failed")
@@ -270,7 +327,8 @@ def reassess_exhausted(orch, job) -> dict[str, Any]:
         decision = {"action": "escalate",
                     "reason": "兩次 PM 介入後，現有 gate/run 證據仍不足以安全自動重試"}
         db.audit("incident-supervisor", "job.pm_reassessment", "job", job["id"],
-                 {"decision": decision, "evidence": evidence})
+                 {"decision": decision, "evidence": evidence,
+                  "evidence_fingerprint": fingerprint})
         from . import collaboration
         collaboration.post(
             db, job["project_id"], author_type="system",
@@ -292,7 +350,8 @@ def reassess_exhausted(orch, job) -> dict[str, Any]:
         "restart_from_rework_target": restart,
     }
     db.audit("incident-supervisor", "job.pm_reassessment", "job", job["id"],
-             {"decision": decision, "evidence": evidence})
+             {"decision": decision, "evidence": evidence,
+              "evidence_fingerprint": fingerprint})
     from . import collaboration
     collaboration.post(
         db, job["project_id"], author_type="system",

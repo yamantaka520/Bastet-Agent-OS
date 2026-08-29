@@ -4,11 +4,12 @@ Last updated: 2026-08-29
 
 ## Current project status
 
-- Released: **v0.34.12**. Version arc v0.1.0 → v0.34.12 in one month
+- Released: **v0.34.13**. Version arc v0.1.0 → v0.34.13 in one month
   (2026-07-28 → 2026-08-29), ~131 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.
-- v0.34.12 closes the rework loop with mandatory original-gate verification
+- v0.34.13 makes exhausted PM recovery evidence-aware instead of permanently
+  count-latched; v0.34.12 closes the rework loop with mandatory original-gate verification
   before re-review and durable immediate PM diagnosis; v0.34.11 makes Pi
   account credentials deterministic for extension providers;
   v0.34.10 safely loads account-profile Pi provider packages while keeping
