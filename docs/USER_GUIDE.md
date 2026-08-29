@@ -114,10 +114,15 @@ Each card carries the light, progress, and the controls that its state allows:
 | ■ 停止 | cancel what is in flight |
 | 結案 / 重啟 | close, or reopen a closed project |
 
-When a job finishes its pipeline, its `bastet/<job_id>` branch is **pushed to
-the project's remote** automatically (origin, or a granted git resource), using
-the project's git credentials. Your own branch is never pushed; opt out with
-`git_auto_push: false` in the project config.
+Every confirmed task has a **delivery mode**. `none` is for analysis with no
+external result. `branch` requires `bastet/<job_id>` to reach the project remote.
+`production` additionally requires a new version and the project's delivery
+profile: target branch/target plus trusted pre-deploy, deploy, and online verify
+commands. Bastet atomically publishes the target branch and `v<version>` tag,
+then verifies the exact commit it deployed. A failed required delivery stays
+blocked and keeps its worktree; it cannot be marked done. `git_auto_push: false`
+therefore applies only to legacy/best-effort `none` tasks, not to an explicit
+delivery promise.
 | 刪除 | remove the project (admin only) — see below |
 
 Expanded, a card shows the task plan (with provenance: which conversation it came

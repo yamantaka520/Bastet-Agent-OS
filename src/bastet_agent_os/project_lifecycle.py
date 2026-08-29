@@ -316,13 +316,14 @@ def plan_with_jobs(db, project_id: str) -> dict[str, Any]:
     for task in plan["tasks"]:
         item = dict(task)
         if item.get("job_id"):
-            job = db.one("SELECT status, stage, title FROM jobs WHERE id=?",
+            job = db.one("SELECT status, stage, title, delivery_status FROM jobs WHERE id=?",
                          (item["job_id"],))
             if job is None:
                 item["job_status"] = "missing"
             else:
                 item["job_status"] = job["status"]
                 item["job_stage"] = job["stage"]
+                item["delivery_status"] = job["delivery_status"]
         tasks.append(item)
     return {**plan, "tasks": tasks, "stale": stale, "chat": chat,
             "provenance": provenance,

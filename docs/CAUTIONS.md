@@ -122,6 +122,10 @@
   Agent 進度仍可能重做，因此部署、付款、發訊等外部副作用必須使用 idempotency key。
 - **計畫性部署仍應 drain。** 先進 maintenance fence，等 active jobs/runs 都為 0，
   再重啟；crash recovery 是安全網，不是用來取代正常交接點。
+- **正式交付不是 Agent 自述。** 發版卡必須選 `production` 並填新版本；專案的
+  delivery profile 由可信任管理者設定，因為其中的 gate/deploy/verify 命令會在
+  Bastet 主機執行。只有 main 與不可變 tag 原子推送、部署命令成功，且線上回報的
+  commit 與 `BASTET_DELIVERY_COMMIT` 一致後，卡片才會變成完成。
 - **審計是 hash 串接的 append-only。** 不要手動改 audit_log —— 鏈會斷，
   `verify_audit_chain()` 會抓到。刪任務/專案時的用量帳務會被拒絕或要求 force
   並記錄寫掉的金額，這是刻意的。

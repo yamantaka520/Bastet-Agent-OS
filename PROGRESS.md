@@ -1,13 +1,18 @@
 # Bastet Agent OS Progress
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 ## Current project status
 
-- Released: **v0.34.17**. Version arc v0.1.0 → v0.34.17 in one month
-  (2026-07-28 → 2026-08-29), ~131 commits. See [CHANGELOG.md](CHANGELOG.md) for
+- Released: **v0.35.0**. Version arc v0.1.0 → v0.35.0 in one month
+  (2026-07-28 → 2026-08-30), ~132 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.
+- v0.35.0 makes delivery part of the completion contract: required branches
+  must reach the remote, and production cards must publish main plus an
+  immutable version tag, deploy, and verify the exact live commit before
+  `job.done` can exist. Failed delivery remains blocked and resumable with a
+  durable receipt instead of rerunning already-accepted Agent stages.
 - v0.34.17 reuses a passed reviewer precheck after unrelated executor failure
   when its command, clean HEAD, and audit evidence still match; v0.34.16 carries
   the Pi account's last interactively proven provider/model

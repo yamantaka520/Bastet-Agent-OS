@@ -73,6 +73,11 @@ audit trail behind every state change.
   pipeline carries on. A vendor quota failure parks with the reset time parsed
   from the vendor's own message and resumes itself. It stops for a human only
   when it genuinely cannot proceed. → [When a gate says no](#when-a-gate-says-no)
+- **Completion means delivery.** Every project task declares `none`, `branch`,
+  or `production`. A required branch must reach the remote; production must
+  pass its trusted pre-deploy gate, atomically publish `main` plus an immutable
+  version tag, deploy, and verify the exact live commit. Any failure keeps the
+  card blocked with its worktree and receipt intact—never falsely `done`.
 - **Project lifecycle with a light.** planning → ready → running ⇄ paused →
   maintenance → closed, as a real state machine: only declared transitions, each
   one audited. Run / pause / stop controls on the card.

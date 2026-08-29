@@ -67,6 +67,7 @@ class DispatchRequest:
     allowed_tools: list[str] | None = None
     use_worktree: bool = True
     origin: str = "dispatch"          # chat|runner|dispatch — shown on the plan
+    delivery: dict | None = None       # none|branch|production contract
 
 
 def _failure_reason(result: RunResult, workdir: str) -> str:
@@ -152,16 +153,34 @@ class Orchestrator:
         else:
             stages_raw = SINGLE_STAGE
         stages = parse_stages(stages_raw)  # validates; job snapshots the raw form
+        from . import delivery
+        delivery_contract = delivery.normalize(req.delivery)
+        if delivery_contract["mode"] == "production":
+            project_config = json.loads(project["config_json"] or "{}")
+            if not delivery_contract.get("profile") and \
+                    not project_config.get("delivery_profile"):
+                raise ValueError(
+                    "production delivery requires the project's delivery profile")
+            previous = project_config.get("last_delivery") or {}
+            if str(previous.get("version") or "").removeprefix("v") == \
+                    delivery_contract.get("version"):
+                raise ValueError(
+                    f"production version v{delivery_contract['version']} was already "
+                    "delivered; choose a new version")
 
         job_id = new_id("job")
         ts = now()
         self.db.write(
             "INSERT INTO jobs(id, project_id, template_id, stages_snapshot_json, title, "
-            "spec_md, stage, status, default_agent_id, resource_id, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            "spec_md, stage, status, default_agent_id, resource_id, delivery_json, "
+            "delivery_status, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (job_id, req.project_id, template_id or "single-stage",
              json.dumps(stages_raw), req.title, req.prompt, stages[0].name,
-             "in_progress", req.agent_id, req.resource_id, ts, ts),
+             "in_progress", req.agent_id, req.resource_id,
+             json.dumps(delivery_contract),
+             "pending" if delivery_contract["mode"] != "none"
+             else "not_required", ts, ts),
         )
         self.db.audit(actor, "job.dispatch", "job", job_id,
                       {"project": req.project_id, "agent": req.agent_id,
@@ -179,6 +198,143 @@ class Orchestrator:
         self._sync_project(req.project_id)
         self._spawn(self._drive_job(job_id, req))
         return job_id
+
+    def _delivery_contract(self, job) -> dict:
+        from . import delivery
+
+        try:
+            contract = json.loads(job["delivery_json"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            contract = {}
+        contract = delivery.normalize(contract)
+        if contract["mode"] == "production" and not contract.get("profile"):
+            project = self.db.one("SELECT config_json FROM projects WHERE id=?",
+                                  (job["project_id"],))
+            config = json.loads(project["config_json"] or "{}") if project else {}
+            contract["profile"] = config.get("delivery_profile") or {}
+        return contract
+
+    def _complete_job(self, job, *, via: str = "workflow") -> None:
+        """The single terminal transition. Required delivery already succeeded."""
+        contract = self._delivery_contract(job)
+        if contract["mode"] != "none" and job["delivery_status"] != "succeeded":
+            raise RuntimeError("required delivery has no successful receipt")
+        self.db.write("UPDATE jobs SET status='done', updated_at=? WHERE id=?",
+                      (now(), job["id"]))
+        self.db.audit("orchestrator", "job.done", "job", job["id"],
+                      {"via": via, "delivery": contract["mode"]})
+        run_memory.job_finished(self.db, job, "done")
+        self._emit("job.done", job["project_id"], job_id=job["id"])
+        self._sync_project(job["project_id"])
+        self.cleanup_worktree(job["id"])
+        if contract["mode"] == "none":
+            # Backward-compatible best effort. This is explicitly NOT delivery;
+            # callers that require a durable branch must request mode=branch.
+            try:
+                from . import git_push
+                git_push.push_job_branch(self.db, job, emit=self._emit)
+            except Exception as exc:
+                log.warning("job %s: optional auto-push crashed: %r", job["id"], exc)
+
+    def _finish_or_schedule_delivery(self, job, *, via: str) -> bool:
+        contract = self._delivery_contract(job)
+        if contract["mode"] == "none":
+            self._complete_job(job, via=via)
+            return True
+        self.db.write("UPDATE jobs SET status='in_progress', delivery_status='pending', "
+                      "updated_at=? WHERE id=?", (now(), job["id"]))
+        self.db.audit("orchestrator", "job.delivery_pending", "job", job["id"],
+                      {"mode": contract["mode"], "version": contract.get("version", "")})
+        self._emit("job.delivery_pending", job["project_id"], job_id=job["id"],
+                   mode=contract["mode"], version=contract.get("version", ""))
+        self._spawn(self._run_delivery(job["id"]))
+        return True
+
+    async def _run_delivery(self, job_id: str) -> None:
+        """Run exactly one durable delivery attempt outside the event loop."""
+        from . import delivery, resource_access
+
+        job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job is None or job["delivery_status"] not in ("pending", "failed"):
+            return
+        changed = self.db.write(
+            "UPDATE jobs SET delivery_status='running', status='in_progress', "
+            "updated_at=? WHERE id=? AND delivery_status IN ('pending','failed')",
+            (now(), job_id)).rowcount
+        if not changed:
+            return
+        job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        contract = self._delivery_contract(job)
+        attempt_id = new_id("dly")
+        self.db.write(
+            "INSERT INTO deliveries(id,job_id,mode,status,target,version,started_at) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (attempt_id, job_id, contract["mode"], "running",
+             str((contract.get("profile") or {}).get("target") or ""),
+             str(contract.get("version") or ""), now()))
+        workdir = job["worktree_path"] or self._project_repo(job)
+        latest = self.db.one(
+            "SELECT id FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 1", (job_id,))
+        run_id = latest["id"] if latest else attempt_id
+        access = None
+        env: dict[str, str] = {}
+        try:
+            if contract["mode"] == "production":
+                env.update(self._project_secrets(job, run_id))
+                access = resource_access.build(
+                    self.db, self.home.root, job["project_id"],
+                    self._project_team(job["project_id"]), run_id,
+                    audit_actor=f"delivery:{attempt_id}")
+                env.update(access.env)
+            result = await asyncio.to_thread(
+                delivery.execute, self.db, job, workdir, contract,
+                env=env, emit=self._emit)
+            self.db.write(
+                "UPDATE deliveries SET status='succeeded',target=?,version=?,"
+                "commit_sha=?,evidence_json=?,finished_at=? WHERE id=?",
+                (result.target, result.version, result.commit_sha,
+                 json.dumps(result.evidence), now(), attempt_id))
+            self.db.write("UPDATE jobs SET delivery_status='succeeded', updated_at=? "
+                          "WHERE id=?", (now(), job_id))
+            action = "job.deployed" if result.mode == "production" else "job.delivered"
+            self.db.audit("orchestrator", action, "job", job_id,
+                          {"delivery_id": attempt_id, "mode": result.mode,
+                           "target": result.target, "version": result.version,
+                           "commit_sha": result.commit_sha})
+            if result.mode == "production":
+                project = self.db.one("SELECT config_json FROM projects WHERE id=?",
+                                      (job["project_id"],))
+                config = json.loads(project["config_json"] or "{}") if project else {}
+                config["last_delivery"] = {
+                    "job_id": job_id, "delivery_id": attempt_id,
+                    "target": result.target, "version": result.version,
+                    "commit_sha": result.commit_sha, "at": now(),
+                }
+                self.db.write("UPDATE projects SET config_json=?,updated_at=? WHERE id=?",
+                              (json.dumps(config), now(), job["project_id"]))
+            self._emit(action, job["project_id"], job_id=job_id,
+                       target=result.target, version=result.version,
+                       commit_sha=result.commit_sha)
+            fresh = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+            self._complete_job(fresh, via="delivery")
+        except Exception as exc:
+            message = f"{type(exc).__name__}: {exc}"[-8000:]
+            self.db.write("UPDATE deliveries SET status='failed',error=?,finished_at=? "
+                          "WHERE id=?", (message, now(), attempt_id))
+            self.db.write("UPDATE jobs SET status='blocked',delivery_status='failed',"
+                          "rework_note=?,updated_at=? WHERE id=?",
+                          (f"交付失敗；不得標記完成。{message}", now(), job_id))
+            self.db.audit("orchestrator", "job.delivery_failed", "job", job_id,
+                          {"delivery_id": attempt_id, "mode": contract["mode"],
+                           "detail": message[:1200]})
+            self._emit("job.delivery_failed", job["project_id"], job_id=job_id,
+                       mode=contract["mode"], detail=message[:300])
+            self._sync_project(job["project_id"])
+            self._maybe_pm_diagnose(
+                self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,)), "")
+        finally:
+            if access is not None:
+                resource_access.cleanup(self.home.root, run_id)
 
     async def cancel_job(self, job_id: str, actor: str = "user") -> dict:
         """Stop a job now: kill whatever is streaming, mark the job cancelled.
@@ -294,6 +450,17 @@ class Orchestrator:
                             stage=job["stage"])
                 parked.append(job["id"])
                 continue
+            if job["delivery_status"] in ("pending", "running"):
+                # The process may have died after main was pushed but before
+                # deployment verification was recorded. The delivery sequence
+                # is convergent and safe to resume; never rerun the Agent stage.
+                self.db.write("UPDATE jobs SET delivery_status='pending' WHERE id=?",
+                              (job["id"],))
+                self.db.audit(actor, "job.delivery_resumed", "job", job["id"],
+                              {"previous": job["delivery_status"]})
+                self._spawn(self._run_delivery(job["id"]))
+                resumed.append(job["id"])
+                continue
             try:
                 stages = parse_stages(json.loads(job["stages_snapshot_json"]))
                 names = [s.name for s in stages]
@@ -321,6 +488,38 @@ class Orchestrator:
             log.info("job %s: driver lost on restart, resuming at stage %s",
                      job["id"], job["stage"])
         return {"resumed": resumed, "parked": parked}
+
+    def configure_delivery(self, job_id: str, contract: dict,
+                           user: str = "user") -> dict:
+        """Attach or repair a contract, including historic falsely-done cards."""
+        from . import delivery
+
+        job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job is None:
+            raise ValueError(f"unknown job {job_id!r}")
+        active = self.db.one(
+            "SELECT COUNT(*) AS n FROM runs WHERE job_id=? AND status IN "
+            "('queued','running','waiting_input')", (job_id,))
+        if active and active["n"]:
+            raise ValueError("cannot change delivery while an Agent run is active")
+        normalized = delivery.normalize(contract)
+        if normalized["mode"] == "none":
+            raise ValueError("use an explicit branch or production delivery mode")
+        if not job["worktree_path"]:
+            workdir = self._ensure_workdir(job, True)
+            self.db.write("UPDATE jobs SET worktree_path=? WHERE id=?",
+                          (workdir, job_id))
+        self.db.write(
+            "UPDATE jobs SET delivery_json=?,delivery_status='pending',"
+            "status='in_progress',rework_note=NULL,updated_at=? WHERE id=?",
+            (json.dumps(normalized), now(), job_id))
+        self.db.audit(f"user:{user}", "job.delivery_configured", "job", job_id,
+                      {"mode": normalized["mode"],
+                       "version": normalized.get("version", ""),
+                       "historic_status": job["status"]})
+        self._spawn(self._run_delivery(job_id))
+        return {"job_id": job_id, "status": "in_progress",
+                "delivery_status": "pending", "delivery": normalized}
 
     async def quota_resume_loop(self) -> None:
         """Retry quota-parked jobs when their timer passes. Runs for the life of
@@ -1034,19 +1233,7 @@ class Orchestrator:
                        stage=next_stage)
             return False
 
-        self.db.write("UPDATE jobs SET status='done', updated_at=? WHERE id=?",
-                      (now(), job["id"]))
-        self.db.audit("orchestrator", "job.done", "job", job["id"], {})
-        run_memory.job_finished(self.db, job, "done")
-        self._emit("job.done", job["project_id"], job_id=job["id"])
-        self._sync_project(job["project_id"])
-        self.cleanup_worktree(job["id"])
-        try:
-            from . import git_push
-            git_push.push_job_branch(self.db, job, emit=self._emit)
-        except Exception as exc:
-            log.warning("job %s: auto-push crashed: %r", job["id"], exc)
-        return True
+        return self._finish_or_schedule_delivery(job, via="workflow")
 
     def revalidate_gate(self, job_id: str, user: str = "user") -> dict:
         """Re-run a deterministic gate against the last successful stage output."""
@@ -1379,23 +1566,11 @@ class Orchestrator:
                            "via": "human-approve"})
 
         if idx + 1 >= len(stages):
-            self.db.write("UPDATE jobs SET status='done', updated_at=? WHERE id=?",
-                          (now(), job_id))
-            self.db.audit("orchestrator", "job.done", "job", job_id,
-                          {"via": "approve"})
-            run_memory.job_finished(self.db, job, "done")
-            self._emit("job.done", job["project_id"], job_id=job_id)
-            self.cleanup_worktree(job_id)
-            # a job approved into done deserves the same delivery as one that
-            # finishes in the driver loop — the live art card completed via this
-            # path and never pushed, silently (no audit row of any kind)
-            try:
-                from . import git_push
-                git_push.push_job_branch(self.db, job, emit=self._emit)
-            except Exception as exc:
-                log.warning("job %s: auto-push crashed: %r", job_id, exc)
-            self._sync_project(job["project_id"])
-            return {"job_id": job_id, "status": "done"}
+            self._finish_or_schedule_delivery(job, via="approve")
+            fresh = self.db.one("SELECT status,delivery_status FROM jobs WHERE id=?",
+                                (job_id,))
+            return {"job_id": job_id, "status": fresh["status"],
+                    "delivery_status": fresh["delivery_status"]}
         self.db.write("UPDATE jobs SET stage=?, status='in_progress', updated_at=? WHERE id=?",
                       (names[idx + 1], now(), job_id))
         req = DispatchRequest(
@@ -1423,6 +1598,15 @@ class Orchestrator:
         if job["status"] not in ("blocked", "cancelled"):
             raise ValueError(f"job {job_id} is {job['status']}, not stuck "
                              f"(only blocked/cancelled jobs can be retried)")
+        if job["delivery_status"] == "failed":
+            self.db.write(
+                "UPDATE jobs SET status='in_progress',delivery_status='pending',"
+                "rework_note=NULL,updated_at=? WHERE id=?", (now(), job_id))
+            self.db.audit(f"user:{user}", "job.delivery_retry", "job", job_id,
+                          {"mode": self._delivery_contract(job)["mode"]})
+            self._spawn(self._run_delivery(job_id))
+            return {"job_id": job_id, "status": "in_progress",
+                    "delivery_status": "pending"}
         # Re-read the project as it is NOW. Retrying with the state that already
         # failed just fails again: the operator has fixed the repo path, changed
         # the workflow, or corrected the spec — that is the whole point.
@@ -2221,10 +2405,17 @@ class Orchestrator:
         # work — the implementer and reviewer then disagreed forever about a
         # baseline neither of them had chosen.
         base = self._worktree_base(job, repo)
-        cmd = ["git", "-C", repo, "worktree", "add",
-               "-b", f"bastet/{job['id']}", wt_path]
-        if base:
-            cmd.append(base)
+        branch = f"bastet/{job['id']}"
+        existing_branch = subprocess.run(
+            ["git", "-C", repo, "rev-parse", "--verify", "--quiet",
+             f"refs/heads/{branch}"], capture_output=True, text=True).returncode == 0
+        cmd = ["git", "-C", repo, "worktree", "add"]
+        if existing_branch:
+            cmd.extend([wt_path, branch])
+        else:
+            cmd.extend(["-b", branch, wt_path])
+            if base:
+                cmd.append(base)
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             log.warning("worktree add failed (%s); running in repo directly",

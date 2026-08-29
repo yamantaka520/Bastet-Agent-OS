@@ -39,13 +39,16 @@ DECOMPOSE_INSTRUCTIONS = """\
 - 依執行順序排列；前置任務排前面
 - 任務數量控制在 3～12 個之間，不要拆到無法驗收的碎片
 - spec 要寫得讓執行者不必回頭問人：範圍、驗收條件、要動到哪些部分
+- 每個任務必須宣告 delivery：純分析用 none、一般程式工作用 branch、真正上線用
+  production；production 必須填一個不同於目前正式版的新 version
+- 只有最後一張整合/發布卡可以用 production，不要讓每張功能卡各自部署
 - 不要發明專案沒提到的需求；資訊不足就在 spec 裡寫明「需確認：…」
 
 重要：拆分需要的資訊全部在下方，**不要使用任何工具**（不要讀檔、不要搜尋、
 不要執行指令）。headless 模式無法詢問權限，工具呼叫會被拒絕而讓這次拆分失敗。
 
 只輸出 JSON，格式如下，不要有其他文字：
-{"tasks":[{"title":"任務標題","spec":"完整任務說明與驗收條件","role":"（可留空）建議角色 id"}]}
+{"tasks":[{"title":"任務標題","spec":"完整任務說明與驗收條件","role":"（可留空）建議角色 id","delivery":{"mode":"none|branch|production","version":"production 時必填"}}]}
 """
 
 
@@ -104,7 +107,7 @@ def _planning_context(db, project_id: str) -> str:
     return "\n\n".join(parts)
 
 
-def parse_tasks(text: str) -> list[dict[str, str]]:
+def parse_tasks(text: str) -> list[dict[str, Any]]:
     """Pull the task list out of the agent's answer.
 
     Real answers are messy: prose around the JSON, a preamble object, several
@@ -138,15 +141,24 @@ def parse_tasks(text: str) -> list[dict[str, str]]:
         spec = str(item.get("spec") or item.get("description") or "").strip()
         if not title:
             continue
+        delivery_value = item.get("delivery") or {"mode": "branch"}
+        if isinstance(delivery_value, str):
+            delivery_value = {"mode": delivery_value}
+        try:
+            from .delivery import normalize
+            delivery_value = normalize(delivery_value)
+        except (TypeError, ValueError) as exc:
+            raise PlanError(f"task {title!r} has invalid delivery: {exc}") from exc
         tasks.append({"title": title[:120], "spec": spec or title,
-                      "role": str(item.get("role") or "").strip()})
+                      "role": str(item.get("role") or "").strip(),
+                      "delivery": delivery_value})
     if not tasks:
         raise PlanError("no usable tasks in the decomposition")
     return tasks
 
 
 async def decompose(db, home_root, project_id: str, agent_id: str = "",
-                    actor: str = "") -> list[dict[str, str]]:
+                    actor: str = "") -> list[dict[str, Any]]:
     """Ask the PM agent to split the project into tasks. Stores the proposal
     unconfirmed — a human still has to say go."""
     from .executors.base import TaskSpec, get_executor
@@ -350,7 +362,8 @@ class ProjectRunner:
                 continue
             job_id = self.orch.dispatch(actor=actor or "runner", req=DispatchRequest(
                 project_id=project_id, prompt=task.get("spec") or task["title"],
-                title=task["title"], agent_id=agent, origin="runner"))
+                title=task["title"], agent_id=agent, origin="runner",
+                delivery=task.get("delivery")))
             self._remember_job(project_id, index, job_id)
             if await self._await_job(project_id, job_id) is None:
                 return

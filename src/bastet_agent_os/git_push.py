@@ -5,11 +5,12 @@ when the code is done. What "done" means here is precise: the job walked its
 whole pipeline — tests green, reviews approved, any human gate passed — and its
 work sits committed on `bastet/<job_id>`. That branch is what gets pushed.
 
-What is deliberately NOT automatic: the project's own branch is never pushed,
-never fast-forwarded, never touched. Pushing a job branch parks the work
-somewhere durable and reviewable (and openable as an MR/PR); merging it into
-anything is still a person's move. Auto-push is on by default and per-project
-switchable (`config_json {"git_auto_push": false}`).
+For ordinary and legacy jobs, the project's own branch is never touched:
+pushing a job branch only parks the work somewhere durable and reviewable.
+An explicit production delivery contract is the sole exception; its separate
+path merges a fresh target and atomically pushes that target with a release tag.
+Optional auto-push is on by default and per-project switchable
+(`config_json {"git_auto_push": false}`).
 
 Remote detection, in order of how explicit the signal is:
 
@@ -31,6 +32,7 @@ import base64
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 from typing import Any
@@ -119,9 +121,9 @@ def push_job_branch(db: Db, job, *, emit=None) -> dict[str, Any] | None:
     """Push `bastet/<job_id>` to the project's remote. Returns what happened,
     or None when there was nothing to do (opted out, no remote, no branch).
 
-    Failure is reported, audited and non-fatal: the job is already done and its
-    work is safe on the local branch — a push that failed is a delivery problem,
-    not a reason to un-finish the job."""
+    This primitive reports and audits failure. The caller decides terminal
+    semantics: optional legacy delivery remains non-fatal, while an explicit
+    branch/production contract blocks the job."""
     project = db.one("SELECT * FROM projects WHERE id=?", (job["project_id"],))
     if project is None:
         return None
@@ -183,3 +185,104 @@ def push_job_branch(db: Db, job, *, emit=None) -> dict[str, Any] | None:
         log.warning("job %s: push failed (%s): %s", job["id"], detected, output[:200])
     return {"pushed": ok, "remote": detected, "branch": branch, "detail": output,
             "at": now()}
+
+
+def integrate_job_branch(db: Db, job, *, workdir: str,
+                         target_branch: str = "main",
+                         release_tag: str = "") -> dict[str, Any]:
+    """Merge the fresh remote target and atomically push HEAD and its tag.
+
+    This is used only by an explicit production delivery contract.  It never
+    force-pushes: a concurrently advanced target or conflicting release tag
+    makes the atomic push fail and leaves the card blocked with its worktree
+    intact.  A production release therefore cannot silently update ``main``
+    without also publishing its immutable version tag.
+    """
+    if release_tag and not re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z._+-]*", release_tag):
+        return {"pushed": False, "detail": "invalid release tag"}
+    valid_target = subprocess.run(
+        ["git", "check-ref-format", f"refs/heads/{target_branch}"],
+        capture_output=True, text=True)
+    if valid_target.returncode:
+        return {"pushed": False, "detail": "invalid target branch"}
+    project = db.one("SELECT * FROM projects WHERE id=?", (job["project_id"],))
+    if project is None:
+        return {"pushed": False, "detail": "project not found"}
+    resources = _granted_git_resources(db, project["id"], project["team_id"])
+    from .config import expand_repo_path
+    repo = expand_repo_path(project["repo_path"] or "")
+    url = _origin_url(repo)
+    detected = "origin"
+    if not url:
+        candidate = next((r for r in resources if (r["endpoint"] or "").strip()), None)
+        if candidate is None:
+            return {"pushed": False, "detail": "no remote or granted git resource"}
+        url = candidate["endpoint"].strip()
+        detected = f"resource:{candidate['name']}"
+    with tempfile.TemporaryDirectory(prefix="bastet-release-") as scratch:
+        env = _env_for(db, url, resources, scratch)
+        steps = [
+            ["git", "-C", workdir, "fetch", "--no-tags", url, target_branch],
+            ["git", "-C", workdir, "merge", "--no-edit", "FETCH_HEAD"],
+        ]
+        output = []
+        for command in steps:
+            try:
+                proc = subprocess.run(command, capture_output=True, text=True,
+                                      timeout=PUSH_TIMEOUT_S, env=env)
+            except subprocess.TimeoutExpired:
+                return {"pushed": False, "detail": f"{command[3]} timed out"}
+            output.append((proc.stdout + proc.stderr).strip())
+            if proc.returncode:
+                detail = "\n".join(output)[-1200:]
+                db.audit("orchestrator", "job.integration_failed", "job", job["id"],
+                         {"target_branch": target_branch, "remote": detected,
+                          "detail": detail[:800]})
+                return {"pushed": False, "detail": detail}
+        commit_sha = subprocess.run(
+            ["git", "-C", workdir, "rev-parse", "HEAD"], capture_output=True,
+            text=True).stdout.strip()
+        if release_tag:
+            remote_tag = subprocess.run(
+                ["git", "ls-remote", "--tags", url, f"refs/tags/{release_tag}",
+                 f"refs/tags/{release_tag}^{{}}"], capture_output=True, text=True,
+                timeout=PUSH_TIMEOUT_S, env=env)
+            if remote_tag.returncode:
+                return {"pushed": False, "detail": remote_tag.stderr[-1200:]}
+            remote_lines = remote_tag.stdout.splitlines()
+            remote_sha = remote_lines[-1].split()[0] if remote_lines else ""
+            if remote_sha and remote_sha != commit_sha:
+                return {"pushed": False,
+                        "detail": f"release tag {release_tag} already points elsewhere"}
+            local_tag = subprocess.run(
+                ["git", "-C", workdir, "rev-parse", "--verify", "-q",
+                 f"refs/tags/{release_tag}^{{}}"], capture_output=True, text=True)
+            if local_tag.returncode == 0 and local_tag.stdout.strip() != commit_sha:
+                return {"pushed": False,
+                        "detail": f"local release tag {release_tag} points elsewhere"}
+            if local_tag.returncode != 0:
+                tagged = subprocess.run(
+                    ["git", "-C", workdir, "tag", "-a", release_tag, "-m",
+                     f"Release {release_tag}"], capture_output=True, text=True)
+                if tagged.returncode:
+                    return {"pushed": False, "detail": tagged.stderr[-1200:]}
+        push = ["git", "-C", workdir, "push", "--atomic", url,
+                f"HEAD:{target_branch}"]
+        if release_tag:
+            push.append(f"refs/tags/{release_tag}:refs/tags/{release_tag}")
+        proc = subprocess.run(push, capture_output=True, text=True,
+                              timeout=PUSH_TIMEOUT_S, env=env)
+        output.append((proc.stdout + proc.stderr).strip())
+        if proc.returncode:
+            detail = "\n".join(output)[-1200:]
+            db.audit("orchestrator", "job.integration_failed", "job", job["id"],
+                     {"target_branch": target_branch, "release_tag": release_tag,
+                      "remote": detected, "detail": detail[:800]})
+            return {"pushed": False, "detail": detail}
+    detail = "\n".join(output)[-1200:]
+    db.audit("orchestrator", "job.integrated", "job", job["id"],
+             {"target_branch": target_branch, "remote": detected,
+              "release_tag": release_tag, "commit_sha": commit_sha,
+              "detail": detail[:800]})
+    return {"pushed": True, "target_branch": target_branch, "remote": detected,
+            "release_tag": release_tag, "commit_sha": commit_sha, "detail": detail}

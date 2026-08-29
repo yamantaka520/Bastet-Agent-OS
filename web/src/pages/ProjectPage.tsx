@@ -21,8 +21,10 @@ type Agent = { id: string; name: string; executor_type: string; enabled: number 
 type Role = { id: string; label: string };
 type Template = { id: string };
 type PoolResource = { id: string; name: string; kind: string };
-type Task = { title: string; spec: string; role?: string; job_id?: string;
-               origin?: string; job_status?: string; job_stage?: string };
+type Delivery = { mode: "none" | "branch" | "production"; version?: string };
+type Task = { title: string; spec: string; role?: string; delivery?: Delivery;
+               job_id?: string; origin?: string; job_status?: string;
+               job_stage?: string; delivery_status?: string };
 type Plan = { tasks: Task[]; confirmed: boolean; by: string; at?: string;
               stale?: boolean; unverified?: boolean; dispatched?: number;
               source?: { kind?: string; at?: string; messages?: number;
@@ -30,7 +32,8 @@ type Plan = { tasks: Task[]; confirmed: boolean; by: string; at?: string;
               chat?: { messages: number; last_at: string | null } };
 type Overview = {
   project: { id: string; team_id: string; repo_path: string | null;
-             description: string; template_id: string | null };
+             description: string; template_id: string | null;
+             delivery_profile?: DeliveryProfile };
   stages: Stage[];
   role_coverage: { stage: string; role: string;
                    agents: { agent_id: string; agent_name: string;
@@ -42,6 +45,8 @@ type Overview = {
   jobs: { id: string; title: string; stage: string; status: string;
           updated_at: string }[];
 };
+type DeliveryProfile = { target_branch?: string; target?: string;
+  predeploy_command?: string; deploy_command?: string; verify_command?: string };
 type RoomMember = { id: string; name: string; role: string; executor_type: string };
 type RoomMessage = { id: string; author_type: string; author_id: string;
                      kind: string; content: string; at: string };
@@ -242,6 +247,7 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
       <ContentEditor projectId={projectId} canOperate={canOperate} t={t}
                      repo={ov.project.repo_path ?? ""}
                      desc={ov.project.description}
+                     deliveryProfile={ov.project.delivery_profile ?? {}}
                      onSaved={() => { load(); onChanged(); }} />
 
       <h4>{t("project.workflowBlock")}</h4>
@@ -456,6 +462,11 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
 
   const patch = (i: number, key: keyof Task, value: string) =>
     setTasks(tasks.map((task, idx) => (idx === i ? { ...task, [key]: value } : task)));
+  const patchDelivery = (i: number, value: Partial<Delivery>) =>
+    setTasks(tasks.map((task, idx) => idx === i
+      ? { ...task, delivery: { mode: task.delivery?.mode ?? "branch",
+                               ...task.delivery, ...value } }
+      : task));
 
   return (
     <>
@@ -511,6 +522,22 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
           <input value={task.role ?? ""} placeholder={t("proj.taskRolePh")}
                  disabled={!canOperate} style={{ width: "9rem" }}
                  onChange={(e) => patch(i, "role", e.target.value)} />
+          <select value={task.delivery?.mode ?? "branch"}
+                  disabled={!canOperate || !!task.job_id}
+                  title={t("proj.deliveryMode")}
+                  onChange={(e) => patchDelivery(i, {
+                    mode: e.target.value as Delivery["mode"] })}>
+            <option value="none">{t("proj.deliveryNone")}</option>
+            <option value="branch">{t("proj.deliveryBranch")}</option>
+            <option value="production">{t("proj.deliveryProduction")}</option>
+          </select>
+          {(task.delivery?.mode === "production") && (
+            <input value={task.delivery.version ?? ""}
+                   placeholder={t("proj.deliveryVersionPh")}
+                   disabled={!canOperate || !!task.job_id}
+                   style={{ width: "7rem" }}
+                   onChange={(e) => patchDelivery(i, { version: e.target.value })} />
+          )}
           {task.job_id
             ? (
               // the same job the board shows, with its live state: this is what
@@ -520,6 +547,8 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
                 {task.job_status ? t(`proj.job.${task.job_status}`,
                                      undefined, task.job_status) : ""}
                 {task.job_stage ? ` · ${task.job_stage}` : ""}
+                {task.delivery_status && task.delivery_status !== "not_required"
+                  ? ` · ${t("proj.deliveryStatus")}: ${task.delivery_status}` : ""}
                 {task.origin
                   ? ` · ${t(`proj.origin.${task.origin}`, undefined, task.origin)}` : ""}
                 <code className="detail"> {task.job_id}</code>
@@ -535,7 +564,8 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
       {canOperate && (
         <div className="row">
           <button className="ghost"
-                  onClick={() => setTasks([...tasks, { title: "", spec: "" }])}>
+                  onClick={() => setTasks([...tasks, { title: "", spec: "",
+                    delivery: { mode: "branch" } }])}>
             {t("proj.addTask")}</button>
           {!!tasks.filter((x) => !x.job_id).length && (
             <button className="ghost danger-text" onClick={async () => {
@@ -546,7 +576,8 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
             }}>{t("proj.clearTasks")}</button>
           )}
           <button onClick={confirm}
-                  disabled={!tasks.length || !tasks.every((x) => x.title.trim())}>
+                  disabled={!tasks.length || !tasks.every((x) => x.title.trim()
+                    && (x.delivery?.mode !== "production" || !!x.delivery.version?.trim()))}>
             {t("proj.confirmTasks")}</button>
         </div>
       )}
@@ -581,24 +612,25 @@ function Picker({ options, label, empty, onPick, t }: {
  *  a WS event mid-typing snapped the path back and the edit looked impossible.
  *  State lives here, seeded once per project, and is only re-seeded when the
  *  server value actually changes while the field is untouched. */
-function ContentEditor({ projectId, repo, desc, canOperate, onSaved, t }: {
+function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onSaved, t }: {
   projectId: string; repo: string; desc: string; canOperate: boolean;
-  onSaved: () => void; t: T;
+  deliveryProfile: DeliveryProfile; onSaved: () => void; t: T;
 }) {
-  const [draft, setDraft] = useState({ repo, desc });
+  const [draft, setDraft] = useState({ repo, desc, deliveryProfile });
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    if (!dirty) setDraft({ repo, desc });     // adopt server values only if idle
-  }, [repo, desc, dirty]);
+    if (!dirty) setDraft({ repo, desc, deliveryProfile });
+  }, [repo, desc, deliveryProfile, dirty]);
 
   const save = async () => {
     setError("");
     try {
       await put(`/api/projects/${projectId}`,
-                { repo_path: draft.repo.trim(), description: draft.desc });
+                { repo_path: draft.repo.trim(), description: draft.desc,
+                  delivery_profile: draft.deliveryProfile });
       setDirty(false);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2000);
@@ -606,7 +638,8 @@ function ContentEditor({ projectId, repo, desc, canOperate, onSaved, t }: {
     } catch (e) { setError(String((e as Error).message)); }
   };
 
-  const patch = (part: Partial<{ repo: string; desc: string }>) => {
+  const patch = (part: Partial<{ repo: string; desc: string;
+                                deliveryProfile: DeliveryProfile }>) => {
     setDraft({ ...draft, ...part });
     setDirty(true);
     setSaved(false);
@@ -630,6 +663,24 @@ function ContentEditor({ projectId, repo, desc, canOperate, onSaved, t }: {
         {saved && <span className="muted">✅</span>}
       </div>
       <p className="muted">{t("project.repoHint")}</p>
+      <details>
+        <summary>{t("project.deliveryProfile")}</summary>
+        <div className="stage-editor">
+          <div className="inline-form">
+            {(["target_branch", "target", "predeploy_command", "deploy_command",
+               "verify_command"] as (keyof DeliveryProfile)[]).map((key) => (
+              <label className="res-field" key={key}>
+                <span>{t(`project.delivery.${key}`)}</span>
+                <input value={draft.deliveryProfile[key] ?? ""}
+                       disabled={!canOperate}
+                       onChange={(e) => patch({ deliveryProfile: {
+                         ...draft.deliveryProfile, [key]: e.target.value } })} />
+              </label>
+            ))}
+          </div>
+          <p className="muted">{t("project.deliveryHint")}</p>
+        </div>
+      </details>
       {error && <p className="error">{error}</p>}
     </>
   );

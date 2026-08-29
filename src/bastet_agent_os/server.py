@@ -188,6 +188,7 @@ class DispatchIn(BaseModel):
     template_id: str | None = None
     timeout_s: int = 3600
     use_worktree: bool = True
+    delivery: dict[str, Any] | None = None
 
 
 class TemplateIn(BaseModel):
@@ -265,6 +266,14 @@ class ProjectTemplateIn(BaseModel):
 class ProjectUpdateIn(BaseModel):
     repo_path: str | None = None
     description: str | None = None
+    delivery_profile: dict[str, Any] | None = None
+
+
+class DeliveryIn(BaseModel):
+    mode: str
+    version: str = ""
+    version_source: str = "package.json"
+    profile: dict[str, Any] | None = None
 
 
 class RolePromptIn(BaseModel):
@@ -367,6 +376,7 @@ class ChatDispatchIn(BaseModel):
     title: str = ""
     spec: str = ""                     # blank = build it from the conversation
     template_id: str | None = None
+    delivery: dict[str, Any] | None = None
 
 
 class SecretUpdateIn(BaseModel):
@@ -1086,6 +1096,8 @@ def create_app(home: Home) -> FastAPI:
         config = json.loads(row["config_json"] or "{}")
         if p.description is not None:
             config["description"] = p.description
+        if p.delivery_profile is not None:
+            config["delivery_profile"] = p.delivery_profile
         if p.repo_path is not None and p.repo_path.strip():
             try:
                 p.repo_path = check_repo_path(p.repo_path)
@@ -1144,6 +1156,7 @@ def create_app(home: Home) -> FastAPI:
             "project": {"id": project["id"], "team_id": project["team_id"],
                         "repo_path": project["repo_path"],
                         "description": config.get("description", ""),
+                        "delivery_profile": config.get("delivery_profile", {}),
                         "template_id": project["default_template_id"]},
             "stages": stages,
             "role_coverage": needed,
@@ -1371,12 +1384,24 @@ def create_app(home: Home) -> FastAPI:
         between planning and execution."""
         if db.one("SELECT id FROM projects WHERE id=?", (project_id,)) is None:
             raise HTTPException(status_code=404, detail="project not found")
-        tasks = [{"title": str(t.get("title", "")).strip(),
-                  "spec": str(t.get("spec", "")).strip(),
-                  "role": str(t.get("role", "")).strip(),
-                  **({"job_id": t["job_id"]} if t.get("job_id") else {}),
-                  **({"origin": t["origin"]} if t.get("origin") else {})}
-                 for t in body.tasks if str(t.get("title", "")).strip()]
+        from .delivery import normalize as normalize_delivery
+        tasks = []
+        try:
+            for t in body.tasks:
+                title = str(t.get("title", "")).strip()
+                if not title:
+                    continue
+                tasks.append({
+                    "title": title,
+                    "spec": str(t.get("spec", "")).strip(),
+                    "role": str(t.get("role", "")).strip(),
+                    "delivery": normalize_delivery(
+                        t.get("delivery") or {"mode": "branch"}),
+                    **({"job_id": t["job_id"]} if t.get("job_id") else {}),
+                    **({"origin": t["origin"]} if t.get("origin") else {}),
+                })
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not tasks:
             raise HTTPException(status_code=400, detail="至少需要一個任務")
         lifecycle_mod.save_task_plan(db, project_id, tasks, by=auth.actor,
@@ -1554,7 +1579,7 @@ def create_app(home: Home) -> FastAPI:
                 project_id=session["scope_id"], prompt=spec,
                 title=body.title or f"chat: {session['title']}"[:60],
                 agent_id=body.agent_id, template_id=body.template_id,
-                origin="chat"))
+                origin="chat", delivery=body.delivery))
         except QuotaError as exc:
             raise HTTPException(status_code=429, detail=str(exc)) from exc
         except ValueError as exc:
@@ -1867,6 +1892,7 @@ def create_app(home: Home) -> FastAPI:
                 title=d.title or d.prompt[:60], agent_id=d.agent_id,
                 resource_id=d.resource_id, template_id=d.template_id,
                 timeout_s=d.timeout_s, use_worktree=d.use_worktree,
+                delivery=d.delivery,
             ))
         except QuotaError as exc:
             raise HTTPException(status_code=429, detail=str(exc)) from exc
@@ -1994,7 +2020,8 @@ def create_app(home: Home) -> FastAPI:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = [dict(r) for r in db.query(
             "SELECT id, project_id, template_id, title, stage, status, priority, "
-            "archived, rework_count, stages_snapshot_json, created_at, updated_at "
+            "archived, rework_count, delivery_status, delivery_json, "
+            "stages_snapshot_json, created_at, updated_at "
             f"FROM jobs {where} ORDER BY updated_at DESC LIMIT ?",
             (*params, limit))]
         # liveness for the board: the latest run's heartbeat says whether an
@@ -2032,6 +2059,8 @@ def create_app(home: Home) -> FastAPI:
         job["gates"] = [dict(g) for g in db.query(
             "SELECT g.* FROM gate_results g JOIN runs r ON r.id=g.run_id "
             "WHERE r.job_id=? ORDER BY g.at", (job_id,))]
+        job["deliveries"] = [dict(d) for d in db.query(
+            "SELECT * FROM deliveries WHERE job_id=? ORDER BY started_at", (job_id,))]
         # what the PM did about this card, and above all what it is ASKING.
         # An escalation that lives only in the audit log is an escalation to
         # nobody: the operator saw "blocked" and a retry button, with no sign
@@ -2161,10 +2190,21 @@ def create_app(home: Home) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/jobs/{job_id}/revalidate")
-    def revalidate_job_gate(job_id: str,
-                            auth: Auth = Depends(require_role("operator"))):
+    async def revalidate_job_gate(job_id: str,
+                                  auth: Auth = Depends(require_role("operator"))):
         try:
             return orch.revalidate_gate(job_id, user=auth.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/api/jobs/{job_id}/delivery")
+    async def configure_job_delivery(
+        job_id: str, body: DeliveryIn,
+        auth: Auth = Depends(require_role("operator")),
+    ):
+        try:
+            return orch.configure_delivery(job_id, body.model_dump(exclude_none=True),
+                                           user=auth.name)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

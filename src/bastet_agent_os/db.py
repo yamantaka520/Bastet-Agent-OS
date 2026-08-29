@@ -107,10 +107,29 @@ CREATE TABLE IF NOT EXISTS jobs (
   default_agent_id TEXT,           -- fallback executor agent for stages without a role match
   resource_id TEXT,                -- LLM resource used by this job's runs (NULL = direct path)
   worktree_path TEXT,
+  -- Explicit delivery contract.  Code execution and delivery are separate:
+  -- a release job cannot become done until this contract is satisfied.
+  delivery_json TEXT NOT NULL DEFAULT '{}',
+  delivery_status TEXT NOT NULL DEFAULT 'not_required',
   version INTEGER NOT NULL DEFAULT 0,    -- optimistic lock (CAS updates)
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS deliveries (
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL REFERENCES jobs(id),
+  mode TEXT NOT NULL,
+  status TEXT NOT NULL,             -- running|succeeded|failed
+  target TEXT NOT NULL DEFAULT '',
+  version TEXT NOT NULL DEFAULT '',
+  commit_sha TEXT NOT NULL DEFAULT '',
+  evidence_json TEXT NOT NULL DEFAULT '{}',
+  error TEXT NOT NULL DEFAULT '',
+  started_at TEXT NOT NULL,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_deliveries_job ON deliveries(job_id, started_at);
 
 -- data handed to a job while it runs: deploy targets, endpoints, decisions the
 -- agent could not know. Injected into every later run's brief and dropped into
@@ -464,6 +483,12 @@ class Db:
             if "archived" not in existing:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN archived INTEGER "
                                    "NOT NULL DEFAULT 0")
+            if "delivery_json" not in existing:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN delivery_json TEXT "
+                                   "NOT NULL DEFAULT '{}'")
+            if "delivery_status" not in existing:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN delivery_status TEXT "
+                                   "NOT NULL DEFAULT 'not_required'")
             project_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(projects)")}
             if "status" not in project_cols:
                 self._conn.execute("ALTER TABLE projects ADD COLUMN status TEXT "

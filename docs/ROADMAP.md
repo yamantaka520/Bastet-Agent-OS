@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-08-07 · current version 0.22.x
+Last updated: 2026-08-30 · current version 0.35.x
 
 M0–M6 are done ([PROGRESS.md](../PROGRESS.md) says what was verified where). What
 follows is ordered by how much it would change daily use, not by how interesting
@@ -16,9 +16,10 @@ it is to build.
 - **Cost ceilings that stop work.** Budgets are recorded per grant and enforced
   at dispatch; a per-project daily ceiling that pauses the runner (rather than
   failing a run) is a better shape for the same intent.
-- **Merge assistance.** A finished job leaves its work on `bastet/<job_id>`.
-  Reviewing and merging that is still a manual git operation; a diff view with a
-  merge button belongs on the board.
+- **Review UI for branch deliveries.** A normal `branch` delivery still leaves
+  reviewable work on `bastet/<job_id>` for a deliberate merge; a diff view with
+  a merge button belongs on the board. Explicit `production` delivery is now a
+  separate audited path that atomically publishes the target and release tag.
 
 - **Async media fetcher.** Media stages must currently poll a vendor's async
   generation to completion within their own run. A background fetcher that

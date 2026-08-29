@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  api, apiBlob, post, Interaction, Job, JobDetail, UsageRow,
+  api, apiBlob, post, put, Interaction, Job, JobDetail, UsageRow,
 } from "../api";
 import { useT, type T } from "../i18n";
 import { fmtAgo, fmtTime } from "../ui";
@@ -86,7 +86,9 @@ function Board({ jobs, onSelect }: { jobs: Job[]; onSelect: (id: string) => void
                                             undefined, job.status)}
                 {job.template_id ? ` · ${job.template_id}` : ""}
                 {job.rework_count ? ` · 🔧 ${t("board.reworked",
-                                               { n: job.rework_count })}` : ""}</div>
+                                               { n: job.rework_count })}` : ""}
+                {job.delivery_status && job.delivery_status !== "not_required"
+                  ? ` · 🚚 ${job.delivery_status}` : ""}</div>
               <StageProgress job={job} />
               {job.status === "in_progress" && <Heartbeat job={job} t={t} />}
               <div className="card-meta card-id">{job.id}</div>
@@ -263,6 +265,10 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   const [rulingText, setRulingText] = useState("");
   const [rulingError, setRulingError] = useState("");
   const [supplyNote, setSupplyNote] = useState("");
+  const [repairDeliveryMode, setRepairDeliveryMode] =
+    useState<"branch" | "production">("branch");
+  const [repairDeliveryVersion, setRepairDeliveryVersion] = useState("");
+  const [repairDeliveryError, setRepairDeliveryError] = useState("");
 
   useEffect(() => {
     api<string[]>(`/api/jobs/${jobId}/previews`).then(setPreviews)
@@ -348,6 +354,19 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
     load();
   };
 
+  const repairDelivery = async () => {
+    setRepairDeliveryError("");
+    try {
+      await put(`/api/jobs/${jobId}/delivery`, {
+        mode: repairDeliveryMode,
+        ...(repairDeliveryMode === "production"
+          ? { version: repairDeliveryVersion.trim() } : {}),
+      });
+      onChanged();
+      load();
+    } catch (e) { setRepairDeliveryError(String((e as Error).message)); }
+  };
+
   const answer = async (runId: string, requestId: string, allow: boolean) => {
     const message = (answerText[requestId] || "").trim();
     await post(`/api/runs/${runId}/respond`,
@@ -363,6 +382,43 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
       <button className="ghost close" onClick={onClose}>✕</button>
       <h2>{job.title}</h2>
       <p className="card-meta">{job.id} · {t("board.jobStage")} <b>{job.stage}</b> · {job.status}</p>
+      {job.delivery_status && job.delivery_status !== "not_required" && (
+        <div className={job.delivery_status === "failed" ? "approval" : "notice"}>
+          <b>🚚 {t("board.delivery")}: {job.delivery_status}</b>
+          {job.deliveries?.map((d) => (
+            <p className="card-meta" key={d.id}>
+              {d.mode} · {d.target || "—"}
+              {d.version ? ` · v${d.version}` : ""}
+              {d.commit_sha ? ` · ${d.commit_sha.slice(0, 12)}` : ""}
+              {d.error ? ` · ${d.error.slice(0, 240)}` : ""}
+            </p>
+          ))}
+        </div>
+      )}
+      {canOperate && job.status === "done"
+        && (!job.delivery_status || job.delivery_status === "not_required") && (
+        <div className="approval">
+          <h3>{t("board.repairDelivery")}</h3>
+          <p className="muted">{t("board.repairDeliveryHint")}</p>
+          <div className="row">
+            <select value={repairDeliveryMode}
+                    onChange={(e) => setRepairDeliveryMode(
+                      e.target.value as "branch" | "production") }>
+              <option value="branch">{t("proj.deliveryBranch")}</option>
+              <option value="production">{t("proj.deliveryProduction")}</option>
+            </select>
+            {repairDeliveryMode === "production" && (
+              <input value={repairDeliveryVersion}
+                     placeholder={t("proj.deliveryVersionPh")}
+                     onChange={(e) => setRepairDeliveryVersion(e.target.value)} />
+            )}
+            <button disabled={repairDeliveryMode === "production"
+                              && !repairDeliveryVersion.trim()}
+                    onClick={repairDelivery}>{t("board.repairDeliveryGo")}</button>
+          </div>
+          {repairDeliveryError && <p className="error">{repairDeliveryError}</p>}
+        </div>
+      )}
       {!!job.rework_count && (
         <p className="notice">🔧 {t("board.reworkNote", { n: job.rework_count })}</p>
       )}

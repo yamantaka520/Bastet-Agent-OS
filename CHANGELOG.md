@@ -8,6 +8,30 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.35.0] - 2026-08-30
+
+### Added
+
+- Every planned task now declares an explicit delivery contract: no external
+  delivery, durable task branch, or production. Project settings define the
+  trusted pre-deploy gate, deployment command, online verification command,
+  target branch and production target; cards and delivery receipts expose the
+  live state in the WebUI.
+- Production delivery atomically publishes the target branch and immutable
+  version tag, exports the exact commit/version to deployment verification,
+  and records a durable receipt. A completed Agent stage is no longer accepted
+  as proof that a release reached production.
+
+### Fixed
+
+- Required branch or production delivery failure now blocks the card, preserves
+  its worktree and starts PM diagnosis instead of writing `job.done`. Retry and
+  restart resume the delivery step without rerunning already-accepted Agent
+  stages; historic falsely-completed cards can be reopened with a contract.
+- Project planning, confirmation and lifecycle views retain delivery intent,
+  preventing a seven-card maintenance project from silently ending at a task
+  branch with no version bump, merge, tag, deployment or online verification.
+
 ## [0.34.17] - 2026-08-29
 
 ### Fixed

@@ -8,6 +8,8 @@ export type Job = {
   archived: number;
   stages_snapshot_json: string;
   rework_count?: number;         // how many times a gate sent this card back
+  delivery_status?: string;
+  delivery_json?: string;
   // liveness (in_progress only): the latest run's last words and when
   run_status?: string;
   heartbeat_at?: string | null;
@@ -58,8 +60,14 @@ export type JobDetail = Job & {
   worktree_path: string | null;
   runs: Run[];
   gates: Gate[];
+  deliveries: DeliveryReceipt[];
   // what the PM did — and, on an escalation, the question it needs answered
   pm_decision?: PmDecision | null;
+};
+
+export type DeliveryReceipt = {
+  id: string; mode: string; status: string; target: string; version: string;
+  commit_sha: string; error: string; started_at: string; finished_at: string | null;
 };
 
 export type UsageRow = {

@@ -241,11 +241,13 @@ In chat, an agent's generated files return to the conversation via
    sandbox, so sandboxed executors are granted that directory explicitly —
    without it every git write failed with what looks like a broken disk
    (`cannot lock ref 'ORIG_HEAD': Read-only file system`).
-2. The branch is **pushed** to the project's remote: `origin` if the repo has
-   one, else a granted git resource's URL, with credentials matched by exact
-   host only (a GitLab token never travels to github.com). Opt out per project
-   with `git_auto_push: false`. A failed or timed-out push is audited and
-   non-fatal — the work is safe locally.
+2. The task's explicit delivery contract decides the terminal transition.
+   `branch` must push `bastet/<job_id>` successfully. `production` must also
+   merge a freshly fetched target, atomically push it with the immutable
+   `v<version>` tag, run the trusted deployment profile, and verify the exact
+   commit online. A failure is audited, blocks the card, preserves the worktree,
+   and invokes PM diagnosis; `job.done` is written only after the durable
+   receipt succeeds. `none` retains the old optional best-effort branch push.
 3. The run's summary, any gate rejections, and the completion are written to
    team memory, attributed to the agent that ran, scoped to the project.
 
