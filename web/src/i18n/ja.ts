@@ -156,6 +156,7 @@ const ja: Dict = {
   "org.accountGlobalShort": "グローバルログイン",
   "org.modelDefault": "公式デフォルトモデル",
   "org.webLogin": "WebUI でログイン（グローバル）",
+  "org.loginSettings": "ログインとモデル設定",
   "org.newAccountPh": "新しい {executor} アカウント名",
   "org.addAccount": "＋ アカウント",
   "org.globalOnlyNote": "この executor はグローバルログイン（単一アカウント）のみ対応です — 上の「WebUI でログイン（グローバル）」ボタンから認証してください。",

@@ -49,6 +49,13 @@ _BROWSER_FAILURE_MARKERS = (
 def classify_failure(text: str) -> str:
     """Return a stable infrastructure kind, or an empty string for business failure."""
     lowered = (text or "").lower()
+    # A selected direct-provider model without credentials is deterministic.
+    # It cannot be repaired by asking the same agent to perform the same work
+    # again; park the route without consuming rework and let the supervisor
+    # choose a configured stand-in (or surface the login action to a human).
+    if ("no api key found for the selected model" in lowered
+            or ("log into a provider" in lowered and "api key" in lowered)):
+        return "executor_unconfigured:llm_credentials"
     if "capability_unavailable" in lowered and "browser.playwright" in lowered:
         return "capability_unavailable:browser.playwright"
     browser_context = any(word in lowered for word in

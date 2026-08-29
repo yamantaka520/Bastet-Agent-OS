@@ -8,6 +8,29 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.9] - 2026-08-29
+
+### Added
+
+- Every Agent row now has a **Login & model settings** action. It opens the
+  executor's real server-side profile terminal and saves the exact LLM model on
+  the Agent. Hermes runs its model/provider setup, Pi accepts `/login`, and
+  OpenClaw runs its guided auth/model onboarding in the selected account home.
+- Agent ids are editable. Bastet atomically migrates project roles, jobs, run
+  history, resource grants, chats, room messages and handoff receipts while
+  preserving the separate AgentMemoryOS identity. An Agent with a live run
+  cannot be renamed.
+
+### Fixed
+
+- Direct Pi runs now call `pi auth check` for the selected model before doing
+  work. Missing provider credentials are a non-retryable configuration fault:
+  Bastet routes once to a configured stand-in when available, otherwise waits
+  for login instead of spending PM/rework cycles on identical attempts.
+- Long deterministic gates and host prechecks run outside the async control
+  loop. Browser E2E can no longer make the board, API and WebSocket control
+  plane time out while the test process is healthy.
+
 ## [0.34.8] - 2026-08-29
 
 ### Fixed

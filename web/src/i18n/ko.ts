@@ -156,6 +156,7 @@ const ko: Dict = {
   "org.accountGlobalShort": "전역 로그인",
   "org.modelDefault": "공식 기본 모델",
   "org.webLogin": "WebUI 로그인（전역）",
+  "org.loginSettings": "로그인 및 모델 설정",
   "org.newAccountPh": "새 {executor} 계정 이름",
   "org.addAccount": "＋ 계정",
   "org.globalOnlyNote": "이 executor 는 전역 로그인（단일 계정）만 지원합니다 — 위의 「WebUI 로그인（전역）」 버튼으로 인증하세요.",

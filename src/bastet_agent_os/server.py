@@ -107,6 +107,7 @@ class AccountIn(BaseModel):
 
 
 class AgentUpdateIn(BaseModel):
+    id: str | None = None            # operator-facing id; renames every reference atomically
     name: str | None = None
     executor_type: str | None = None
     account_id: str | None = None
@@ -781,6 +782,20 @@ def create_app(home: Home) -> FastAPI:
         if row is None:
             raise HTTPException(status_code=404, detail="agent not found")
         fields = {k: v for k, v in a.model_dump().items() if v is not None}
+        requested_id = str(fields.pop("id", agent_id)).strip()
+        if not requested_id:
+            raise HTTPException(status_code=400, detail="agent id cannot be empty")
+        if requested_id != agent_id:
+            try:
+                db.rename_agent(agent_id, requested_id)
+            except ValueError as exc:
+                detail = str(exc)
+                status = 409 if "already exists" in detail or "active run" in detail else 404
+                raise HTTPException(status_code=status, detail=detail) from exc
+            db.audit(auth.actor, "agent.rename", "agent", requested_id,
+                     {"old_id": agent_id, "new_id": requested_id})
+            agent_id = requested_id
+            row = db.one("SELECT * FROM agents WHERE id=?", (agent_id,))
         if fields.get("account_id") == "":
             fields["account_id"] = None  # "" clears the binding (global login)
         if "model" in fields:            # model lives inside config_json

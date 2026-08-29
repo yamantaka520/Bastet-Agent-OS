@@ -513,6 +513,52 @@ class Db:
             for sql, params in statements:
                 self._conn.execute(sql, params)
 
+    def rename_agent(self, old_id: str, new_id: str) -> None:
+        """Rename an agent and every live relational reference atomically.
+
+        Agent ids are operator-facing identifiers, not immutable database
+        surrogates.  SQLite's historical schema predates ON UPDATE CASCADE, so
+        changing only ``agents.id`` would either violate a foreign key or leave
+        jobs, rooms and resource grants pointing at the old name.  Defer the
+        constraints for this one transaction and move the whole identity graph
+        together.  Audit rows deliberately remain historical snapshots.
+        """
+        with self._lock, self._conn:
+            if self._conn.execute("SELECT 1 FROM agents WHERE id=?", (old_id,)).fetchone() \
+                    is None:
+                raise ValueError(f"agent {old_id!r} not found")
+            if self._conn.execute("SELECT 1 FROM agents WHERE id=?", (new_id,)).fetchone() \
+                    is not None:
+                raise ValueError(f"agent {new_id!r} already exists")
+            active = self._conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE agent_id=? AND status IN "
+                "('queued','running','waiting_input')", (old_id,)).fetchone()[0]
+            if active:
+                raise ValueError("agent id cannot change while it has an active run")
+
+            self._conn.execute("PRAGMA defer_foreign_keys=ON")
+            statements = [
+                ("UPDATE project_agent_roles SET agent_id=? WHERE agent_id=?", (new_id, old_id)),
+                ("UPDATE runs SET agent_id=? WHERE agent_id=?", (new_id, old_id)),
+                ("UPDATE stage_handoffs SET agent_id=? WHERE agent_id=?", (new_id, old_id)),
+                ("UPDATE handoff_receipts SET agent_id=? WHERE agent_id=?", (new_id, old_id)),
+                ("UPDATE jobs SET default_agent_id=? WHERE default_agent_id=?", (new_id, old_id)),
+                ("UPDATE jobs SET agent_override=? WHERE agent_override=?", (new_id, old_id)),
+                ("UPDATE grants SET scope_id=? WHERE scope_type='agent' AND scope_id=?",
+                 (new_id, old_id)),
+                ("UPDATE chat_sessions SET responder_id=? "
+                 "WHERE responder_kind='agent' AND responder_id=?", (new_id, old_id)),
+                ("UPDATE room_messages SET author_id=? "
+                 "WHERE author_type='agent' AND author_id=?", (new_id, old_id)),
+                ("UPDATE stage_handoffs SET delivered_to_agent_id=? "
+                 "WHERE delivered_to_agent_id=?", (new_id, old_id)),
+                ("UPDATE stage_handoffs SET acknowledged_by=? WHERE acknowledged_by=?",
+                 (new_id, old_id)),
+                ("UPDATE agents SET id=?, updated_at=? WHERE id=?", (new_id, now(), old_id)),
+            ]
+            for sql, params in statements:
+                self._conn.execute(sql, params)
+
     def query(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
         # FastAPI sync handlers and the orchestrator run in different worker
         # threads.  check_same_thread=False permits that ownership model; it

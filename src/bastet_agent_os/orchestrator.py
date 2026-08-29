@@ -410,8 +410,15 @@ class Orchestrator:
         text = " ".join(filter(None, [job["rework_note"] or "",
                                       run["error"] if run else ""]))
         needles = ("max turns reached", "executor reported failed with no output",
-                   "driver_crashed", "driver lost", "orphaned")
+                   "driver_crashed", "driver lost", "orphaned",
+                   "no api key found for the selected model")
         hit = next((n for n in needles if n in text.lower()), "")
+        if hit == "no api key found for the selected model":
+            alternate = self._alternate_agent(job, self._last_agent(job["id"]))
+            return (bool(alternate),
+                    "selected model credentials missing; route to configured stand-in"
+                    if alternate else
+                    "selected model credentials missing; login or configure the agent")
         if not hit:
             from . import quota_wait
             # a depleted agent is recoverable by ROUTING, not by waiting: the
@@ -627,6 +634,13 @@ class Orchestrator:
         from . import pm_supervisor
         if reason == "human approval" or job["resume_at"]:
             return
+        # Credentials are supplied outside prompts.  A PM agent cannot create
+        # an API key safely, and asking it to judge this deterministic error is
+        # exactly how the same Pi model was dispatched three times.  The
+        # capability block already posts the actionable login/configuration
+        # handoff; wait for an operator when no configured stand-in exists.
+        if reason.startswith("selected model credentials missing"):
+            return
         if job["id"] in self._pm_diagnosing:
             return
         if pm_supervisor.intervention_count(self.db, job["id"]) >= \
@@ -779,7 +793,14 @@ class Orchestrator:
             # for files in a directory the stage never wrote to.
             job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
             workdir = job["worktree_path"] or self._project_repo(job)
-            outcome = self._judge(stage, workdir, result, job=job, run_id=run_id)
+            # Deterministic gates may run a long browser/E2E command.  They are
+            # intentionally synchronous at the workflow boundary (also used by
+            # CLI revalidation), but must never occupy the control-plane event
+            # loop: while one live npm gate ran, every API and websocket timed
+            # out for four minutes.  The DB wrapper is thread-safe, so move the
+            # complete judgement to a worker thread.
+            outcome = await asyncio.to_thread(
+                self._judge, stage, workdir, result, job=job, run_id=run_id)
             self._record_gate(run_id, stage, outcome,
                               reviewer_kind="agent",
                               reviewer_id="workflow-engine" if stage.gate == "tests-pass"
@@ -1521,7 +1542,13 @@ class Orchestrator:
             precheck_command = str(
                 stage.gate_config.get("precheck_command") or "").strip()
             if precheck_command:
-                precheck = evaluate_gate(
+                stamp = now()
+                self.db.write(
+                    "UPDATE runs SET heartbeat_at=?, progress_at=?, progress_text=? "
+                    "WHERE id=?", (stamp, stamp,
+                                    f"Bastet precheck: {precheck_command}"[:300], run_id))
+                precheck = await asyncio.to_thread(
+                    evaluate_gate,
                     StageDef(name=f"{stage.name}:precheck", gate="tests-pass",
                              gate_config={"command": precheck_command}),
                     workdir, None, env=extra_env)

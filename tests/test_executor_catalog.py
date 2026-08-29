@@ -17,6 +17,11 @@ def test_pi_and_openclaw_are_first_class_executor_accounts():
         "PI_CODING_AGENT_DIR": "/profiles/pi"}
     assert accounts.login_command("openclaw", "/profiles/claw")[0] == {
         "OPENCLAW_HOME": "/profiles/claw"}
+    assert accounts.login_command("hermes", "/profiles/hermes")[1] == [
+        "hermes", "setup"]
+    assert accounts.login_command("pi", "/profiles/pi")[1] == ["pi"]
+    assert accounts.login_command("openclaw", "/profiles/claw")[1] == [
+        "openclaw", "onboard"]
 
 
 def test_pi_and_openclaw_are_maintainable_components():

@@ -161,6 +161,7 @@ const zhHant = {
   "org.accountGlobalShort": "全域登入",
   "org.modelDefault": "官方預設模型",
   "org.webLogin": "WebUI 登入（全域）",
+  "org.loginSettings": "登入與模型設定",
   "org.newAccountPh": "新增 {executor} 帳號名稱",
   "org.addAccount": "＋ 帳號",
   "org.globalOnlyNote": "此 executor 僅支援全域登入（單一帳號）— 用上方「WebUI 登入（全域）」按鈕完成驗證。",

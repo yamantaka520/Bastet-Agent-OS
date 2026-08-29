@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import { del, openLoginSocket, post } from "./api";
+import { del, openLoginSocket, post, put } from "./api";
 import { useT } from "./i18n";
 import { onEnterSubmit } from "./ui";
 
@@ -18,8 +18,10 @@ const KEYS = [
   { label: "Ctrl+C", seq: "\x03" },
 ];
 
-export default function LoginWizard({ title, executorType, accountId, onClose }: {
+export default function LoginWizard({ title, executorType, accountId, agentId,
+                                      currentModel, onClose }: {
   title: string; executorType: string; accountId: string | null;
+  agentId?: string | null; currentModel?: string;
   onClose: () => void;
 }) {
   const t = useT();
@@ -27,6 +29,8 @@ export default function LoginWizard({ title, executorType, accountId, onClose }:
   const [done, setDone] = useState<number | null | "running">("running");
   const [error, setError] = useState("");
   const [paste, setPaste] = useState("");
+  const [model, setModel] = useState(currentModel ?? "");
+  const [modelSaved, setModelSaved] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   const socket = useRef<ReturnType<typeof openLoginSocket> | null>(null);
   const sessionId = useRef<string | null>(null);
@@ -83,6 +87,22 @@ export default function LoginWizard({ title, executorType, accountId, onClose }:
         <h2>{t("lw.title", { name: title })}</h2>
         {command && <p className="card-meta"><code>{command}</code></p>}
         {error && <p className="error">{error}</p>}
+        {agentId && (
+          <div className="inline-form">
+            <label>{t("org.modelDefault")}</label>
+            <input value={model} style={{ width: "22rem" }}
+                   placeholder={t("org.modelDefault")}
+                   onChange={(e) => { setModel(e.target.value); setModelSaved(false); }} />
+            <button className="ghost" onClick={async () => {
+              setError("");
+              try {
+                await put(`/api/agents/${encodeURIComponent(agentId)}`, { model });
+                setModelSaved(true);
+              } catch (e) { setError(String((e as Error).message)); }
+            }}>{t("c.save")}</button>
+            {modelSaved && <span className="notice">✓</span>}
+          </div>
+        )}
         <div ref={container} className="xterm-host" />
         {done === "running" && (
           <div className="row keypad">

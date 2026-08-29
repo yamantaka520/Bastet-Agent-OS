@@ -352,7 +352,11 @@ resource with a configured model; direct usage is imported from Hermes's
 Pi runs in ephemeral JSONL mode. Bastet disables repository extensions and
 packages, injects the context pack itself, and selects either a writable tool
 set or the real `read,grep,find,ls` review allowlist. It supports direct account
-profiles and temporary OpenAI/Anthropic Gateway profiles. OpenClaw uses the
+profiles and temporary OpenAI/Anthropic Gateway profiles. A direct selected
+model must pass Pi's credential check before work starts; a missing provider key
+is never retried on the identical route. Each Agent row opens the real
+Hermes/Pi/OpenClaw account terminal alongside the editable model, and Agent ids
+can be renamed atomically when no run is live. OpenClaw uses the
 bounded `agent exec --json --isolated` interface; its initial contract is
 direct-only and writable because the upstream exec interface does not yet
 expose a defensible read-only allowlist.

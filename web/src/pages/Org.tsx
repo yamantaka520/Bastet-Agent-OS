@@ -149,7 +149,9 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
   const [form, setForm] = useState({ id: "", name: "", executor: "claude-code",
                                      account: "", model: "" });
   const [wizard, setWizard] = useState<{ title: string; executorType: string;
-                                         accountId: string | null } | null>(null);
+                                         accountId: string | null;
+                                         agentId: string | null;
+                                         currentModel: string } | null>(null);
   const [quota, setQuota] = useState<Record<string, Quota>>({});
   const [newAccountName, setNewAccountName] = useState("");
   const [created, setCreated] = useState<{ login_instruction: string } | null>(null);
@@ -204,6 +206,7 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
     setError("");
     try {
       await put(`/api/agents/${agentId}`, {
+        id: (document.getElementById(`edit-id-${agentId}`) as HTMLInputElement).value,
         name: (document.getElementById(`edit-name-${agentId}`) as HTMLInputElement).value,
         executor_type: (document.getElementById(`edit-exec-${agentId}`) as HTMLSelectElement).value,
         account_id: (document.getElementById(`edit-acct-${agentId}`) as HTMLSelectElement).value,
@@ -296,7 +299,7 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
             {selected && selected.kind !== "bastet-lite" && (
               <button className={selected.configured ? "ghost" : ""} onClick={() =>
                 setWizard({ title: selected.name, executorType: selected.kind,
-                            accountId: null })}>
+                            accountId: null, agentId: null, currentModel: "" })}>
                 {t("org.webLogin")}{!selected.configured && " ←"}</button>
             )}
           </div>
@@ -324,7 +327,8 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
                         "enabled", ""]}
                  rows={agents.map((a) => (
         editing === a.id ? [
-          a.id,
+          <input key="id" defaultValue={a.id} id={`edit-id-${a.id}`}
+                 style={{ width: "10rem" }} />,
           <input key="n" defaultValue={a.name} id={`edit-name-${a.id}`} />,
           <select key="e" defaultValue={a.executor_type} id={`edit-exec-${a.id}`}>
             {executors.map((e) => <option key={e.kind} value={e.kind}>{e.kind}</option>)}
@@ -356,6 +360,15 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
             <span key="ops" className="row-ops">
               <button className="ghost"
                       onClick={() => setEditing(a.id)}>{t("c.edit")}</button>
+              {a.executor_type !== "bastet-lite" && (
+                <button className="ghost" onClick={() => setWizard({
+                  title: `${a.name}（${a.executor_type}）`,
+                  executorType: a.executor_type,
+                  accountId: a.account_id ?? null,
+                  agentId: a.id,
+                  currentModel: agentModel(a),
+                })}>{t("org.loginSettings")}</button>
+              )}
               <button className="ghost" onClick={() => toggleAgent(a)}>
                 {a.enabled ? t("c.disable") : t("c.enable")}</button>
               {a.depleted_at ? (
@@ -370,8 +383,10 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
       {wizard && (
         <LoginWizard title={wizard.title} executorType={wizard.executorType}
                      accountId={wizard.accountId}
+                     agentId={wizard.agentId} currentModel={wizard.currentModel}
                      onClose={() => {
                        setWizard(null);
+                       reloadAgents();
                        loadAccounts();
                        api<Executor[]>("/api/executors").then(setExecutors).catch(() => {});
                      }} />
@@ -397,7 +412,8 @@ function AgentsSection({ canOperate, agents, reloadAgents }:
                            <button className="ghost" onClick={() =>
                              setWizard({ title: `${a.name}（${a.executor_type}）`,
                                          executorType: a.executor_type,
-                                         accountId: a.id })}>{t("c.login")}</button>
+                                         accountId: a.id, agentId: null,
+                                         currentModel: "" })}>{t("c.login")}</button>
                            <button className="ghost" onClick={async () =>
                              setQuota({ ...quota,
                                [a.id]: await api<Quota>(

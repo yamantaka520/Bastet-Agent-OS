@@ -130,6 +130,28 @@ class PiExecutor:
                        BASTET_RUN_TOKEN=task.run_token or "")
             cmd += ["--provider", "bastet", "--model", task.llm["model"]]
         elif task.llm and task.llm.get("model"):
+            # Pi can resolve a model name to a provider before making a paid
+            # request.  Check that exact provider/model credential contract up
+            # front; the old "profile directory is non-empty" signal allowed a
+            # model whose provider had no key to be retried three times.
+            auth = await asyncio.create_subprocess_exec(
+                "pi", "auth", "check", "--model", task.llm["model"],
+                "--json", "--no-refresh",
+                cwd=task.workdir, env=env,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            try:
+                auth_out, auth_err = await asyncio.wait_for(auth.communicate(), timeout=20)
+            except TimeoutError as exc:
+                auth.kill()
+                await auth.wait()
+                raise RuntimeError("Pi model credential preflight timed out") from exc
+            if auth.returncode != 0:
+                detail = (auth_out + auth_err).decode(errors="replace").strip()
+                raise RuntimeError(
+                    "No API key found for the selected model. "
+                    "Open Login & model settings for this Pi agent."
+                    + (f" Pi auth check: {detail[:500]}" if detail else ""))
             cmd += ["--model", task.llm["model"]]
         cmd += ["--", prompt]
 

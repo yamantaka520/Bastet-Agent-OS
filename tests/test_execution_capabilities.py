@@ -1,13 +1,17 @@
 """Execution capabilities are contracts, not optimistic prompt text."""
 
+import asyncio
 import subprocess
+import threading
+import time
 
 import pytest
 from fake_executor import SCRIPT, add_template, req
 
 from bastet_agent_os import execution_capabilities as caps
+from bastet_agent_os import orchestrator as orchestrator_mod
 from bastet_agent_os.executors.base import RunResult
-from bastet_agent_os.workflow import evaluate_gate, parse_stages
+from bastet_agent_os.workflow import GateOutcome, evaluate_gate, parse_stages
 
 
 def test_stage_capabilities_round_trip_and_validate():
@@ -27,6 +31,12 @@ def test_browser_crash_is_classified_as_capability_not_acceptance():
     assert caps.classify_failure(text) == \
         "capability_unavailable:browser.playwright"
     assert caps.classify_failure("AssertionError: expected 30 fps, got 29") == ""
+
+
+def test_missing_model_api_key_is_non_retryable_executor_configuration():
+    assert caps.classify_failure(
+        "No API key found for the selected model. Use /login to log into a provider"
+    ) == "executor_unconfigured:llm_credentials"
 
 
 def test_trusted_gate_marks_browser_launch_failure(monkeypatch, tmp_path):
@@ -86,6 +96,35 @@ async def test_host_precheck_evidence_is_injected_into_reviewer_prompt(
 
     assert "trusted-e2e-ok" in captured["prompt"]
     assert "Bastet 主機 precheck 證據" in captured["prompt"]
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_host_precheck_never_blocks_the_control_plane_loop(
+        orch, seeded, monkeypatch):
+    add_template(seeded, "slow-precheck", [{
+        "name": "review", "gate": "agent-review", "read_only": True,
+        "gate_config": {"precheck_command": "slow-e2e"},
+    }])
+    entered = threading.Event()
+
+    def slow_gate(*_args, **_kwargs):
+        entered.set()
+        time.sleep(0.3)
+        return GateOutcome("passed", "trusted")
+
+    monkeypatch.setattr(orchestrator_mod, "evaluate_gate", slow_gate)
+    SCRIPT.append(lambda _task: RunResult(
+        status="succeeded", summary="reviewed",
+        structured_verdict={"verdict": "approve", "reasons": [], "comments": []}))
+
+    job_id = orch.dispatch(req(template_id="slow-precheck"))
+    while not entered.is_set():
+        await asyncio.sleep(0.005)
+    started = asyncio.get_running_loop().time()
+    await asyncio.sleep(0.02)
+    assert asyncio.get_running_loop().time() - started < 0.1
+    await orch.wait_idle()
     assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
 
 

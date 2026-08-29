@@ -162,6 +162,7 @@ const zhHans: Dict = {
   "org.accountGlobalShort": "全局登录",
   "org.modelDefault": "官方默认模型",
   "org.webLogin": "WebUI 登录（全局）",
+  "org.loginSettings": "登录与模型设置",
   "org.newAccountPh": "新增 {executor} 账号名称",
   "org.addAccount": "＋ 账号",
   "org.globalOnlyNote": "此 executor 仅支持全局登录（单个账号）— 用上方“WebUI 登录（全局）”按钮完成验证。",

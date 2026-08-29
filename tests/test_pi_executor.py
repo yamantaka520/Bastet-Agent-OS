@@ -130,6 +130,20 @@ async def test_gateway_contract_rejects_partial_or_unknown_routes(tmp_path):
             llm={"flavor": "google", "model": "m"}))
 
 
+async def test_direct_selected_model_checks_provider_credentials_before_work(
+        fake_pi, tmp_path, monkeypatch):
+    output, log = fake_pi
+    output({"status": "invalid", "provider": "ollama-cloud",
+            "reason": "invalid_state"})
+    monkeypatch.setenv("FAKE_EXIT", "2")
+
+    with pytest.raises(RuntimeError, match="No API key found for the selected model"):
+        await PiExecutor().start(spec(
+            tmp_path, llm={"flavor": None, "model": "glm-5.3-flash"}))
+
+    assert "auth check --model glm-5.3-flash --json --no-refresh" in log.read_text()
+
+
 async def test_handle_is_restart_serializable_and_cancel_kills_process_group(
         fake_pi, tmp_path, monkeypatch):
     output, _ = fake_pi

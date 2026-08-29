@@ -26,6 +26,9 @@
 2. 右上角選語言（每個瀏覽器記住自己的）。
 3. **組織**：建 team → 建專案（repo 路徑是「Bastet 主機上」的路徑）→ 建 agent。
    executor 顯示 未安裝/未設定/ready；未設定就用登入精靈（瀏覽器裡的真終端）。
+   每張 Agent 列都有「登入與模型設定」：會進入該 Agent 綁定帳號的實際 Hermes／Pi／
+   OpenClaw 環境，可輸入 API Key 並設定模型。Agent ID 也可在編輯模式改名；若仍有
+   live run，系統會拒絕改名，等該輪結束再做。
 4. **模板**：挑一個內建範本（前後端開發、網頁開發、運維處理、持續維護…）直接
    指派，或複製後改。重活記得給 `timeout_s`。
 5. **組織**：把 agent 指派到工作流需要的角色（這同時授予 AMOS 專案記憶的成員資格）。
@@ -122,7 +125,8 @@ executor 與 direct／gateway 路徑。Hermes 未綁 LLM Resource 時使用自�
 
 Pi 使用暫態 JSONL 模式，由 Bastet 注入 context 並停用專案 extension／package；修改
 階段使用明確的可寫工具清單，review 使用真正的 `read,grep,find,ls` 唯讀清單，且可走
-直連帳號或 OpenAI／Anthropic Gateway。OpenClaw 使用
+直連帳號或 OpenAI／Anthropic Gateway。直連且指定模型時，Bastet 會先執行 Pi 官方
+credential check；缺少該模型供應商的 Key 不會再原路重試。OpenClaw 使用
 `agent exec --json --isolated`；首版只接受直連、可寫的 code／light-task 階段，因為
 上游 exec 目前沒有足以保證唯讀的工具白名單。
 

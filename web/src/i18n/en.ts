@@ -156,6 +156,7 @@ const en: Dict = {
   "org.accountGlobalShort": "global login",
   "org.modelDefault": "vendor default model",
   "org.webLogin": "Log in from the WebUI (global)",
+  "org.loginSettings": "Login & model settings",
   "org.newAccountPh": "new {executor} account name",
   "org.addAccount": "＋ account",
   "org.globalOnlyNote": "This executor supports global login only (a single account) — use the “Log in from the WebUI (global)” button above.",
