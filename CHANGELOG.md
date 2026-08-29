@@ -8,6 +8,27 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.6] - 2026-08-29
+
+### Fixed
+
+- Executor routing now validates direct versus Gateway support, API flavor,
+  required model, read-only capability, and resource grant before creating a
+  run. Automatic role routing skips incompatible candidates instead of
+  spending a failed attempt or PM intervention; explicit incompatible choices
+  are rejected before a run starts.
+- Hermes supports the same two execution paths as the other subscription
+  CLIs: jobs without an LLM resource use the existing logged-in Hermes profile,
+  while OpenAI-flavor resources use a temporary Bastet Gateway profile. Direct
+  runs import token and estimated-cost data from Hermes `--usage-file` output.
+- Retry audit entries now name the Agent selected after role routing and retain
+  the original explicit request separately. Every created run records a
+  `run.routed` audit event with its actual Agent, executor, and direct/Gateway
+  path.
+- PM diagnosis routing ignores executors that cannot perform its read-only,
+  direct-path task, preventing an incompatible PM assignment from consuming a
+  diagnosis transport attempt.
+
 ## [0.34.5] - 2026-08-29
 
 ### Fixed

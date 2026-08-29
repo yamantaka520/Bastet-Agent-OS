@@ -42,6 +42,48 @@ class TaskSpec:
     mcp_config: str | None = None        # path to an mcpServers JSON (pool resources)
 
 
+@dataclass(frozen=True)
+class RouteContract:
+    """Static executor requirements checked before a run is created.
+
+    ``start()`` remains the final defensive boundary, but routing must never
+    knowingly dispatch an impossible direct/gateway combination. Third-party
+    executors without a contract retain the permissive legacy behaviour.
+    """
+
+    direct: bool = True
+    gateway: bool = True
+    gateway_flavors: frozenset[str] | None = None
+    requires_model: bool = False
+    gateway_requires_model: bool = False
+
+
+DEFAULT_ROUTE_CONTRACT = RouteContract()
+
+
+def route_incompatibility(executor: Any, *, has_gateway: bool,
+                          api_flavor: str | None, model: str | None,
+                          read_only: bool) -> str | None:
+    """Return a stable operator-facing reason when a route cannot start."""
+    contract = getattr(executor, "route_contract", DEFAULT_ROUTE_CONTRACT)
+    if read_only and "review" not in executor.capabilities:
+        return "executor does not support read-only work"
+    if has_gateway:
+        if not contract.gateway:
+            return "executor does not support Bastet Gateway resources"
+        if (contract.gateway_flavors is not None
+                and api_flavor not in contract.gateway_flavors):
+            accepted = "/".join(sorted(contract.gateway_flavors))
+            return (f"gateway API flavor {api_flavor or '(missing)'} is "
+                    f"incompatible; use {accepted}")
+    elif not contract.direct:
+        return "executor requires an assigned LLM resource through Bastet Gateway"
+    if ((contract.requires_model or
+         (has_gateway and contract.gateway_requires_model)) and not model):
+        return "executor requires a configured model"
+    return None
+
+
 class ProgressDeadline:
     """A bounded run deadline that gives demonstrably active work time to finish.
 
@@ -226,6 +268,7 @@ class RunResult:
 class Executor(Protocol):
     kind: str
     capabilities: set[str]
+    route_contract: RouteContract
 
     async def start(self, task: TaskSpec) -> Any: ...                      # -> RunHandle
     def stream(self, handle: Any) -> AsyncIterator[RunEvent]: ...

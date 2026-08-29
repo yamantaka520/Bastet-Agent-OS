@@ -21,7 +21,7 @@ from typing import Any
 
 import httpx
 
-from .base import RunEvent, RunResult, TaskSpec, register_builtin
+from .base import RouteContract, RunEvent, RunResult, TaskSpec, register_builtin
 
 MAX_ITERATIONS = 15
 SHELL_TIMEOUT_S = 120
@@ -108,6 +108,7 @@ class LiteHandle:
 class BastetLiteExecutor:
     kind = "bastet-lite"
     capabilities = {"light-task", "review"}
+    route_contract = RouteContract(direct=False, gateway_requires_model=True)
 
     # tests may inject an httpx transport that fakes the gateway
     upstream_transport: httpx.AsyncBaseTransport | None = None

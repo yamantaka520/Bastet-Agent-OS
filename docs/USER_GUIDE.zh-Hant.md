@@ -110,10 +110,15 @@ hash 串接、append-only。搜尋：關鍵字（含 detail 內容）、類別�
 | 🟠 已返工 N 次仍未通過 | 迴圈不收斂，PM 已介入 2 次 | supervisor 先用最新 gate、run 與兩次 PM 決定做一次確定性重查：有失敗關卡就送回可修改階段並換手，有 executor 故障就重跑／換手；同一證據只做一次，仍失敗才交由人處理 |
 | 🟠 設定問題 | 關卡指令在這個 repo 跑不起來 | 改範本指令（重試勾範本刷新）或讓 agent 補相依 |
 | 🟠 execution failed/timeout | executor 掛了 | 看錯誤；重活給 `timeout_s`；重試（可換 agent） |
+| 🟠 explicitly assigned agent … is incompatible | 指定 Agent 的直連／Gateway、API flavor、model、唯讀能力或 grant 不符合該階段 | 改選相容 Agent，或替卡片綁定正確的 LLM Resource；卡片不會被改動，也不會消耗 PM 介入 |
 | 🟠 還活著，但已沉默 N 分鐘 | 行程沒死，只是沒有任何輸出 —— 典型是卡在等輸入的子行程上 | 上主機看 `pgrep -P <pid>`：有子行程停在 `ep_poll`／0% CPU 就是它。收掉那個子行程，該輪通常會自己繼續 |
 
 診斷順序：drawer 的失敗輸出 → `bastet audit` → 心跳最後一行 →
 `journalctl --user -u bastet`。
+
+自動路由會在建立 run 前排除不相容 executor，並以 `run.routed` 記錄真正的 Agent、
+executor 與 direct／gateway 路徑。Hermes 未綁 LLM Resource 時使用自己的登入設定；
+綁定時走 Bastet Gateway，resource 必須是 OpenAI flavor 且設定 model。
 
 ### 專案監督與自動解卡
 

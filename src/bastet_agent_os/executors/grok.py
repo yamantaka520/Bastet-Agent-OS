@@ -32,6 +32,7 @@ from .base import (
     STREAM_LIMIT,
     SUMMARY_LIMIT,
     ProgressDeadline,
+    RouteContract,
     RunEvent,
     RunResult,
     TaskSpec,
@@ -82,6 +83,7 @@ class GrokHandle:
 class GrokExecutor:
     kind = "grok"
     capabilities = {"code", "review"}
+    route_contract = RouteContract(gateway_flavors=frozenset({"openai"}))
 
     async def start(self, task: TaskSpec) -> GrokHandle:
         if task.gateway_url and (not task.llm or task.llm.get("flavor") != "openai"):

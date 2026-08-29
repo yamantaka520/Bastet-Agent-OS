@@ -31,6 +31,7 @@ from .base import (
     STREAM_LIMIT,
     SUMMARY_LIMIT,
     ProgressDeadline,
+    RouteContract,
     RunEvent,
     RunResult,
     TaskSpec,
@@ -109,6 +110,7 @@ class AgyHandle:
 class AgyExecutor:
     kind = "agy"
     capabilities = {"code", "review", "light-task"}
+    route_contract = RouteContract(gateway=False)
 
     async def start(self, task: TaskSpec) -> AgyHandle:
         if task.gateway_url:

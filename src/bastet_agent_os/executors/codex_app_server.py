@@ -22,6 +22,7 @@ from .base import (
     STREAM_LIMIT,
     SUMMARY_LIMIT,
     ProgressDeadline,
+    RouteContract,
     RunEvent,
     RunResult,
     TaskSpec,
@@ -65,6 +66,7 @@ class CodexAppServerHandle:
 class CodexAppServerExecutor:
     kind = "codex-app-server"
     capabilities = {"code", "review", "interaction", "stateful-thread"}
+    route_contract = RouteContract(gateway=False)
 
     @staticmethod
     async def _write(process: asyncio.subprocess.Process, message: dict) -> None:

@@ -1,6 +1,6 @@
 # Compatibility
 
-Current version: 0.18.1
+Current version: 0.34.6
 
 ## Platforms
 
@@ -28,11 +28,17 @@ Current version: 0.18.1
 | `codex` | OpenAI Codex CLI | multiple, via `CODEX_HOME` | `/v1/responses` metering supported |
 | `grok` | xAI Grok Build CLI | multiple, via `GROK_HOME` | pretty-prints JSON; the parser is tolerant of it |
 | `agy` | Google Antigravity | one global Google login | login is browser-based |
-| `hermes` | NousResearch Hermes | gateway profile | account env is overridden by the gateway profile in v1 |
+| `hermes` | NousResearch Hermes | default or isolated `HERMES_HOME` | direct path uses the logged-in provider; Gateway path uses a temporary Bastet profile and requires OpenAI flavor + model |
 | `bastet-lite` | built in | n/a | credentials come from the resource pool |
 
 Each vendor CLI must be installed **and logged in** on the control-plane host.
 Logins are interactive by design and cannot be automated for you.
+
+Before creating a run, Bastet filters role candidates by their executor route
+contract. Gateway-only/direct-only mismatches, wrong API flavors, missing models,
+missing grants, and unsupported read-only work are rejected during routing rather
+than counted as executor failures. Explicitly choosing an incompatible agent is
+an actionable error; automatic routing moves to the next compatible candidate.
 
 ## LLM endpoints (gateway)
 

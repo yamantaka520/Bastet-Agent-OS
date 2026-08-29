@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..workflow import read_verdict
-from .base import SUMMARY_LIMIT, RunEvent, RunResult, TaskSpec, register_builtin
+from .base import SUMMARY_LIMIT, RouteContract, RunEvent, RunResult, TaskSpec, register_builtin
 
 INTERACTION_TIMEOUT_S = 600  # unattended fallback: deny after this long
 # WebFetch/WebSearch are read-only by nature and reviewers/chat agents
@@ -58,6 +58,7 @@ class SdkHandle:
 class ClaudeSdkExecutor:
     kind = "claude-sdk"
     capabilities = {"code", "review", "mcp", "interactive"}
+    route_contract = RouteContract(gateway_flavors=frozenset({"anthropic"}))
 
     async def start(self, task: TaskSpec) -> SdkHandle:
         sdk = _sdk()

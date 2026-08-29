@@ -294,6 +294,7 @@ If a card is genuinely stuck, the diagnosis order that has worked in practice:
 | 🟠 blocked: 已返工 N 次仍未通過 | the loop did not converge | read the gate output; fix the cause, then explicitly renew the recovery lease if a new loop is justified |
 | 🟠 blocked: 設定問題 | a gate command cannot run in this repo | fix the template's command (retry offers workflow refresh) or supply the missing dependency |
 | 🟠 blocked: execution failed/timeout | the executor died | check the error; consider `timeout_s` on the stage; retry (optionally with another agent) |
+| 🟠 explicitly assigned agent … is incompatible | its direct/Gateway path, API flavor, model, read-only support, or grant cannot satisfy this stage | choose a compatible agent or assign the right LLM resource; the blocked card and PM budget are left untouched |
 | 🟠 blocked: 服務重啟時中斷… | project was paused/closed during a restart | resume the project, then retry |
 | 🤖 PM 監督介入 | the PM diagnosed a business stall and acted (retry / handover / ruling) | nothing; the notice says what it decided and why |
 | 🤖 PM 需要你的裁定 | the PM escalated a decision it may not make | answer the question on the card; one button files the ruling and retries |

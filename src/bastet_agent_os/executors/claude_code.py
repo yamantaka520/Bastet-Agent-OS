@@ -24,6 +24,7 @@ from .base import (
     STREAM_LIMIT,
     SUMMARY_LIMIT,
     ProgressDeadline,
+    RouteContract,
     RunEvent,
     RunResult,
     TaskSpec,
@@ -65,6 +66,7 @@ class ClaudeCodeHandle:
 class ClaudeCodeExecutor:
     kind = "claude-code"
     capabilities = {"code", "review", "mcp"}
+    route_contract = RouteContract(gateway_flavors=frozenset({"anthropic"}))
 
     async def start(self, task: TaskSpec) -> ClaudeCodeHandle:
         handle = ClaudeCodeHandle(task=task)

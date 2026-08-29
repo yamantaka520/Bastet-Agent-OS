@@ -35,6 +35,7 @@ from .base import (
     STREAM_LIMIT,
     SUMMARY_LIMIT,
     ProgressDeadline,
+    RouteContract,
     RunEvent,
     RunResult,
     TaskSpec,
@@ -90,6 +91,7 @@ class CodexHandle:
 class CodexExecutor:
     kind = "codex"
     capabilities = {"code", "review"}
+    route_contract = RouteContract(gateway_flavors=frozenset({"openai"}))
 
     async def start(self, task: TaskSpec) -> CodexHandle:
         if task.gateway_url and (not task.llm or task.llm.get("flavor") != "openai"):

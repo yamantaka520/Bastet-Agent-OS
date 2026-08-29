@@ -224,6 +224,7 @@ class Executor(Protocol):
 
     kind: str                      # "claude-code" | "codex" | "codex-app-server" | "hermes" | "bastet-lite"
     capabilities: set[str]        # {"code", "review", "light-task", "mcp", ...}
+    route_contract: RouteContract # direct/gateway、API flavor、model 等啟動前條件
 
     async def start(self, task: TaskSpec) -> RunHandle: ...
     #   TaskSpec: prompt、workdir、context pack、gateway 端點 + run token、
@@ -242,6 +243,17 @@ class Executor(Protocol):
     #   RunResult: 結束狀態、產出摘要、diff/artifact 路徑、用量與記帳精度、
     #             structured_verdict（gate 用的結構化欄位，與自由文字嚴格分離，§5.4.2）
 ```
+
+**派工 admission 契約**：角色、啟用狀態與額度只是候選條件；orchestrator 在建立
+`runs` 前還必須驗證 executor 的 `RouteContract`（直連／Gateway 支援、Gateway API
+flavor、model、read-only capability 與 resource grant）。不相容候選者不得產生一次
+必然失敗的 run，也不得消耗 PM 介入額度；自動派工改找下一位，人工明確指定則保留
+卡片原狀並回報可操作的錯誤。每次實際選派寫入 `run.routed`，`job.retry.agent` 必須是
+角色路由完成後真正執行的 Agent，另以 `requested_agent` 保留人的原始要求。
+
+Hermes 支援兩條路徑：未指定 LLM resource 時沿用其已登入的 `HERMES_HOME` provider；
+指定 resource 時使用 Bastet 臨時 profile，且只接受 OpenAI Chat Completions flavor 與
+明確 model。直連 usage 由 Hermes `--usage-file` 回報，Gateway 路徑仍以 ledger 為準。
 
 **RunHandle 持久化契約**：handle state 可序列化並存於
 `runs.executor_handle_json`。目前 CLI executor 無法跨 OS process 安全 re-attach；啟動時

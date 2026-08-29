@@ -338,6 +338,17 @@ complete reference in [WORKFLOWS.md](WORKFLOWS.md).
 
 ### When the executor fails
 
+Routing validates the executor before creating a run: direct versus Gateway
+support, API flavor, required model, read-only capability, and resource grant.
+Automatic role routing skips incompatible candidates; an explicit incompatible
+choice is refused without changing the blocked card or spending PM intervention.
+`run.routed` records the agent and route that actually won selection.
+
+Hermes uses its logged-in provider when a job has no LLM resource. With a
+resource it uses a temporary Bastet Gateway profile and requires an OpenAI-flavor
+resource with a configured model; direct usage is imported from Hermes's
+`--usage-file` report.
+
 A crash or timeout blocks the card after the stage's `max_retries`. A vendor
 **quota / rate limit** does not: the card parks with the reset time parsed from
 the vendor's own message (`resets 1:30am (Asia/Taipei)` included) or a

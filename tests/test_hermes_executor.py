@@ -16,6 +16,13 @@ FAKE_HERMES = """#!/bin/sh
   printf 'TOKEN:%s\\n' "$BASTET_RUN_TOKEN"
   printf 'CWD:%s\\n' "$(pwd)"
 } > "$FAKE_LOG"
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--usage-file" ]; then
+    printf '{"input_tokens":120,"output_tokens":30,"cache_read_tokens":10,"cache_write_tokens":2,"estimated_cost_usd":0.0123}\n' > "$arg"
+  fi
+  previous="$arg"
+done
 echo "final reply from hermes"
 exit ${FAKE_EXIT:-0}
 """
@@ -63,6 +70,25 @@ async def test_oneshot_success_and_wiring(fake_hermes, tmp_path):
     assert "base_url: http://127.0.0.1:8890/v1" in config
     assert "api_key_env: BASTET_RUN_TOKEN" in config
     assert "brt_secret" not in config                      # token never written to disk
+    assert result.tokens_in == 120 and result.tokens_out == 30
+    assert result.cache_read == 10 and result.cache_write == 2
+    assert result.cost_usd == 0.0123
+
+
+async def test_direct_path_uses_the_logged_in_hermes_profile(
+        fake_hermes, tmp_path, monkeypatch):
+    direct_home = tmp_path / "logged-in-hermes"
+    monkeypatch.setenv("HERMES_HOME", str(direct_home))
+
+    result, _ = await drive(
+        HermesExecutor(),
+        spec(tmp_path, gateway_url=None, run_token=None, llm=None))
+
+    assert result.status == "succeeded" and result.tokens_in == 120
+    log = fake_hermes.read_text()
+    assert f"HERMES_HOME:{direct_home}" in log
+    assert "--provider bastet" not in log
+    assert " -m " not in log
 
 
 async def test_nonzero_exit_is_failure(fake_hermes, tmp_path, monkeypatch):
@@ -80,8 +106,8 @@ async def test_requires_openai_flavor_gateway(tmp_path):
     with pytest.raises(ValueError, match="openai-flavor"):
         await HermesExecutor().start(
             spec(tmp_path, llm={"flavor": "anthropic", "model": "x"}))
-    with pytest.raises(ValueError, match="gateway"):
-        await HermesExecutor().start(spec(tmp_path, gateway_url=None, run_token=None))
+    with pytest.raises(ValueError, match="both URL and run token"):
+        await HermesExecutor().start(spec(tmp_path, run_token=None))
 
 
 def test_profile_writer(tmp_path):

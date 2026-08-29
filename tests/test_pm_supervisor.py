@@ -35,6 +35,21 @@ def _make_pm(db, agent_id="fakebot"):
              "VALUES('proj1',?,'pm',100)", (agent_id,))
 
 
+def test_pm_routing_skips_executor_that_cannot_run_read_only_diagnosis(seeded):
+    seeded.write(
+        "INSERT INTO agents(id,amos_agent_id,name,executor_type,enabled,config_json,"
+        "created_at,updated_at) VALUES('Hermes','Hermes','Hermes','hermes',1,'{}',?,?)",
+        (now(), now()))
+    seeded.write(
+        "INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+        "VALUES('proj1','Hermes','pm',200)")
+    _make_pm(seeded, "ag1")
+
+    selected = pm_supervisor._diagnostic_agent(seeded, "proj1", set())
+
+    assert selected["id"] == "ag1"
+
+
 @pytest.mark.asyncio
 async def test_pm_diagnoses_a_business_stall_and_retries(orch, seeded):
     _make_pm(seeded)

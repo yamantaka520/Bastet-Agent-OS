@@ -28,7 +28,7 @@ from . import run_memory, run_tokens
 from .config import Home
 from .context_engine import build_context
 from .db import Db, new_id, now
-from .executors.base import RunResult, TaskSpec, get_executor
+from .executors.base import RunResult, TaskSpec, get_executor, route_incompatibility
 from .governance import GrantView, QuotaError, dispatch_check, resolve_grant
 from .pricing import PriceBook
 from .role_prompts import prompt_for as role_prompt_for
@@ -470,27 +470,34 @@ class Orchestrator:
         return True
 
     def _alternate_agent(self, job, last_agent: str) -> str:
-        """Prefer another enabled, funded agent for the current stage's role."""
+        """Prefer another funded *and route-compatible* stage agent."""
         try:
             stages = parse_stages(json.loads(job["stages_snapshot_json"]))
-            role = next(s.role for s in stages if s.name == job["stage"])
+            stage = next(s for s in stages if s.name == job["stage"])
+            role = stage.role
         except Exception:
+            stage = StageDef(name=job["stage"])
             role = None
+        candidates = []
         if role:
-            row = self.db.one(
-                "SELECT par.agent_id FROM project_agent_roles par JOIN agents a "
+            candidates.extend(self.db.query(
+                "SELECT a.* FROM project_agent_roles par JOIN agents a "
                 "ON a.id=par.agent_id WHERE par.project_id=? AND par.role=? "
-                "AND a.enabled=1 AND a.depleted_at IS NULL AND par.agent_id<>? ORDER BY par.preference DESC LIMIT 1",
-                (job["project_id"], role, last_agent or ""))
-            if row:
-                return row["agent_id"]
-        row = self.db.one(
-            "SELECT par.agent_id FROM project_agent_roles par JOIN agents a "
+                "AND a.enabled=1 AND a.depleted_at IS NULL AND par.agent_id<>? "
+                "ORDER BY par.preference DESC",
+                (job["project_id"], role, last_agent or "")))
+        candidates.extend(self.db.query(
+            "SELECT DISTINCT a.* FROM project_agent_roles par JOIN agents a "
             "ON a.id=par.agent_id WHERE par.project_id=? AND a.enabled=1 AND a.depleted_at IS NULL "
-            "AND par.agent_id<>? ORDER BY par.preference DESC LIMIT 1",
-            (job["project_id"], last_agent or ""))
-        if row:
-            return row["agent_id"]
+            "AND par.agent_id<>? ORDER BY par.preference DESC",
+            (job["project_id"], last_agent or "")))
+        seen = set()
+        for agent in candidates:
+            if agent["id"] in seen:
+                continue
+            seen.add(agent["id"])
+            if self._agent_route_problem(job, stage, agent) is None:
+                return agent["id"]
         return ""
 
     async def supervise_once(self) -> dict[str, list[str]]:
@@ -1294,12 +1301,26 @@ class Orchestrator:
                               "resume_at=NULL WHERE id=?", (job_id,))
             else:
                 self.db.write("UPDATE jobs SET resume_at=NULL WHERE id=?", (job_id,))
-        agent = agent_id or job["default_agent_id"]
+        requested_agent = agent_id or ""
+        routed_stage = next(item for item in stages if item.name == job["stage"])
+        if agent_id:
+            # Explicit selection is a contract, not a hint. Validate it before
+            # mutating the blocked card, and never silently run somebody else.
+            routed_agent = self.db.one(
+                "SELECT * FROM agents WHERE id=? AND enabled=1", (agent_id,))
+            if routed_agent is None:
+                raise ValueError(f"agent {agent_id!r} is unavailable")
+            problem = self._agent_route_problem(job, routed_stage, routed_agent)
+            if problem:
+                raise ValueError(
+                    f"job {job_id} stage {job['stage']!r}: explicitly assigned "
+                    f"agent {agent_id} is incompatible: {problem}")
+        else:
+            routed_agent = self._agent_for_stage(job, routed_stage)
+        agent = routed_agent["id"]
         if agent_id:
             # the human picked WHO runs this retry. Role assignment normally
-            # outranks the job default, so without an explicit override the
-            # picked agent silently lost to the role mapping — the live case
-            # retried with Claude1 and watched Codex1 fail again identically.
+            # outranks the job default, so persist a one-shot override.
             self.db.write("UPDATE jobs SET default_agent_id=?, agent_override=? "
                           "WHERE id=?", (agent_id, agent_id, job_id))
             # naming a depleted agent IS the human saying it has funds again —
@@ -1311,6 +1332,7 @@ class Orchestrator:
                       (now(), job_id))
         self.db.audit(f"user:{user}", "job.retry", "job", job_id,
                       {"stage": job["stage"], "agent": agent,
+                       "requested_agent": requested_agent,
                        "retried_from": retried_from,
                        "restart_from_rework_target": bool(
                            restart_from_rework_target),
@@ -1399,6 +1421,13 @@ class Orchestrator:
             (run_id, job["id"], stage.name, attempt, agent["id"], agent["executor_type"],
              job["resource_id"], stage.isolation, "queued"),
         )
+        self.db.audit(
+            "orchestrator", "run.routed", "run", run_id,
+            {"job_id": job["id"], "stage": stage.name,
+             "role": stage.role, "agent_id": agent["id"],
+             "executor_type": agent["executor_type"],
+             "route": "gateway" if job["resource_id"] else "direct",
+             "resource_id": job["resource_id"]})
 
         capability_statuses = []
         if stage.requires:
@@ -1805,41 +1834,92 @@ class Orchestrator:
 
     # -- agents / workdir -----------------------------------------------------------
 
+    def _agent_route_problem(self, job, stage: StageDef, agent) -> str | None:
+        """Explain why this agent cannot execute this exact stage route."""
+        resource_id = job["resource_id"]
+        resource = (self.db.one("SELECT * FROM resources WHERE id=? AND enabled=1",
+                                (resource_id,)) if resource_id else None)
+        if resource_id and resource is None:
+            return f"assigned LLM resource {resource_id!r} is missing or disabled"
+        if resource is not None and resolve_grant(
+                self.db, resource_id, job["project_id"], agent["id"]) is None:
+            return f"agent has no grant for assigned LLM resource {resource_id!r}"
+        try:
+            executor = get_executor(agent["executor_type"])
+        except KeyError:
+            return f"executor {agent['executor_type']!r} is not installed"
+        agent_cfg = json.loads(agent["config_json"] or "{}")
+        model = agent_cfg.get("model")
+        flavor = None
+        if resource is not None:
+            routing = json.loads(resource["routing_json"] or "{}")
+            model = model or routing.get("default_model")
+            flavor = resource["api_flavor"]
+        return route_incompatibility(
+            executor, has_gateway=resource is not None,
+            api_flavor=flavor, model=model, read_only=stage.read_only)
+
     def _agent_for_stage(self, job, stage: StageDef):
+        candidates = []
         override = (job["agent_override"] if "agent_override" in job.keys()
                     else None)
         if override:
             row = self.db.one("SELECT * FROM agents WHERE id=? AND enabled=1 "
                               "AND depleted_at IS NULL", (override,))
             if row is not None:
-                return row
-            log.info("agent override %r unavailable; falling back", override)
+                candidates.append(("override", row))
+            else:
+                log.info("agent override %r unavailable; falling back", override)
         if stage.role:
-            row = self.db.one(
+            rows = self.db.query(
                 "SELECT a.* FROM project_agent_roles par JOIN agents a ON a.id = par.agent_id "
                 "WHERE par.project_id=? AND par.role=? AND a.enabled=1 AND a.depleted_at IS NULL "
-                "ORDER BY par.preference DESC LIMIT 1",
+                "ORDER BY par.preference DESC",
                 (job["project_id"], stage.role))
-            if row is not None:
-                return row
-            log.info("no agent for role %r in project %s; using job default",
-                     stage.role, job["project_id"])
+            candidates.extend(("role", row) for row in rows)
+            if not rows:
+                log.info("no agent for role %r in project %s; using job default",
+                         stage.role, job["project_id"])
         agent = self.db.one("SELECT * FROM agents WHERE id=? AND enabled=1 "
                             "AND depleted_at IS NULL", (job["default_agent_id"],))
         if agent is not None:
-            return agent
+            candidates.append(("default", agent))
         # last resort: any funded agent on this project. Without it, a role with
         # exactly one agent (the live case: `tester` = Grok1 alone) dead-ends the
         # moment that agent's balance empties, even with capable stand-ins sitting
         # right there under other roles.
-        stand_in = self.db.one(
-            "SELECT a.* FROM project_agent_roles par JOIN agents a ON a.id=par.agent_id "
+        stand_ins = self.db.query(
+            "SELECT DISTINCT a.* FROM project_agent_roles par JOIN agents a ON a.id=par.agent_id "
             "WHERE par.project_id=? AND a.enabled=1 AND a.depleted_at IS NULL "
-            "ORDER BY par.preference DESC LIMIT 1", (job["project_id"],))
-        if stand_in is not None:
-            log.warning("job %s: %r has no funded agent; standing in with %s",
-                        job["id"], stage.role or "default", stand_in["id"])
-            return stand_in
+            "ORDER BY par.preference DESC", (job["project_id"],))
+        candidates.extend(("stand-in", row) for row in stand_ins)
+
+        seen = set()
+        rejected = []
+        for source, candidate in candidates:
+            if candidate["id"] in seen:
+                continue
+            seen.add(candidate["id"])
+            problem = self._agent_route_problem(job, stage, candidate)
+            if problem is None:
+                if rejected:
+                    log.warning("job %s stage %s: routed to %s after rejecting %s",
+                                job["id"], stage.name, candidate["id"], rejected)
+                elif source == "stand-in":
+                    log.warning("job %s: %r has no compatible role/default agent; "
+                                "standing in with %s", job["id"],
+                                stage.role or "default", candidate["id"])
+                return candidate
+            if source == "override":
+                raise ValueError(
+                    f"job {job['id']} stage {stage.name!r}: explicitly assigned "
+                    f"agent {candidate['id']} is incompatible: {problem}")
+            rejected.append(f"{candidate['id']}: {problem}")
+
+        if rejected:
+            raise ValueError(
+                f"job {job['id']} stage {stage.name!r}: no route-compatible agent; "
+                + "; ".join(rejected))
         depleted = self.db.one(
             "SELECT id FROM agents WHERE id=? AND depleted_at IS NOT NULL",
             (job["default_agent_id"],))

@@ -332,23 +332,39 @@ def diagnosis_failures(db, job_id: str) -> list[dict[str, str]]:
 def _diagnostic_agent(db, project_id: str, excluded: set[str],
                       *, allow_deputy: bool = False):
     """Use another PM first, then a project deputy with a different executor."""
+    from .executors.base import get_executor, route_incompatibility
+
+    def first_compatible(rows):
+        for agent in rows:
+            try:
+                executor = get_executor(agent["executor_type"])
+            except KeyError:
+                continue
+            problem = route_incompatibility(
+                executor, has_gateway=False, api_flavor=None,
+                model=json.loads(agent["config_json"] or "{}").get("model"),
+                read_only=True)
+            if problem is None:
+                return agent
+        return None
+
     placeholders = ",".join("?" for _ in excluded)
     exclusion = f" AND a.id NOT IN ({placeholders})" if excluded else ""
     params = (project_id, *sorted(excluded))
-    row = db.one(
+    row = first_compatible(db.query(
         "SELECT a.* FROM project_agent_roles par JOIN agents a ON a.id=par.agent_id "
         "WHERE par.project_id=? AND par.role='pm' AND a.enabled=1 "
         "AND a.depleted_at IS NULL" + exclusion +
-        " ORDER BY par.preference DESC LIMIT 1", params)
+        " ORDER BY par.preference DESC", params))
     if row is not None:
         return row
     if not allow_deputy:
         return None
-    return db.one(
+    return first_compatible(db.query(
         "SELECT DISTINCT a.* FROM project_agent_roles par JOIN agents a "
         "ON a.id=par.agent_id WHERE par.project_id=? AND a.enabled=1 "
         "AND a.depleted_at IS NULL" + exclusion +
-        " ORDER BY par.preference DESC LIMIT 1", params)
+        " ORDER BY par.preference DESC", params))
 
 
 def _transport_escalation(orch, job, failures: list[dict[str, str]]) -> dict[str, str]:
