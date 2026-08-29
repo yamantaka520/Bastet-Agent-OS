@@ -2395,6 +2395,28 @@ class Orchestrator:
         repo = self._project_repo(job)
         if not use_worktree:
             return repo
+        branch = f"bastet/{job['id']}"
+        # Historic recovery may already have this branch checked out in an
+        # operator-created or release worktree. Reuse Git's authoritative
+        # mapping instead of falling back to the main checkout (or creating a
+        # duplicate worktree that Git rejects). This also preserves uncommitted
+        # delivery evidence produced while repairing a falsely-done card.
+        listed = subprocess.run(
+            ["git", "-C", repo, "worktree", "list", "--porcelain"],
+            capture_output=True, text=True)
+        if listed.returncode == 0:
+            for block in listed.stdout.split("\n\n"):
+                fields = dict(line.split(" ", 1) for line in block.splitlines()
+                              if " " in line)
+                if fields.get("branch") == f"refs/heads/{branch}":
+                    existing_path = fields.get("worktree", "")
+                    existing = Path(existing_path).resolve() if existing_path else None
+                    if existing is not None and existing.is_dir() \
+                            and existing.is_relative_to(self.home.root.resolve()):
+                        self.db.write(
+                            "UPDATE jobs SET worktree_path=?, updated_at=? WHERE id=?",
+                            (str(existing), now(), job["id"]))
+                        return str(existing)
         wt_path = str(self.home.worktrees_dir / job["id"])
         if Path(wt_path).exists():
             return wt_path
@@ -2405,7 +2427,6 @@ class Orchestrator:
         # work — the implementer and reviewer then disagreed forever about a
         # baseline neither of them had chosen.
         base = self._worktree_base(job, repo)
-        branch = f"bastet/{job['id']}"
         existing_branch = subprocess.run(
             ["git", "-C", repo, "rev-parse", "--verify", "--quiet",
              f"refs/heads/{branch}"], capture_output=True, text=True).returncode == 0

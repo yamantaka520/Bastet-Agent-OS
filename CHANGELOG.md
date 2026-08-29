@@ -8,6 +8,16 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.35.2] - 2026-08-30
+
+### Fixed
+
+- Historic delivery repair reuses an existing Bastet-owned Git worktree already
+  checking out the card branch, even when it lives outside the default worktree
+  folder. Locally regenerated release evidence is preserved instead of being
+  stranded while a second empty worktree is created; unrelated external
+  worktrees are never adopted or removed.
+
 ## [0.35.1] - 2026-08-30
 
 ### Fixed

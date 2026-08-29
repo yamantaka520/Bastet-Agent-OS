@@ -185,3 +185,18 @@ async def test_historic_false_done_card_can_be_reopened_for_delivery(
     assert dict(job) == {"status": "done", "delivery_status": "succeeded"}
     assert seeded.one("SELECT status FROM deliveries WHERE job_id=?", (job_id,))[
         "status"] == "succeeded"
+
+
+async def test_historic_repair_reuses_only_a_bastet_owned_worktree(
+        orch, seeded, repo):
+    branch = "bastet/job1"
+    subprocess.run(["git", "-C", str(repo), "branch", branch], check=True)
+    repair_path = orch.home.root / "release-worktrees" / "job1-repair"
+    repair_path.parent.mkdir(parents=True)
+    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q",
+                    str(repair_path), branch], check=True)
+
+    job = seeded.one("SELECT * FROM jobs WHERE id='job1'")
+    assert orch._ensure_workdir(job, True) == str(repair_path.resolve())
+    assert seeded.one("SELECT worktree_path FROM jobs WHERE id='job1'")[
+        "worktree_path"] == str(repair_path.resolve())
