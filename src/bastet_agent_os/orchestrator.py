@@ -964,28 +964,44 @@ class Orchestrator:
 
     def _reusable_repair_precheck(self, job, stage: StageDef, workdir: str,
                                   command: str) -> dict | None:
-        """Return exact repair evidence when no inputs changed afterward."""
-        row = self.db.one(
-            "SELECT id,detail_json FROM audit_log WHERE "
-            "action='repair.verification.passed' AND target_id=? "
-            "ORDER BY id DESC LIMIT 1", (job["id"],))
-        if row is None:
-            return None
-        try:
-            detail = json.loads(row["detail_json"] or "{}")
-        except json.JSONDecodeError:
-            return None
-        if (detail.get("source_stage") != stage.name
-                or detail.get("command") != command
-                or not detail.get("head_commit")
-                or detail.get("head_commit") != self._worktree_head(workdir)):
+        """Return exact passed evidence when no test input changed afterward.
+
+        This covers both the repair verifier and a previous reviewer precheck.
+        The latter matters when the tests passed but the executor then failed
+        for an unrelated reason (credentials, quota, driver crash): retrying the
+        Agent must not rerun the same expensive suite at the same clean HEAD.
+        """
+        rows = self.db.query(
+            "SELECT id,action,detail_json FROM audit_log WHERE "
+            "(action='repair.verification.passed' AND target_id=?) OR "
+            "(action='capability.precheck.passed' AND "
+            "json_extract(detail_json, '$.job_id')=?) "
+            "ORDER BY id DESC LIMIT 20", (job["id"], job["id"]))
+        head = self._worktree_head(workdir)
+        matched = None
+        for row in rows:
+            try:
+                detail = json.loads(row["detail_json"] or "{}")
+            except json.JSONDecodeError:
+                continue
+            evidence_stage = (detail.get("source_stage")
+                              if row["action"] == "repair.verification.passed"
+                              else detail.get("stage"))
+            if (evidence_stage == stage.name
+                    and detail.get("command") == command
+                    and detail.get("head_commit")
+                    and detail.get("head_commit") == head):
+                matched = {**detail, "audit_id": row["id"],
+                           "source_action": row["action"]}
+                break
+        if matched is None:
             return None
         clean = subprocess.run(
             ["git", "-C", workdir, "status", "--porcelain", "--untracked-files=all"],
             capture_output=True, text=True)
         if clean.returncode != 0 or clean.stdout.strip():
             return None
-        return {"audit_id": row["id"], **detail}
+        return matched
 
     def _accept_passed_stage(self, job, stages: list[StageDef], idx: int,
                              stage: StageDef, workdir: str, run_id: str,
@@ -1727,7 +1743,7 @@ class Orchestrator:
                         run_id))
                 if reused:
                     precheck = GateOutcome(
-                        "passed", "已復用相同 HEAD 與命令的 repair verification："
+                        "passed", "已復用相同 HEAD 與命令的既有通過證據："
                         f"{reused['head_commit']} / `{precheck_command}`")
                 else:
                     precheck = await asyncio.to_thread(
@@ -1742,6 +1758,7 @@ class Orchestrator:
                     {"job_id": job["id"], "stage": stage.name,
                      "command": precheck_command,
                      "source_audit_id": reused["audit_id"] if reused else None,
+                     "source_action": reused["source_action"] if reused else None,
                      "head_commit": reused["head_commit"] if reused else
                      self._worktree_head(workdir),
                      "failure_kind": precheck.failure_kind,

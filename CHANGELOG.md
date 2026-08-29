@@ -8,6 +8,16 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.17] - 2026-08-29
+
+### Fixed
+
+- Retrying a reviewer after an unrelated executor failure now reuses its
+  already-passed host precheck when the command, Git HEAD, and clean worktree
+  still match. The source audit is recorded; any changed input invalidates the
+  evidence. Credential, quota, or driver recovery no longer reruns the same
+  expensive E2E suite before trying the Agent again.
+
 ## [0.34.16] - 2026-08-29
 
 ### Fixed

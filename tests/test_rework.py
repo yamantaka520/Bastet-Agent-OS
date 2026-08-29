@@ -187,6 +187,44 @@ async def test_reviewer_reuses_passed_repair_precheck_at_same_head(
         "SELECT 1 FROM audit_log WHERE action='capability.precheck.reused'")
 
 
+async def test_retry_reuses_precheck_when_only_the_executor_failed(
+        orch, seeded, monkeypatch):
+    """Credentials failing after green tests must not rerun the green suite."""
+    add_template(seeded, "dev", [
+        {"name": "review", "gate": "agent-review", "read_only": True,
+         "on_fail": "block",
+         "gate_config": {"precheck_command": "true"}},
+    ])
+    SCRIPT.append(RunResult(
+        status="failed", summary="No API key found for the selected model"))
+    from bastet_agent_os import orchestrator as module
+    original = module.evaluate_gate
+    commands = []
+
+    def counted(stage, *args, **kwargs):
+        if stage.gate == "tests-pass":
+            commands.append(stage.gate_config.get("command"))
+        return original(stage, *args, **kwargs)
+
+    monkeypatch.setattr(module, "evaluate_gate", counted)
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] \
+        == "blocked"
+
+    SCRIPT.append(RunResult(
+        status="succeeded", summary="approve",
+        structured_verdict={"verdict": "approve", "reasons": []}))
+    orch.retry(job_id)
+    await orch.wait_idle()
+
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] \
+        == "done"
+    assert commands == ["true"]
+    reused = audit(seeded, "capability.precheck.reused")[-1]
+    assert reused["source_action"] == "capability.precheck.passed"
+
+
 async def test_exhausted_rework_starts_pm_immediately(
         orch, seeded, monkeypatch):
     """Max rework is a PM event, not a later sweep that may never happen."""
