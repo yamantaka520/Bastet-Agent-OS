@@ -350,11 +350,13 @@ resource with a configured model; direct usage is imported from Hermes's
 `--usage-file` report.
 
 Pi runs in ephemeral JSONL mode. Bastet disables repository extensions and
-packages, injects the context pack itself, and selects either a writable tool
-set or the real `read,grep,find,ls` review allowlist. It supports direct account
-profiles and temporary OpenAI/Anthropic Gateway profiles. A direct selected
-model must pass Pi's credential check before work starts; a missing provider key
-is never retried on the identical route. Each Agent row opens the real
+packages, but explicitly loads provider packages installed through the selected
+account profile; project-local injection remains disabled. Bastet injects the
+context pack itself and selects either a writable tool set or the real
+`read,grep,find,ls` review allowlist. Direct profiles and temporary
+OpenAI/Anthropic Gateway profiles are supported. A selected direct model must
+resolve to one exact provider/model in that same isolated catalogue; a missing
+route is never retried unchanged. Each Agent row opens the real
 Hermes/Pi/OpenClaw account terminal alongside the editable model, and Agent ids
 can be renamed atomically when no run is live. OpenClaw uses the
 bounded `agent exec --json --isolated` interface; its initial contract is

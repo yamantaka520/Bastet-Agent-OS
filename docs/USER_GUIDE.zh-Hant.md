@@ -123,10 +123,11 @@ hash 串接、append-only。搜尋：關鍵字（含 detail 內容）、類別�
 executor 與 direct／gateway 路徑。Hermes 未綁 LLM Resource 時使用自己的登入設定；
 綁定時走 Bastet Gateway，resource 必須是 OpenAI flavor 且設定 model。
 
-Pi 使用暫態 JSONL 模式，由 Bastet 注入 context 並停用專案 extension／package；修改
-階段使用明確的可寫工具清單，review 使用真正的 `read,grep,find,ls` 唯讀清單，且可走
-直連帳號或 OpenAI／Anthropic Gateway。直連且指定模型時，Bastet 會先執行 Pi 官方
-credential check；缺少該模型供應商的 Key 不會再原路重試。OpenClaw 使用
+Pi 使用暫態 JSONL 模式，由 Bastet 注入 context 並停用專案 extension／package；帳號
+profile 透過 Pi 登入／設定安裝的 provider 套件則以明確白名單載入，不會開放專案注入。
+修改階段使用可寫工具清單，review 使用真正的 `read,grep,find,ls` 唯讀清單，且可走
+直連帳號或 OpenAI／Anthropic Gateway。直連且指定模型時，Bastet 以相同隔離環境的
+模型清單解析唯一 provider/model；缺少該路由的 Key 不會再原路重試。OpenClaw 使用
 `agent exec --json --isolated`；首版只接受直連、可寫的 code／light-task 階段，因為
 上游 exec 目前沒有足以保證唯讀的工具白名單。
 

@@ -41,6 +41,75 @@ WRITE_TOOLS = "read,bash,edit,write,grep,find,ls"
 log = logging.getLogger("bastet.executor")
 
 
+def _trusted_profile_extensions(env: dict[str, str]) -> list[str]:
+    """Return explicitly installed Pi packages from the selected account profile.
+
+    ``--no-extensions`` is still kept on every run so a repository cannot load
+    project-local code.  Provider packages installed by the operator through
+    Pi's own login/config flow are different: they live below the account's
+    private profile and are part of that account's credential contract.  Load
+    only npm packages named in that profile's settings, and only from its own
+    node_modules directory.
+    """
+    profile = Path(env.get("PI_CODING_AGENT_DIR") or
+                   (Path(env.get("HOME") or Path.home()) / ".pi" / "agent"))
+    settings_path = profile / "settings.json"
+    try:
+        settings = json.loads(settings_path.read_text())
+    except (OSError, ValueError, TypeError):
+        return []
+    packages = settings.get("packages") if isinstance(settings, dict) else None
+    if not isinstance(packages, list):
+        return []
+    modules = (profile / "npm" / "node_modules").resolve()
+    paths: list[str] = []
+    for source in packages:
+        if not isinstance(source, str) or not source.startswith("npm:"):
+            continue
+        spec = source.removeprefix("npm:")
+        if spec.startswith("@"):
+            match = spec.split("/", 1)
+            if len(match) != 2:
+                continue
+            name = f"{match[0]}/{match[1].split('@', 1)[0]}"
+        else:
+            name = spec.split("@", 1)[0]
+        if not name or name in {".", ".."}:
+            continue
+        package_dir = (modules / name).resolve()
+        try:
+            package_dir.relative_to(modules)
+            metadata = json.loads((package_dir / "package.json").read_text())
+        except (OSError, ValueError, TypeError):
+            continue
+        if not isinstance(metadata, dict):
+            continue
+        pi_meta = metadata.get("pi")
+        if metadata.get("name") != name or not isinstance(pi_meta, dict):
+            continue
+        if not isinstance(pi_meta.get("extensions"), list):
+            continue
+        paths.append(str(package_dir))
+    return paths
+
+
+def _listed_model(output: str, requested: str) -> tuple[str, str] | None:
+    """Resolve one exact provider/model pair from ``pi --list-models`` output."""
+    wanted_provider, wanted_model = "", requested
+    if "/" in requested:
+        wanted_provider, wanted_model = requested.split("/", 1)
+    matches: list[tuple[str, str]] = []
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) < 2 or fields[:2] == ["provider", "model"]:
+            continue
+        provider, model = fields[:2]
+        if (model == wanted_model and
+                (not wanted_provider or provider == wanted_provider)):
+            matches.append((provider, model))
+    return matches[0] if len(matches) == 1 else None
+
+
 def _message_text(message: object) -> str:
     if not isinstance(message, dict):
         return ""
@@ -130,29 +199,37 @@ class PiExecutor:
                        BASTET_RUN_TOKEN=task.run_token or "")
             cmd += ["--provider", "bastet", "--model", task.llm["model"]]
         elif task.llm and task.llm.get("model"):
-            # Pi can resolve a model name to a provider before making a paid
-            # request.  Check that exact provider/model credential contract up
-            # front; the old "profile directory is non-empty" signal allowed a
-            # model whose provider had no key to be retried three times.
-            auth = await asyncio.create_subprocess_exec(
-                "pi", "auth", "check", "--model", task.llm["model"],
-                "--json", "--no-refresh",
+            # Keep repository extension discovery disabled, but explicitly load
+            # provider packages the operator installed in this account profile.
+            # Some providers (including pi-ollama-cloud-provider) are invisible
+            # to ``pi auth check`` even though the real inference route works, so
+            # resolve the exact authenticated provider through the same model
+            # catalogue the actual run uses.
+            extension_args = [item for path in _trusted_profile_extensions(env)
+                              for item in ("-e", path)]
+            lookup = await asyncio.create_subprocess_exec(
+                "pi", "--no-extensions", *extension_args,
+                "--list-models", task.llm["model"],
                 cwd=task.workdir, env=env,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             try:
-                auth_out, auth_err = await asyncio.wait_for(auth.communicate(), timeout=20)
+                model_out, model_err = await asyncio.wait_for(
+                    lookup.communicate(), timeout=20)
             except TimeoutError as exc:
-                auth.kill()
-                await auth.wait()
-                raise RuntimeError("Pi model credential preflight timed out") from exc
-            if auth.returncode != 0:
-                detail = (auth_out + auth_err).decode(errors="replace").strip()
+                lookup.kill()
+                await lookup.wait()
+                raise RuntimeError("Pi model/provider preflight timed out") from exc
+            listing = model_out.decode(errors="replace")
+            selected = _listed_model(listing, task.llm["model"])
+            if lookup.returncode != 0 or selected is None:
+                detail = (model_out + model_err).decode(errors="replace").strip()
                 raise RuntimeError(
                     "No API key found for the selected model. "
                     "Open Login & model settings for this Pi agent."
-                    + (f" Pi auth check: {detail[:500]}" if detail else ""))
-            cmd += ["--model", task.llm["model"]]
+                    + (f" Pi model lookup: {detail[:500]}" if detail else ""))
+            provider, model = selected
+            cmd += extension_args + ["--provider", provider, "--model", model]
         cmd += ["--", prompt]
 
         handle.process = await asyncio.create_subprocess_exec(

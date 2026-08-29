@@ -4,10 +4,12 @@ Last updated: 2026-08-29
 
 ## Current project status
 
-- Released: **v0.34.9**. Version arc v0.1.0 → v0.34.9 in one month
+- Released: **v0.34.10**. Version arc v0.1.0 → v0.34.10 in one month
   (2026-07-28 → 2026-08-29), ~131 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.
+- v0.34.10 safely loads account-profile Pi provider packages while keeping
+  repository extensions disabled, and resolves the exact provider/model route.
 - v0.34.9 adds model-specific Pi credential admission, non-blocking E2E gates,
   per-Agent login/model terminals, and atomic editable Agent ids.
 - v0.32.0 adds a durable maintenance/drain fence, explicit handoff delivery and
@@ -41,7 +43,7 @@ Last updated: 2026-08-29
   6. **Interrupt the dead, not the merely quiet** (0.30.0): liveness decides
      interruption, so a 20-minute test is no longer executed at the 15-minute
      silence mark.
-- Test suite: **555 passing**, `ruff` clean; CI green on Linux/macOS and
+- Test suite: **556 passing**, `ruff` clean; CI green on Linux/macOS and
   inside the shipped Docker base image (Windows legs are declarative).
 - Releases are automated: a `v*` tag publishes to PyPI (Trusted Publishing) and
   pushes the multi-arch image to Docker Hub.

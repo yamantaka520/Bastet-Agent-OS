@@ -15,6 +15,12 @@ FAKE_PI = """#!/bin/sh
   printf 'PROFILE:%s\n' "$PI_CODING_AGENT_DIR"
   printf 'TOKEN:%s\n' "$BASTET_RUN_TOKEN"
 } > "$FAKE_LOG"
+for arg in "$@"; do
+  if [ "$arg" = "--list-models" ]; then
+    cat "$FAKE_MODEL_LIST"
+    exit ${FAKE_MODEL_EXIT:-0}
+  fi
+done
 [ -z "$FAKE_SLEEP" ] || sleep "$FAKE_SLEEP"
 cat "$FAKE_EVENTS"
 exit ${FAKE_EXIT:-0}
@@ -30,9 +36,12 @@ def fake_pi(tmp_path, monkeypatch):
     binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
     log = tmp_path / "pi.log"
     events = tmp_path / "events.jsonl"
+    models = tmp_path / "models.txt"
+    models.write_text("")
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_LOG", str(log))
     monkeypatch.setenv("FAKE_EVENTS", str(events))
+    monkeypatch.setenv("FAKE_MODEL_LIST", str(models))
 
     def output(*rows):
         events.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
@@ -130,18 +139,46 @@ async def test_gateway_contract_rejects_partial_or_unknown_routes(tmp_path):
             llm={"flavor": "google", "model": "m"}))
 
 
-async def test_direct_selected_model_checks_provider_credentials_before_work(
+async def test_direct_selected_model_loads_only_trusted_profile_provider(
         fake_pi, tmp_path, monkeypatch):
     output, log = fake_pi
-    output({"status": "invalid", "provider": "ollama-cloud",
-            "reason": "invalid_state"})
-    monkeypatch.setenv("FAKE_EXIT", "2")
+    profile = tmp_path / "profile"
+    package = profile / "npm" / "node_modules" / "pi-ollama-cloud-provider"
+    package.mkdir(parents=True)
+    (profile / "settings.json").write_text(json.dumps({
+        "packages": ["npm:pi-ollama-cloud-provider"],
+    }))
+    (package / "package.json").write_text(json.dumps({
+        "name": "pi-ollama-cloud-provider",
+        "pi": {"extensions": ["./index.ts"]},
+    }))
+    models = tmp_path / "models.txt"
+    models.write_text(
+        "provider      model          context  max-out\n"
+        "ollama-cloud  glm-5.3-flash  1.0M     131.1K\n")
+    monkeypatch.setenv("FAKE_MODEL_LIST", str(models))
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(profile))
+    output({"type": "message_end", "message": {
+        "role": "assistant", "content": [{"type": "text", "text": "ok"}],
+        "usage": {}, "stopReason": "stop"}})
+
+    result, _, _ = await drive(spec(
+        tmp_path, llm={"flavor": None, "model": "glm-5.3-flash"}))
+
+    assert result.status == "succeeded"
+    text = log.read_text()
+    assert "--no-extensions" in text
+    assert f"-e {package}" in text
+    assert "--provider ollama-cloud --model glm-5.3-flash" in text
+
+
+async def test_direct_selected_model_rejects_an_unavailable_profile_route(
+        fake_pi, tmp_path):
+    _, _ = fake_pi
 
     with pytest.raises(RuntimeError, match="No API key found for the selected model"):
         await PiExecutor().start(spec(
             tmp_path, llm={"flavor": None, "model": "glm-5.3-flash"}))
-
-    assert "auth check --model glm-5.3-flash --json --no-refresh" in log.read_text()
 
 
 async def test_handle_is_restart_serializable_and_cancel_kills_process_group(

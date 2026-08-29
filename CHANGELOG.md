@@ -8,6 +8,20 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.10] - 2026-08-29
+
+### Fixed
+
+- Pi direct runs now preserve repository isolation while explicitly loading
+  only provider packages installed in the selected Agent account profile. This
+  fixes profiles such as `pi-ollama-cloud-provider`, which disappeared under
+  the blanket `--no-extensions` flag even though login and the model worked in
+  Pi's interactive terminal.
+- Pi model admission now uses the same isolated, trusted-extension model
+  catalogue as the real run and resolves an exact provider/model pair. It no
+  longer relies on `pi auth check`, which does not recognize extension-defined
+  providers and incorrectly reported valid API-key profiles as `invalid_state`.
+
 ## [0.34.9] - 2026-08-29
 
 ### Added
