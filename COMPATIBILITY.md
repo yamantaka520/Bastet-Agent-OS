@@ -1,6 +1,6 @@
 # Compatibility
 
-Current version: 0.34.6
+Current version: 0.34.7
 
 ## Platforms
 
@@ -29,6 +29,8 @@ Current version: 0.34.6
 | `grok` | xAI Grok Build CLI | multiple, via `GROK_HOME` | pretty-prints JSON; the parser is tolerant of it |
 | `agy` | Google Antigravity | one global Google login | login is browser-based |
 | `hermes` | NousResearch Hermes | default or isolated `HERMES_HOME` | direct path uses the logged-in provider; Gateway path uses a temporary Bastet profile and requires OpenAI flavor + model |
+| `pi` | Pi Coding Agent | multiple, via `PI_CODING_AGENT_DIR` | ephemeral JSONL runs; explicit writable/read-only tool allowlists; OpenAI and Anthropic Gateway profiles supported |
+| `openclaw` | OpenClaw `agent exec` | multiple, via `OPENCLAW_HOME` | direct path only in this release; isolated temporary run state; writable code/light-task stages only |
 | `bastet-lite` | built in | n/a | credentials come from the resource pool |
 
 Each vendor CLI must be installed **and logged in** on the control-plane host.

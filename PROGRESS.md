@@ -4,7 +4,7 @@ Last updated: 2026-08-29
 
 ## Current project status
 
-- Released: **v0.34.6**. Version arc v0.1.0 → v0.34.6 in one month
+- Released: **v0.34.7**. Version arc v0.1.0 → v0.34.7 in one month
   (2026-07-28 → 2026-08-29), ~131 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.
@@ -39,7 +39,7 @@ Last updated: 2026-08-29
   6. **Interrupt the dead, not the merely quiet** (0.30.0): liveness decides
      interruption, so a 20-minute test is no longer executed at the 15-minute
      silence mark.
-- Test suite: **521 passing**, `ruff` clean; CI green on Linux/macOS and
+- Test suite: **549 passing**, `ruff` clean; CI green on Linux/macOS and
   inside the shipped Docker base image (Windows legs are declarative).
 - Releases are automated: a `v*` tag publishes to PyPI (Trusted Publishing) and
   pushes the multi-arch image to Docker Hub.
@@ -48,7 +48,7 @@ Last updated: 2026-08-29
   [Docker Hub](https://hub.docker.com/r/yamantaka520/bastet-agent-os)
   (amd64+arm64, chromium included for Playwright).
 - Executors: `claude-code`, `claude-sdk`, `codex`, `grok`, `agy`, `hermes`,
-  `bastet-lite`. Standard tooling tracked by the maintenance card: pytest,
+  `pi`, `openclaw`, `bastet-lite`. Standard tooling tracked by the maintenance card: pytest,
   Pillow, Playwright (+chromium), turbovec.
 - Resource kinds: llm, mcp, api, skill, git, image, video, music, tts, stt and
   **model3d** (3D model/animation generation); a resource can be reclassified

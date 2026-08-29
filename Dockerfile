@@ -4,7 +4,7 @@
 #
 # What this image is: the control plane, the gateway, the WebUI, and the
 # bastet-lite executor. What it deliberately is NOT: the vendor CLIs
-# (claude/codex/grok/agy/hermes) — their logins are interactive and their
+# (claude/codex/grok/agy/hermes/pi/openclaw) — their logins are interactive and their
 # credentials are yours, so they belong on a host (or your own derived image),
 # not baked into a public one. Point repos and executors at the container via
 # mounts, or run Bastet on the host for full executor support and keep this

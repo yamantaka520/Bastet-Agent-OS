@@ -10,7 +10,7 @@
 |---|---|
 | **Team** | 組織頂層；記憶可以在這層共享 |
 | **專案** | 與 Bastet 主機上的一個真實 git repo 一對一，也與一個 AMOS 專案一對一。有生命週期狀態與燈號 |
-| **Agent** | executor + 帳號 + 模型設定。`claude-code`、`claude-sdk`、`codex`、`grok`、`agy`、`hermes`、`bastet-lite` |
+| **Agent** | executor + 帳號 + 模型設定。`claude-code`、`claude-sdk`、`codex`、`grok`、`agy`、`hermes`、`pi`、`openclaw`、`bastet-lite` |
 | **角色** | agent 在專案裡「做什麼」（engineer、reviewer、pm、ops-engineer…）。階段指定角色，專案的角色指派決定實際由誰跑 |
 | **工作流範本** | 有序的階段清單，每階段一種關卡 |
 | **關卡** | 階段怎麼算過：`auto`（跑完即過）、`tests-pass`（引擎跑指令看 exit code）、`agent-review`（結構化裁決檔）、`human-approve`（等人） |
@@ -92,7 +92,7 @@ agent 會做的事（LLM 列模型不花 token、MCP 真握手、git 真驗證�
 - **系統設定**：顯示時區（儲存永遠 UTC）
 - **通知頻道**：Telegram 配對、回應者與專案綁定
 - **維護**：所有元件的版本檢查與更新（Bastet、AMOS、turbovec、SDK、pytest、
-  Pillow、Playwright、五個 executor CLI），絕不自動更新
+  Pillow、Playwright、七個 executor CLI），絕不自動更新
 
 ### 稽核
 
@@ -119,6 +119,12 @@ hash 串接、append-only。搜尋：關鍵字（含 detail 內容）、類別�
 自動路由會在建立 run 前排除不相容 executor，並以 `run.routed` 記錄真正的 Agent、
 executor 與 direct／gateway 路徑。Hermes 未綁 LLM Resource 時使用自己的登入設定；
 綁定時走 Bastet Gateway，resource 必須是 OpenAI flavor 且設定 model。
+
+Pi 使用暫態 JSONL 模式，由 Bastet 注入 context 並停用專案 extension／package；修改
+階段使用明確的可寫工具清單，review 使用真正的 `read,grep,find,ls` 唯讀清單，且可走
+直連帳號或 OpenAI／Anthropic Gateway。OpenClaw 使用
+`agent exec --json --isolated`；首版只接受直連、可寫的 code／light-task 階段，因為
+上游 exec 目前沒有足以保證唯讀的工具白名單。
 
 ### 專案監督與自動解卡
 

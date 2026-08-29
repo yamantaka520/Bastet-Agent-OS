@@ -8,7 +8,7 @@
 
 **給 AI agent 團隊的 local-first 作業系統。** Bastet 把你已經在用的 agent —— Claude
 Code（CLI 或 Agent SDK）、Codex CLI、Grok Build、Google Antigravity（`agy`）、
-Hermes，或任何 OpenAI / Claude 相容端點 —— 組織成有角色、有工作流、有資源治理的
+Hermes、Pi、OpenClaw，或任何 OpenAI / Claude 相容端點 —— 組織成有角色、有工作流、有資源治理的
 執行團隊，讓多個專案可控地併發推進。
 
 Bastet 是**控制平面，不是另一個 agent 框架**。執行力來自調度既有的 agent；Bastet

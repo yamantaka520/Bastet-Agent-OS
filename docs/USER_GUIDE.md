@@ -9,7 +9,7 @@ For getting Bastet onto a machine see [INSTALLATION.md](INSTALLATION.md).
 |---|---|
 | **Team** | the top of the org. Owns projects; memory can be shared at this level. |
 | **Project** | 1:1 with a real git repo **on the Bastet host**, and with an AMOS project. Has a lifecycle state and a light. |
-| **Agent** | an executor + an account + optional model config. `claude-code`, `claude-sdk`, `codex`, opt-in `codex-app-server`, `grok`, `agy`, `hermes`, `bastet-lite`. |
+| **Agent** | an executor + an account + optional model config. `claude-code`, `claude-sdk`, `codex`, opt-in `codex-app-server`, `grok`, `agy`, `hermes`, `pi`, `openclaw`, `bastet-lite`. |
 | **Role** | what an agent is *for* in a project (`engineer`, `reviewer`, `pm`, `ops-engineer`…). A stage asks for a role; the project's role assignment decides who runs it. |
 | **Workflow template** | an ordered list of stages, each with a gate. |
 | **Gate** | how a stage's exit is judged: `auto`, `tests-pass`, `agent-review`, `human-approve`. |
@@ -348,6 +348,14 @@ Hermes uses its logged-in provider when a job has no LLM resource. With a
 resource it uses a temporary Bastet Gateway profile and requires an OpenAI-flavor
 resource with a configured model; direct usage is imported from Hermes's
 `--usage-file` report.
+
+Pi runs in ephemeral JSONL mode. Bastet disables repository extensions and
+packages, injects the context pack itself, and selects either a writable tool
+set or the real `read,grep,find,ls` review allowlist. It supports direct account
+profiles and temporary OpenAI/Anthropic Gateway profiles. OpenClaw uses the
+bounded `agent exec --json --isolated` interface; its initial contract is
+direct-only and writable because the upstream exec interface does not yet
+expose a defensible read-only allowlist.
 
 A crash or timeout blocks the card after the stage's `max_retries`. A vendor
 **quota / rate limit** does not: the card parks with the reset time parsed from

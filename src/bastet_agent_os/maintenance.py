@@ -80,6 +80,13 @@ CLI_COMPONENTS = [
     {"id": "hermes", "label": "Hermes Agent", "kind": "cli", "program": "hermes",
      "version_args": ["--version"],
      "update": "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"},
+    {"id": "pi", "label": "Pi Coding Agent", "kind": "cli", "program": "pi",
+     "version_args": ["--version"],
+     "update": "curl -fsSL https://pi.dev/install.sh | sh"},
+    {"id": "openclaw", "label": "OpenClaw Agent Exec", "kind": "cli",
+     "program": "openclaw", "version_args": ["--version"],
+     "update": ("curl -fsSL https://openclaw.ai/install.sh | bash -s -- "
+                "--no-prompt --no-onboard")},
 ]
 
 COMPONENTS = PIP_COMPONENTS + CLI_COMPONENTS

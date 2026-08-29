@@ -8,6 +8,32 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.7] - 2026-08-29
+
+### Added
+
+- Pi Coding Agent is a first-class executor and account type. It runs in
+  ephemeral JSONL mode, streams text/tool activity, reports provider usage and
+  cost, applies a real read-only tool allowlist for review work, and supports
+  direct profiles plus temporary OpenAI/Anthropic Bastet Gateway profiles.
+- OpenClaw is a first-class direct-path executor and account type through the
+  stable `agent exec --json --isolated` contract. Runs have bounded temporary
+  state, explicit workdir/model/timeout wiring, provider usage and cost, and
+  process-group cancellation. Its honest initial contract is writable
+  code/light-task only; Gateway and review routes are rejected before a run.
+- The one-click installer, maintenance card, login wizard, compatibility table,
+  specification, and operator guides now include Pi and OpenClaw. Cross-executor
+  guards cover non-interactive stdin/env, large output lines, workdir/env
+  propagation, route admission, isolation, cancellation, and restart-safe
+  serializable handles for the expanded CLI set.
+
+### Validated
+
+- v0.34.6 was deployed under maintenance with all 74 production cards intact.
+  A separate real Hermes direct-path task card completed in 26 seconds through
+  routing, worktree execution, reported usage, auto gate, stage handoff, project
+  room message, commit, and cleanup without touching the production database.
+
 ## [0.34.6] - 2026-08-29
 
 ### Fixed

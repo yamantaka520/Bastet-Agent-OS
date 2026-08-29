@@ -255,6 +255,13 @@ Hermes 支援兩條路徑：未指定 LLM resource 時沿用其已登入的 `HER
 指定 resource 時使用 Bastet 臨時 profile，且只接受 OpenAI Chat Completions flavor 與
 明確 model。直連 usage 由 Hermes `--usage-file` 回報，Gateway 路徑仍以 ledger 為準。
 
+Pi executor 以 `--mode json --no-session` 執行，停用 repository extension/skill/package
+載入並由 Bastet 注入 context；read-only 階段只開 `read,grep,find,ls`。直連使用隔離的
+`PI_CODING_AGENT_DIR`，Gateway 則建立只含環境變數 credential reference 的臨時
+`models.json`，支援 OpenAI Chat Completions 與 Anthropic Messages。OpenClaw executor
+使用 `agent exec --json --isolated` 的一次性契約；首版 `RouteContract` 為 direct-only，
+且不宣告 review，直到上游提供可驗證的唯讀工具邊界。
+
 **RunHandle 持久化契約**：handle state 可序列化並存於
 `runs.executor_handle_json`。目前 CLI executor 無法跨 OS process 安全 re-attach；啟動時
 把非終止 run 標為 `orphaned`、撤銷其 run token，保留原 job、workflow snapshot、

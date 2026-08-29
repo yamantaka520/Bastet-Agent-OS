@@ -33,7 +33,7 @@ What it does:
    chromium browser** — the package without a browser dies at first use
 3. installs the executor CLIs using **each vendor's own official installer** —
    Claude Code, OpenAI Codex, xAI Grok Build, Google Antigravity (`agy`),
-   NousResearch Hermes
+   NousResearch Hermes, Pi Coding Agent, and OpenClaw
 4. runs `bastet init`, installs the auto-restart service, and finishes with
    `bastet doctor`
 
@@ -65,7 +65,7 @@ docker exec bastet cat /data/api_token      # the WebUI login
 Or with compose (`docker-compose.yml` is in the repo): `docker compose up -d`.
 
 What the image deliberately does **not** contain: the vendor CLIs
-(claude/codex/grok/agy/hermes). Their logins are interactive and their
+(claude/codex/grok/agy/hermes/pi/openclaw). Their logins are interactive and their
 credentials are yours, so they belong on a host — or in your own derived image —
 not baked into a public one. Use the container for gateway/board/memory duty
 with `bastet-lite` + pool LLM resources, and run Bastet directly on a host when
@@ -153,7 +153,8 @@ Each vendor CLI keeps its own credentials and each login is interactive, so
 Bastet cannot do it for you. Two ways:
 
 1. **On the host, in your own terminal** — `claude`, `codex`, `grok`, `agy`,
-   `hermes` each have their own login command.
+   `hermes`, `pi`, and `openclaw` each have their own login command. Pi uses
+   `/login`; OpenClaw uses `openclaw onboard`.
 2. **From the WebUI's login wizard** (組織 tab → the agent's account) — a real
    terminal in the browser, driving the CLI on the host. Use this when you are
    not sitting at that machine.
@@ -164,7 +165,8 @@ ready.
 
 Multiple accounts per executor are supported: each account gets its own profile
 directory under `~/.bastet/executor-profiles/<id>`, injected per run through
-`CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `GROK_HOME`.
+`CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `GROK_HOME` / `HERMES_HOME` /
+`PI_CODING_AGENT_DIR` / `OPENCLAW_HOME`.
 
 ## Gate tools
 

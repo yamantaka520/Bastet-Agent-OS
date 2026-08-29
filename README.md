@@ -8,7 +8,7 @@
 
 **A local-first operating system for AI-agent teams.** Bastet organizes the
 agents you already use — Claude Code (CLI or Agent SDK), Codex CLI, Grok Build,
-Google Antigravity (`agy`), Hermes, or any OpenAI/Claude-compatible endpoint —
+Google Antigravity (`agy`), Hermes, Pi, OpenClaw, or any OpenAI/Claude-compatible endpoint —
 into teams with roles, gated workflows, and centrally governed resources, so
 several projects can run concurrently under control.
 

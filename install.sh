@@ -6,11 +6,11 @@
 # Installs: Bastet (+ Agent Memory OS latest, claude-agent-sdk) into
 # ~/.bastet/venv, plus the executor CLIs via their OFFICIAL installers:
 # Claude Code, OpenAI Codex, xAI Grok Build, Google Antigravity (agy),
-# NousResearch Hermes. bastet-lite is built in.
+# NousResearch Hermes, Pi Coding Agent, and OpenClaw. bastet-lite is built in.
 #
 # Flags / env:
 #   --minimal            Bastet + AMOS only, skip executor CLIs
-#   --executors "a,b"    only these executors (claude,codex,grok,agy,hermes)
+#   --executors "a,b"    only these executors (claude,codex,grok,agy,hermes,pi,openclaw)
 #   --upgrade            re-run installers even when a tool already exists
 #   --no-service         don't install the boot/login auto-restart service
 #   --lan                bind 0.0.0.0 (LAN access; Host guard stays on)
@@ -119,6 +119,9 @@ install_tool() {  # install_tool <name> <binary> <install command...>
 
 curl_bash() { curl -fsSL "$1" | bash; }
 curl_sh()   { curl -fsSL "$1" | sh; }
+openclaw_install() {
+  curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-prompt --no-onboard
+}
 
 # 來源皆為各工具官方文件（見 docs/INSTALL 附註）
 install_tool claude claude curl_bash https://claude.ai/install.sh
@@ -126,6 +129,8 @@ install_tool codex  codex  curl_sh   https://chatgpt.com/codex/install.sh
 install_tool grok   grok   curl_bash https://x.ai/cli/install.sh
 install_tool agy    agy    curl_bash https://antigravity.google/cli/install.sh
 install_tool hermes hermes curl_bash https://hermes-agent.nousresearch.com/install.sh
+install_tool pi     pi     curl_sh   https://pi.dev/install.sh
+install_tool openclaw openclaw openclaw_install
 
 # ---- LAN mode + service ---------------------------------------------------------
 
@@ -166,6 +171,8 @@ cat <<'NEXT'
        grok            → 首次執行自動開瀏覽器
        agy             → 首次執行自動走 Google OAuth
        hermes setup    → 供應商/模型設定精靈
+       pi              → 進入後輸入 /login
+       openclaw onboard → 帳號與模型設定精靈
      多帳號：在 Web UI「組織」頁建立 executor 帳號，會給你對應的登入指令。
   4. 記憶引擎：     agent-memory doctor（已隨 Bastet 安裝）
 NEXT

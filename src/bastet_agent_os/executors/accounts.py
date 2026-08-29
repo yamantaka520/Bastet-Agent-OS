@@ -21,6 +21,8 @@ HOME_ENV = {
     "codex": "CODEX_HOME",
     "grok": "GROK_HOME",
     "hermes": "HERMES_HOME",  # merged with the gateway provider profile at run time
+    "pi": "PI_CODING_AGENT_DIR",
+    "openclaw": "OPENCLAW_HOME",
 }
 
 # kinds whose upstream has no per-directory auth (global login only)
@@ -54,6 +56,10 @@ EXECUTOR_CATALOG = [
     {"kind": "hermes", "name": "NousResearch Hermes", "binary": "hermes",
      "config_dir": "~/.hermes",
      "models": []},   # model comes from the gateway resource routing
+    {"kind": "pi", "name": "Pi Coding Agent", "binary": "pi",
+     "config_dir": "~/.pi/agent", "models": []},
+    {"kind": "openclaw", "name": "OpenClaw Agent Exec", "binary": "openclaw",
+     "config_dir": "~/.openclaw", "models": []},
     {"kind": "grok", "name": "xAI Grok Build", "binary": "grok",
      "config_dir": "~/.grok",
      # fallback only — `grok models` enumerates the real lineup per login
@@ -120,11 +126,15 @@ def login_command(kind: str, home_dir: str | None) -> tuple[dict[str, str], list
         return {}, ["agy"]  # full TUI — the wizard is a real terminal (xterm.js)
     if kind == "hermes":
         return env, ["hermes", "setup"]
+    if kind == "pi":
+        return env, ["pi"]
+    if kind == "openclaw":
+        return env, ["openclaw", "onboard"]
     return None
 
 
 # kinds whose login TUI must not use the alternate screen in a web terminal
-STRIP_ALT_SCREEN = {"agy"}
+STRIP_ALT_SCREEN = {"agy", "pi", "openclaw"}
 
 
 def login_instruction(kind: str, home_dir: str | None) -> str:
@@ -140,6 +150,8 @@ def login_instruction(kind: str, home_dir: str | None) -> str:
         "grok": "  # device auth：無需本機瀏覽器",
         "agy": "  # 全域 Google OAuth（Antigravity 不支援多帳號目錄）",
         "hermes": "  # 供應商/模型設定精靈",
+        "pi": "  # 進入後輸入 /login，可使用訂閱帳號或 API key",
+        "openclaw": "  # OpenClaw 帳號與模型設定精靈",
     }
     if kind in ("claude-code", "claude-sdk"):
         return line.replace(" /login", "") + "  # 進入後輸入 /login"

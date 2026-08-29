@@ -121,9 +121,9 @@ def test_every_cli_executor_passes_the_limit_to_its_subprocess():
     """One executor left on the default is one executor that still dies."""
     import inspect
 
-    from bastet_agent_os.executors import agy, claude_code, codex, grok, hermes
+    from bastet_agent_os.executors import agy, claude_code, codex, grok, hermes, openclaw, pi_agent
 
-    for module in (claude_code, codex, grok, agy, hermes):
+    for module in (claude_code, codex, grok, agy, hermes, pi_agent, openclaw):
         source = inspect.getsource(module)
         assert "create_subprocess_exec" in source, module.__name__
         assert "limit=STREAM_LIMIT" in source, (
@@ -136,9 +136,9 @@ def test_every_cli_executor_survives_a_line_over_the_limit():
     working, so the loop only has to not treat ValueError as fatal."""
     import inspect
 
-    from bastet_agent_os.executors import agy, claude_code, codex, grok, hermes
+    from bastet_agent_os.executors import agy, claude_code, codex, grok, hermes, openclaw, pi_agent
 
-    for module in (claude_code, codex, grok, agy, hermes):
+    for module in (claude_code, codex, grok, agy, hermes, pi_agent, openclaw):
         source = inspect.getsource(module)
         assert "except ValueError:" in source, (
             f"{module.__name__} lets an oversized line kill the run")
@@ -184,9 +184,9 @@ def test_every_cli_executor_runs_in_the_job_workdir_with_its_env():
     three executors. agy and grok had tests that caught it; codex did not, so it
     would have shipped running every run in the *server's* directory with none of
     the injected credentials."""
-    from bastet_agent_os.executors import agy, claude_code, codex, grok, hermes
+    from bastet_agent_os.executors import agy, claude_code, codex, grok, hermes, openclaw, pi_agent
 
-    for module in (claude_code, codex, grok, agy, hermes):
+    for module in (claude_code, codex, grok, agy, hermes, pi_agent, openclaw):
         passed = subprocess_kwargs(module)
         assert "cwd" in passed, f"{module.__name__} does not run in the job workdir"
         assert "env" in passed, (

@@ -9,6 +9,8 @@ from . import (  # noqa: F401  (register builtins)
     codex_app_server,
     grok,
     hermes,
+    openclaw,
+    pi_agent,
 )
 from .base import Executor, RunEvent, RunResult, TaskSpec, get_executor
 

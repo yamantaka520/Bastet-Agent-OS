@@ -18,7 +18,8 @@ import pytest
 from bastet_agent_os.executors.agy import _progress_text, unwrap_envelope
 from bastet_agent_os.executors.base import NONINTERACTIVE_ENV, TaskSpec, run_env
 
-CLI_EXECUTORS = ["claude_code.py", "codex.py", "hermes.py", "grok.py", "agy.py"]
+CLI_EXECUTORS = ["claude_code.py", "codex.py", "hermes.py", "grok.py", "agy.py",
+                 "pi_agent.py", "openclaw.py"]
 EXEC_DIR = Path(__file__).resolve().parents[1] / "src" / "bastet_agent_os" / "executors"
 
 
