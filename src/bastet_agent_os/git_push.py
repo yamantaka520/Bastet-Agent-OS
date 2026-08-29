@@ -35,6 +35,7 @@ import os
 import re
 import subprocess
 import tempfile
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
@@ -189,7 +190,9 @@ def push_job_branch(db: Db, job, *, emit=None) -> dict[str, Any] | None:
 
 def integrate_job_branch(db: Db, job, *, workdir: str,
                          target_branch: str = "main",
-                         release_tag: str = "") -> dict[str, Any]:
+                         release_tag: str = "",
+                         prepush_gate: Callable[[str], str] | None = None,
+                         ) -> dict[str, Any]:
     """Merge the fresh remote target and atomically push HEAD and its tag.
 
     This is used only by an explicit production delivery contract.  It never
@@ -242,6 +245,10 @@ def integrate_job_branch(db: Db, job, *, workdir: str,
         commit_sha = subprocess.run(
             ["git", "-C", workdir, "rev-parse", "HEAD"], capture_output=True,
             text=True).stdout.strip()
+        # The release gate runs against the exact merged candidate, before any
+        # public ref moves.  A callback keeps host-specific validation in the
+        # delivery layer while this function owns the atomic git transaction.
+        gate_output = prepush_gate(commit_sha) if prepush_gate else ""
         if release_tag:
             remote_tag = subprocess.run(
                 ["git", "ls-remote", "--tags", url, f"refs/tags/{release_tag}",
@@ -285,4 +292,5 @@ def integrate_job_branch(db: Db, job, *, workdir: str,
               "release_tag": release_tag, "commit_sha": commit_sha,
               "detail": detail[:800]})
     return {"pushed": True, "target_branch": target_branch, "remote": detected,
-            "release_tag": release_tag, "commit_sha": commit_sha, "detail": detail}
+            "release_tag": release_tag, "commit_sha": commit_sha,
+            "gate_output": gate_output, "detail": detail}

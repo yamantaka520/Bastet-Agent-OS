@@ -8,6 +8,15 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.35.1] - 2026-08-30
+
+### Fixed
+
+- The trusted pre-deploy gate now runs against the freshly merged release
+  candidate before either the target branch or version tag moves. A failing
+  gate publishes nothing; only a passing candidate is atomically pushed as
+  target plus tag, then deployed and verified online.
+
 ## [0.35.0] - 2026-08-30
 
 ### Added

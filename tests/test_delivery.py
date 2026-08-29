@@ -110,6 +110,7 @@ async def test_production_failure_after_publish_never_claims_done(
     profile = {
         "target_branch": "main",
         "target": "test-production",
+        "predeploy_command": "true",
         "deploy_command": "false",
         "verify_command": "true",
     }
@@ -133,6 +134,38 @@ async def test_production_failure_after_publish_never_claims_done(
                       "AND target_id=?", (job_id,)) is None
     assert seeded.one("SELECT 1 FROM audit_log WHERE action='job.deployed' "
                       "AND target_id=?", (job_id,)) is None
+
+
+async def test_failed_predeploy_gate_moves_neither_main_nor_tag(
+        orch, seeded, origin):
+    original_main = subprocess.run(
+        ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+        capture_output=True, text=True, check=True).stdout.strip()
+    profile = {
+        "target_branch": "main",
+        "target": "test-production",
+        "predeploy_command": "false",
+        "deploy_command": "true",
+        "verify_command": "true",
+    }
+    seeded.write("UPDATE projects SET config_json=? WHERE id='proj1'",
+                 (json.dumps({"delivery_profile": profile}),))
+    add_template(seeded, "dev", [{"name": "implement", "gate": "auto"}])
+    SCRIPT.append(writes_release)
+
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True,
+                               delivery={"mode": "production", "version": "1.4.0"}))
+    await orch.wait_idle()
+
+    current_main = subprocess.run(
+        ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+        capture_output=True, text=True, check=True).stdout.strip()
+    assert current_main == original_main
+    assert subprocess.run(
+        ["git", "--git-dir", str(origin), "tag", "--list"],
+        capture_output=True, text=True, check=True).stdout.strip() == ""
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))[
+        "status"] == "blocked"
 
 
 async def test_historic_false_done_card_can_be_reopened_for_delivery(

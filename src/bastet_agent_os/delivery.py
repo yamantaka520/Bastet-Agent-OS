@@ -118,30 +118,39 @@ def execute(db: Db, job, workdir: str, contract: dict,
     if not isinstance(profile, dict):
         raise DeliveryError("delivery.profile must be an object")
     target_branch = str(profile.get("target_branch") or "main").strip()
+    predeploy = str(profile.get("predeploy_command") or "").strip()
+    if not predeploy:
+        raise DeliveryError("missing pre-deploy gate command")
+
+    base_env = {
+        **(env or {}),
+        "BASTET_DELIVERY_VERSION": expected,
+        "BASTET_DELIVERY_TAG": f"v{expected}",
+        "BASTET_DELIVERY_TARGET": str(profile.get("target") or target_branch),
+    }
+
+    def prepush_gate(candidate_sha: str) -> str:
+        return _run(predeploy, workdir, {
+            **base_env, "BASTET_DELIVERY_COMMIT": candidate_sha,
+        }, "pre-deploy gate")
+
     integration = git_push.integrate_job_branch(
         db, job, workdir=workdir, target_branch=target_branch,
-        release_tag=f"v{expected}")
+        release_tag=f"v{expected}", prepush_gate=prepush_gate)
     if not integration.get("pushed"):
         raise DeliveryError(str(integration.get("detail") or "main integration failed"))
     evidence["integration"] = integration
     commit_sha = integration.get("commit_sha") or commit_sha
+    evidence["predeploy"] = integration.pop("gate_output", "")
 
     # Commands run on the trusted host, but they still need an unambiguous
     # identity for the exact release being deployed.  This also lets an online
     # verification command reject a stale deployment instead of merely seeing
     # HTTP 200 and declaring success.
     delivery_env = {
-        **(env or {}),
+        **base_env,
         "BASTET_DELIVERY_COMMIT": commit_sha,
-        "BASTET_DELIVERY_VERSION": expected,
-        "BASTET_DELIVERY_TAG": f"v{expected}",
-        "BASTET_DELIVERY_TARGET": str(profile.get("target") or target_branch),
     }
-
-    predeploy = str(profile.get("predeploy_command") or "").strip()
-    if predeploy:
-        evidence["predeploy"] = _run(
-            predeploy, workdir, delivery_env, "pre-deploy gate")
     evidence["deploy"] = _run(
         str(profile.get("deploy_command") or ""), workdir, delivery_env, "deployment")
     evidence["verify"] = _run(
