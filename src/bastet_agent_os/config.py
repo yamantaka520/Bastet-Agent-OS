@@ -15,6 +15,7 @@ DEFAULT_PORT = 8890
 # minimal PATH that misses these, breaking both detection and run spawning
 TOOL_DIRS = [
     str(Path.home() / ".local/bin"),
+    str(Path.home() / ".npm-global/bin"),
     str(Path.home() / ".grok/bin"),
     "/opt/homebrew/bin",
     "/usr/local/bin",

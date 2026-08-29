@@ -9,6 +9,7 @@ def test_systemd_unit_restarts_always():
     assert "Restart=always" in unit
     assert "TimeoutStopSec=15" in unit
     assert "KillMode=control-group" in unit
+    assert "%h/.npm-global/bin" in unit
     assert "WantedBy=default.target" in unit  # user service, not system
 
 
@@ -17,6 +18,7 @@ def test_launchd_plist_keepalive():
     assert "<string>/usr/local/bin/bastet</string>" in plist
     assert "<key>KeepAlive</key><true/>" in plist
     assert "<key>RunAtLoad</key><true/>" in plist
+    assert "/.npm-global/bin:" in plist
 
 
 def test_windows_task_restart_on_failure():

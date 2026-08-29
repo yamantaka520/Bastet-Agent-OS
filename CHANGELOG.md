@@ -8,6 +8,16 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.8] - 2026-08-29
+
+### Fixed
+
+- OpenClaw's official installer may place its executable under
+  `~/.npm-global/bin`. Bastet now includes that directory in runtime,
+  systemd, and launchd paths, and the one-click installer publishes a safe
+  `~/.local/bin/openclaw` link when needed. This prevents a successful
+  OpenClaw install from appearing unavailable to task-card routing.
+
 ## [0.34.7] - 2026-08-29
 
 ### Added

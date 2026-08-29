@@ -36,7 +36,7 @@ After=network-online.target
 
 [Service]
 ExecStart={binary} serve
-Environment="PATH=%h/.local/bin:%h/.grok/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PATH=%h/.local/bin:%h/.npm-global/bin:%h/.grok/bin:/usr/local/bin:/usr/bin:/bin"
 Restart=always
 RestartSec=5
 TimeoutStopSec=15
@@ -49,7 +49,7 @@ WantedBy=default.target
 
 def launchd_plist(binary: str, log_path: str) -> str:
     home = str(Path.home())
-    path_value = (f"{home}/.local/bin:{home}/.grok/bin:"
+    path_value = (f"{home}/.local/bin:{home}/.npm-global/bin:{home}/.grok/bin:"
                   "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"

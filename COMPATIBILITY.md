@@ -1,6 +1,6 @@
 # Compatibility
 
-Current version: 0.34.7
+Current version: 0.34.8
 
 ## Platforms
 

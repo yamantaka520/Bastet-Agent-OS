@@ -23,6 +23,12 @@ def test_pi_and_openclaw_are_maintainable_components():
     assert "--no-onboard" in components["openclaw"]["update"]
 
 
+def test_openclaw_official_npm_prefix_is_on_runtime_path():
+    from bastet_agent_os.config import TOOL_DIRS
+
+    assert any(path.endswith("/.npm-global/bin") for path in TOOL_DIRS)
+
+
 def test_route_contract_advertises_only_proven_capabilities():
     pi = PiExecutor()
     assert route_incompatibility(

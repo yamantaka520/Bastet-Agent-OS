@@ -121,6 +121,15 @@ curl_bash() { curl -fsSL "$1" | bash; }
 curl_sh()   { curl -fsSL "$1" | sh; }
 openclaw_install() {
   curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-prompt --no-onboard
+  # The official installer may switch npm to this user-local prefix. Keep it
+  # visible to this install and to existing Bastet service PATHs.
+  local npm_bin="$HOME/.npm-global/bin/openclaw"
+  if [ -e "$npm_bin" ]; then
+    export PATH="$HOME/.npm-global/bin:$PATH"
+    if [ ! -e "$BIN_DIR/openclaw" ] && [ ! -L "$BIN_DIR/openclaw" ]; then
+      ln -s "$npm_bin" "$BIN_DIR/openclaw"
+    fi
+  fi
 }
 
 # 來源皆為各工具官方文件（見 docs/INSTALL 附註）
