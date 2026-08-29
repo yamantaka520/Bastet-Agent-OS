@@ -815,6 +815,7 @@ class Orchestrator:
                     {"stage": stage.name,
                      "source_stage": repair_stage.name.split(":", 1)[0],
                      "command": repair_stage.gate_config.get("command", ""),
+                     "head_commit": self._worktree_head(workdir),
                      "config_error": repair_outcome.config_error,
                      "detail": repair_outcome.detail[:1200]})
                 if repair_outcome.verdict != "passed":
@@ -953,6 +954,38 @@ class Orchestrator:
         return StageDef(
             name=f"{source.name}:repair-verification",
             gate="tests-pass", gate_config={"command": command})
+
+    @staticmethod
+    def _worktree_head(workdir: str) -> str:
+        result = subprocess.run(
+            ["git", "-C", workdir, "rev-parse", "HEAD"],
+            capture_output=True, text=True)
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    def _reusable_repair_precheck(self, job, stage: StageDef, workdir: str,
+                                  command: str) -> dict | None:
+        """Return exact repair evidence when no inputs changed afterward."""
+        row = self.db.one(
+            "SELECT id,detail_json FROM audit_log WHERE "
+            "action='repair.verification.passed' AND target_id=? "
+            "ORDER BY id DESC LIMIT 1", (job["id"],))
+        if row is None:
+            return None
+        try:
+            detail = json.loads(row["detail_json"] or "{}")
+        except json.JSONDecodeError:
+            return None
+        if (detail.get("source_stage") != stage.name
+                or detail.get("command") != command
+                or not detail.get("head_commit")
+                or detail.get("head_commit") != self._worktree_head(workdir)):
+            return None
+        clean = subprocess.run(
+            ["git", "-C", workdir, "status", "--porcelain", "--untracked-files=all"],
+            capture_output=True, text=True)
+        if clean.returncode != 0 or clean.stdout.strip():
+            return None
+        return {"audit_id": row["id"], **detail}
 
     def _accept_passed_stage(self, job, stages: list[StageDef], idx: int,
                              stage: StageDef, workdir: str, run_id: str,
@@ -1683,20 +1716,34 @@ class Orchestrator:
                 stage.gate_config.get("precheck_command") or "").strip()
             if precheck_command:
                 stamp = now()
+                reused = self._reusable_repair_precheck(
+                    job, stage, workdir, precheck_command)
                 self.db.write(
                     "UPDATE runs SET heartbeat_at=?, progress_at=?, progress_text=? "
-                    "WHERE id=?", (stamp, stamp,
-                                    f"Bastet precheck: {precheck_command}"[:300], run_id))
-                precheck = await asyncio.to_thread(
-                    evaluate_gate,
-                    StageDef(name=f"{stage.name}:precheck", gate="tests-pass",
-                             gate_config={"command": precheck_command}),
-                    workdir, None, env=extra_env)
+                    "WHERE id=?", (
+                        stamp, stamp,
+                        (f"Bastet precheck reused at {reused['head_commit']}"
+                         if reused else f"Bastet precheck: {precheck_command}")[:300],
+                        run_id))
+                if reused:
+                    precheck = GateOutcome(
+                        "passed", "已復用相同 HEAD 與命令的 repair verification："
+                        f"{reused['head_commit']} / `{precheck_command}`")
+                else:
+                    precheck = await asyncio.to_thread(
+                        evaluate_gate,
+                        StageDef(name=f"{stage.name}:precheck", gate="tests-pass",
+                                 gate_config={"command": precheck_command}),
+                        workdir, None, env=extra_env)
                 self.db.audit(
-                    "orchestrator", f"capability.precheck.{precheck.verdict}",
+                    "orchestrator", ("capability.precheck.reused" if reused else
+                                     f"capability.precheck.{precheck.verdict}"),
                     "run", run_id,
                     {"job_id": job["id"], "stage": stage.name,
                      "command": precheck_command,
+                     "source_audit_id": reused["audit_id"] if reused else None,
+                     "head_commit": reused["head_commit"] if reused else
+                     self._worktree_head(workdir),
                      "failure_kind": precheck.failure_kind,
                      "detail": precheck.detail[:1200]})
                 if precheck.failure_kind:

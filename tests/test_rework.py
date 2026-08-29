@@ -150,6 +150,43 @@ async def test_rework_writer_must_pass_original_precheck_before_re_review(
     assert "不再重送 reviewer" in blocked["reason"]
 
 
+async def test_reviewer_reuses_passed_repair_precheck_at_same_head(
+        orch, seeded, monkeypatch):
+    """The reviewer must not rerun an identical monolithic command immediately."""
+    add_template(seeded, "dev", [
+        {"name": "implement", "gate": "auto"},
+        {"name": "review", "gate": "agent-review", "read_only": True,
+         "rework_target": "implement",
+         "gate_config": {"precheck_command": "true"}},
+    ])
+    SCRIPT.append(RunResult(status="succeeded", summary="first implementation"))
+    SCRIPT.append(RunResult(
+        status="succeeded", summary="reject",
+        structured_verdict={"verdict": "reject", "reasons": ["fix"]}))
+    SCRIPT.append(RunResult(status="succeeded", summary="fixed"))
+    SCRIPT.append(RunResult(
+        status="succeeded", summary="approve",
+        structured_verdict={"verdict": "approve", "reasons": []}))
+    from bastet_agent_os import orchestrator as module
+    original = module.evaluate_gate
+    commands = []
+
+    def counted(stage, *args, **kwargs):
+        if stage.gate == "tests-pass":
+            commands.append(stage.gate_config.get("command"))
+        return original(stage, *args, **kwargs)
+
+    monkeypatch.setattr(module, "evaluate_gate", counted)
+    job_id = orch.dispatch(req(template_id="dev"))
+    await orch.wait_idle()
+
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] \
+        == "done"
+    assert commands == ["true", "true"]  # first review + repair verifier only
+    assert seeded.one(
+        "SELECT 1 FROM audit_log WHERE action='capability.precheck.reused'")
+
+
 async def test_exhausted_rework_starts_pm_immediately(
         orch, seeded, monkeypatch):
     """Max rework is a PM event, not a later sweep that may never happen."""

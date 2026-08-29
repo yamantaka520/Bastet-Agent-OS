@@ -8,6 +8,15 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.34.15] - 2026-08-29
+
+### Fixed
+
+- A reviewer precheck now reuses a just-passed repair verification when the
+  command and Git HEAD are identical and the worktree is clean. The durable
+  audit records the evidence commit and source audit row; any command, commit,
+  tracked, or untracked change invalidates reuse and runs the test normally.
+
 ## [0.34.14] - 2026-08-29
 
 ### Fixed
