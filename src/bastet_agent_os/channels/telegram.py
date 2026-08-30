@@ -622,6 +622,10 @@ class TelegramChannel:
             text = (f"🚚 工作流已驗收，開始交付\n{self._job_line(event)}\n"
                     f"模式：{event.get('mode')}"
                     + (f" · v{event.get('version')}" if event.get("version") else ""))
+        elif etype == "job.delivery_waiting":
+            text = (f"⏳ 已送交外部商店，等待審核／發布\n{self._job_line(event)}\n"
+                    f"商店狀態：{event.get('provider_status') or 'pending'}\n"
+                    f"下次查詢：{event.get('next_poll_at') or '—'}")
         elif etype in ("job.delivered", "job.deployed"):
             action = "主線交付完成" if etype == "job.delivered" else "正式部署完成"
             text = (f"🚚 {action}\n{self._job_line(event)}\n"

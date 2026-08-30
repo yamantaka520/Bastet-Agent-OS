@@ -127,6 +127,10 @@
   Bastet 主機執行。只有 main 與不可變 tag 原子推送、部署命令成功，且線上回報的
   JSON receipt 明確包含 `status=verified`，且 target、version、commit 分別與本次
   交付完全一致後，卡片才會變成完成；只有 exit code 0 不構成線上證據。
+- **商店上傳、送審、核准、上架是四件事。** App Store Connect／Google Play 必須使用
+  release-manager 人工閘道與非同步 store receipt；`waiting_external` 期間只輪詢狀態，
+  不能重跑上傳／送審。設定 `release_goal=published` 時，submitted 或 approved 都不能把
+  卡片標成完成；rejected 必須阻擋並保留 provider 原始狀態。
 - **審計是 hash 串接的 append-only。** 不要手動改 audit_log —— 鏈會斷，
   `verify_audit_chain()` 會抓到。刪任務/專案時的用量帳務會被拒絕或要求 force
   並記錄寫掉的金額，這是刻意的。

@@ -171,12 +171,15 @@ CREATE TABLE IF NOT EXISTS deliveries (
   id TEXT PRIMARY KEY,
   job_id TEXT NOT NULL REFERENCES jobs(id),
   mode TEXT NOT NULL,
-  status TEXT NOT NULL,             -- running|succeeded|failed
+  status TEXT NOT NULL,             -- running|waiting_external|polling|succeeded|failed
   target TEXT NOT NULL DEFAULT '',
   version TEXT NOT NULL DEFAULT '',
   commit_sha TEXT NOT NULL DEFAULT '',
   evidence_json TEXT NOT NULL DEFAULT '{}',
   error TEXT NOT NULL DEFAULT '',
+  provider TEXT NOT NULL DEFAULT 'web',
+  provider_status TEXT NOT NULL DEFAULT '',
+  next_poll_at TEXT,
   started_at TEXT NOT NULL,
   finished_at TEXT
 );
@@ -600,6 +603,16 @@ class Db:
             if "delivery_status" not in existing:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN delivery_status TEXT "
                                    "NOT NULL DEFAULT 'not_required'")
+            delivery_cols = {r[1] for r in
+                             self._conn.execute("PRAGMA table_info(deliveries)")}
+            for col, decl in [
+                ("provider", "TEXT NOT NULL DEFAULT 'web'"),
+                ("provider_status", "TEXT NOT NULL DEFAULT ''"),
+                ("next_poll_at", "TEXT"),
+            ]:
+                if col not in delivery_cols:
+                    self._conn.execute(
+                        f"ALTER TABLE deliveries ADD COLUMN {col} {decl}")
             project_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(projects)")}
             if "status" not in project_cols:
                 self._conn.execute("ALTER TABLE projects ADD COLUMN status TEXT "

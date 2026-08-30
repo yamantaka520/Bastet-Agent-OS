@@ -67,7 +67,11 @@ Last updated: 2026-08-31
   `bastet production-rehearsal` publishes an immutable tag, deploys to a temporary
   HTTP provider and reads back the exact live receipt. It then proves a second release
   is blocked when that provider remains stale, without emitting `job.deployed`.
-  Validation: 637 Python tests,
+  App Store Connect and Google Play profiles now use a shared asynchronous store
+  state machine: release-manager approval is mandatory, provider/app identity and
+  goal are frozen, and submitted/approved releases remain `waiting_external` with
+  durable CAS polling across service restarts until published or rejected.
+  Validation: 641 Python tests,
   ruff clean, Web production build clean.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month

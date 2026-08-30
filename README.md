@@ -90,6 +90,10 @@ audit trail behind every state change.
   production additionally publishes an immutable version tag, deploys, and
   requires a structured live-provider receipt whose target, version and commit
   exactly match the release. Any failure blocks with its receipt intact.
+- **App Store and Google Play are real delivery providers.** Store cards require
+  a release-manager approval, then persist through upload, submission, approval
+  and publication. Review can take days: Bastet records `waiting_external`, polls
+  provider receipts across restarts, and never labels upload/submission as live.
 - **Project lifecycle with a light.** planning → ready → running ⇄ paused →
   maintenance → closed, as a real state machine: only declared transitions, each
   one audited. Run / pause / stop controls on the card.

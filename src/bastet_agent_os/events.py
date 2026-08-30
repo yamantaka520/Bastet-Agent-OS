@@ -30,6 +30,7 @@ EVENT_TYPES = {
     "job.rework", "job.resumed", "job.retried", "job.archived", "job.deleted",
     "job.supplied", "job.pushed", "job.push_failed", "job.quota_wait",
     "job.pm_intervention", "job.maintenance_parked", "job.delivery_pending",
+    "job.delivery_waiting",
     "job.delivered", "job.deployed", "job.delivery_failed",
     # runs
     "run.queued", "run.started", "run.waiting_input", "run.finished",

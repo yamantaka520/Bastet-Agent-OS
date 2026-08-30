@@ -195,6 +195,17 @@ class Orchestrator:
                     f"{delivery_contract['mode']} delivery requires the project's "
                     "delivery profile")
             delivery.validate_profile(profile, delivery_contract["mode"])
+            # Freeze commands, provider identity and completion goal into the
+            # job. A project profile edited during a multi-day store review
+            # must not silently change what this already-submitted card means.
+            delivery_contract["profile"] = dict(profile)
+            if str(profile.get("provider") or "web") in delivery.STORE_PROVIDERS:
+                sinks = [stage for stage in stages if not any(
+                    stage.name in candidate.needs for candidate in stages)]
+                if len(sinks) != 1 or sinks[0].gate != "human-approve":
+                    raise ValueError(
+                        "App Store and Google Play delivery require a unique "
+                        "human-approve terminal stage before submission")
         if delivery_contract["mode"] == "production":
             project_config = json.loads(project["config_json"] or "{}")
             previous = project_config.get("last_delivery") or {}
@@ -340,12 +351,13 @@ class Orchestrator:
         job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         contract = self._delivery_contract(job)
         attempt_id = new_id("dly")
+        provider = str((contract.get("profile") or {}).get("provider") or "web")
         self.db.write(
-            "INSERT INTO deliveries(id,job_id,mode,status,target,version,started_at) "
-            "VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO deliveries(id,job_id,mode,status,target,version,provider,"
+            "started_at) VALUES(?,?,?,?,?,?,?,?)",
             (attempt_id, job_id, contract["mode"], "running",
              str((contract.get("profile") or {}).get("target") or ""),
-             str(contract.get("version") or ""), now()))
+             str(contract.get("version") or ""), provider, now()))
         workdir = job["worktree_path"] or self._project_repo(job)
         latest = self.db.one(
             "SELECT id FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 1", (job_id,))
@@ -363,52 +375,155 @@ class Orchestrator:
             result = await asyncio.to_thread(
                 delivery.execute, self.db, job, workdir, contract,
                 env=env, emit=self._emit)
-            self.db.write(
-                "UPDATE deliveries SET status='succeeded',target=?,version=?,"
-                "commit_sha=?,evidence_json=?,finished_at=? WHERE id=?",
-                (result.target, result.version, result.commit_sha,
-                 json.dumps(result.evidence), now(), attempt_id))
-            self.db.write("UPDATE jobs SET delivery_status='succeeded', updated_at=? "
-                          "WHERE id=?", (now(), job_id))
-            action = "job.deployed" if result.mode == "production" else "job.delivered"
-            self.db.audit("orchestrator", action, "job", job_id,
-                          {"delivery_id": attempt_id, "mode": result.mode,
-                           "target": result.target, "version": result.version,
-                           "commit_sha": result.commit_sha})
-            if result.mode == "production":
-                project = self.db.one("SELECT config_json FROM projects WHERE id=?",
-                                      (job["project_id"],))
-                config = json.loads(project["config_json"] or "{}") if project else {}
-                config["last_delivery"] = {
-                    "job_id": job_id, "delivery_id": attempt_id,
-                    "target": result.target, "version": result.version,
-                    "commit_sha": result.commit_sha, "at": now(),
-                }
-                self.db.write("UPDATE projects SET config_json=?,updated_at=? WHERE id=?",
-                              (json.dumps(config), now(), job["project_id"]))
-            self._emit(action, job["project_id"], job_id=job_id,
-                       target=result.target, version=result.version,
-                       commit_sha=result.commit_sha)
-            fresh = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
-            self._complete_job(fresh, via="delivery")
+            if result.complete:
+                self._record_delivery_success(job, attempt_id, result)
+            else:
+                self._record_delivery_wait(job, attempt_id, result)
         except Exception as exc:
-            message = f"{type(exc).__name__}: {exc}"[-8000:]
-            self.db.write("UPDATE deliveries SET status='failed',error=?,finished_at=? "
-                          "WHERE id=?", (message, now(), attempt_id))
-            self.db.write("UPDATE jobs SET status='blocked',delivery_status='failed',"
-                          "rework_note=?,updated_at=? WHERE id=?",
-                          (f"交付失敗；不得標記完成。{message}", now(), job_id))
-            self.db.audit("orchestrator", "job.delivery_failed", "job", job_id,
-                          {"delivery_id": attempt_id, "mode": contract["mode"],
-                           "detail": message[:1200]})
-            self._emit("job.delivery_failed", job["project_id"], job_id=job_id,
-                       mode=contract["mode"], detail=message[:300])
-            self._sync_project(job["project_id"])
-            self._maybe_pm_diagnose(
-                self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,)), "")
+            self._record_delivery_failure(job, attempt_id, contract["mode"], exc)
         finally:
             if access is not None:
                 resource_access.cleanup(self.home.root, run_id)
+
+    def _record_delivery_wait(self, job, delivery_id: str, result) -> None:
+        self.db.write(
+            "UPDATE deliveries SET status='waiting_external',target=?,version=?,"
+            "commit_sha=?,evidence_json=?,provider_status=?,next_poll_at=? WHERE id=?",
+            (result.target, result.version, result.commit_sha,
+             json.dumps(result.evidence), result.provider_status,
+             result.next_poll_at, delivery_id))
+        self.db.write(
+            "UPDATE jobs SET status='in_progress',delivery_status='waiting_external',"
+            "updated_at=? WHERE id=?", (now(), job["id"]))
+        self.db.audit("orchestrator", "job.delivery_waiting", "job", job["id"],
+                      {"delivery_id": delivery_id,
+                       "provider_status": result.provider_status,
+                       "next_poll_at": result.next_poll_at})
+        self._emit("job.delivery_waiting", job["project_id"], job_id=job["id"],
+                   provider_status=result.provider_status,
+                   next_poll_at=result.next_poll_at)
+        self._sync_project(job["project_id"])
+
+    def _record_delivery_success(self, job, delivery_id: str, result) -> None:
+        self.db.write(
+            "UPDATE deliveries SET status='succeeded',target=?,version=?,commit_sha=?,"
+            "evidence_json=?,provider_status=?,next_poll_at=NULL,finished_at=? WHERE id=?",
+            (result.target, result.version, result.commit_sha,
+             json.dumps(result.evidence), result.provider_status, now(), delivery_id))
+        self.db.write("UPDATE jobs SET delivery_status='succeeded', updated_at=? "
+                      "WHERE id=?", (now(), job["id"]))
+        action = "job.deployed" if result.mode == "production" else "job.delivered"
+        self.db.audit("orchestrator", action, "job", job["id"],
+                      {"delivery_id": delivery_id, "mode": result.mode,
+                       "target": result.target, "version": result.version,
+                       "commit_sha": result.commit_sha})
+        if result.mode == "production":
+            project = self.db.one("SELECT config_json FROM projects WHERE id=?",
+                                  (job["project_id"],))
+            config = json.loads(project["config_json"] or "{}") if project else {}
+            config["last_delivery"] = {
+                "job_id": job["id"], "delivery_id": delivery_id,
+                "target": result.target, "version": result.version,
+                "commit_sha": result.commit_sha, "at": now(),
+            }
+            self.db.write("UPDATE projects SET config_json=?,updated_at=? WHERE id=?",
+                          (json.dumps(config), now(), job["project_id"]))
+        self._emit(action, job["project_id"], job_id=job["id"],
+                   target=result.target, version=result.version,
+                   commit_sha=result.commit_sha)
+        fresh = self.db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
+        self._complete_job(fresh, via="delivery")
+
+    def _record_delivery_failure(self, job, delivery_id: str, mode: str,
+                                 exc: Exception) -> None:
+        message = f"{type(exc).__name__}: {exc}"[-8000:]
+        self.db.write(
+            "UPDATE deliveries SET status='failed',error=?,next_poll_at=NULL,"
+            "finished_at=? WHERE id=?", (message, now(), delivery_id))
+        self.db.write("UPDATE jobs SET status='blocked',delivery_status='failed',"
+                      "rework_note=?,updated_at=? WHERE id=?",
+                      (f"交付失敗；不得標記完成。{message}", now(), job["id"]))
+        self.db.audit("orchestrator", "job.delivery_failed", "job", job["id"],
+                      {"delivery_id": delivery_id, "mode": mode,
+                       "detail": message[:1200]})
+        self._emit("job.delivery_failed", job["project_id"], job_id=job["id"],
+                   mode=mode, detail=message[:300])
+        self._sync_project(job["project_id"])
+        self._maybe_pm_diagnose(
+            self.db.one("SELECT * FROM jobs WHERE id=?", (job["id"],)), "")
+
+    async def poll_external_deliveries(self) -> dict[str, list[str]]:
+        """Poll due store reviews/releases once, with a database ownership CAS."""
+        from . import delivery, resource_access
+
+        completed: list[str] = []
+        waiting: list[str] = []
+        failed: list[str] = []
+        due_at = now()
+        rows = self.db.query(
+            "SELECT d.* FROM deliveries d JOIN jobs j ON j.id=d.job_id "
+            "WHERE d.status IN ('waiting_external','polling') "
+            "AND d.next_poll_at IS NOT NULL "
+            "AND d.next_poll_at<=? AND j.status='in_progress' "
+            "AND j.delivery_status='waiting_external' "
+            "ORDER BY d.next_poll_at", (due_at,))
+        for candidate in rows:
+            lease_until = (datetime.now(UTC) + timedelta(minutes=5)).isoformat(
+                timespec="seconds")
+            claimed = self.db.write(
+                "UPDATE deliveries SET status='polling',next_poll_at=? WHERE id=? "
+                "AND status IN ('waiting_external','polling') "
+                "AND next_poll_at<=?", (lease_until, candidate["id"], due_at)).rowcount
+            if not claimed:
+                continue
+            delivery_row = self.db.one("SELECT * FROM deliveries WHERE id=?",
+                                       (candidate["id"],))
+            job = self.db.one("SELECT * FROM jobs WHERE id=?",
+                              (delivery_row["job_id"],))
+            if job is None or job["delivery_status"] != "waiting_external":
+                self.db.write("UPDATE deliveries SET status='waiting_external' "
+                              "WHERE id=?", (delivery_row["id"],))
+                continue
+            contract = self._delivery_contract(job)
+            workdir = job["worktree_path"] or self._project_repo(job)
+            latest = self.db.one(
+                "SELECT id FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 1",
+                (job["id"],))
+            run_id = latest["id"] if latest else delivery_row["id"]
+            access = None
+            env: dict[str, str] = {}
+            try:
+                env.update(self._project_secrets(job, run_id))
+                access = resource_access.build(
+                    self.db, self.home.root, job["project_id"],
+                    self._project_team(job["project_id"]), run_id,
+                    audit_actor=f"delivery-poll:{delivery_row['id']}")
+                env.update(access.env)
+                result = await asyncio.to_thread(
+                    delivery.poll, workdir, contract, delivery_row, env=env)
+                if result.complete:
+                    self._record_delivery_success(job, delivery_row["id"], result)
+                    completed.append(job["id"])
+                else:
+                    self._record_delivery_wait(job, delivery_row["id"], result)
+                    waiting.append(job["id"])
+            except Exception as exc:
+                self._record_delivery_failure(
+                    job, delivery_row["id"], contract["mode"], exc)
+                failed.append(job["id"])
+            finally:
+                if access is not None:
+                    resource_access.cleanup(self.home.root, run_id)
+        return {"completed": completed, "waiting": waiting, "failed": failed}
+
+    async def external_delivery_loop(self) -> None:
+        """Keep asynchronous store submissions moving across service restarts."""
+        while True:
+            try:
+                await self.poll_external_deliveries()
+            except Exception as exc:
+                log.error("external delivery poll failed: %r", exc)
+            await asyncio.sleep(60)
 
     async def cancel_job(self, job_id: str, actor: str = "user") -> dict:
         """Stop a job now: kill whatever is streaming, mark the job cancelled.
@@ -516,6 +631,14 @@ class Orchestrator:
                 if r["id"] in self._live]
             if live_runs:
                 continue                       # a driver in this process owns it
+            if job["delivery_status"] == "waiting_external":
+                # The provider owns progress now. A crashed poll claimant is
+                # returned to the durable queue; the background loop will read
+                # the same receipt without rerunning upload/submission.
+                self.db.write(
+                    "UPDATE deliveries SET status='waiting_external' "
+                    "WHERE job_id=? AND status='polling'", (job["id"],))
+                continue
             state = states.get(job["project_id"], "")
             if state in ("paused", "closed"):
                 self._block(job["id"],
@@ -603,6 +726,14 @@ class Orchestrator:
                     f"{normalized['mode']} delivery requires the project's "
                     "delivery profile")
             delivery.validate_profile(profile, normalized["mode"])
+            normalized["profile"] = dict(profile)
+            if str(profile.get("provider") or "web") in delivery.STORE_PROVIDERS:
+                sinks = [stage for stage in stages if not any(
+                    stage.name in candidate.needs for candidate in stages)]
+                if len(sinks) != 1 or sinks[0].gate != "human-approve":
+                    raise ValueError(
+                        "App Store and Google Play delivery require a unique "
+                        "human-approve terminal stage before submission")
         if not job["worktree_path"]:
             workdir = self._ensure_workdir(job, True)
             self.db.write("UPDATE jobs SET worktree_path=? WHERE id=?",

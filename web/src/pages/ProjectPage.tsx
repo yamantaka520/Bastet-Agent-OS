@@ -52,7 +52,11 @@ type Overview = {
           updated_at: string }[];
 };
 type DeliveryProfile = { target_branch?: string; target?: string;
-  predeploy_command?: string; deploy_command?: string; verify_command?: string };
+  predeploy_command?: string; deploy_command?: string; verify_command?: string;
+  provider?: "web" | "app_store_connect" | "google_play";
+  release_goal?: "uploaded" | "submitted" | "approved" | "published";
+  app_id?: string; package_name?: string; track?: string;
+  poll_interval_seconds?: string };
 type RoomMember = { id: string; name: string; role: string; executor_type: string };
 type RoomMessage = { id: string; author_type: string; author_id: string;
                      kind: string; content: string; at: string };
@@ -663,6 +667,19 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
         <summary>{t("project.deliveryProfile")}</summary>
         <div className="stage-editor">
           <div className="inline-form">
+            <label className="res-field">
+              <span>{t("project.delivery.provider")}</span>
+              <select value={draft.deliveryProfile.provider ?? "web"}
+                      disabled={!canOperate}
+                      onChange={(e) => patch({ deliveryProfile: {
+                        ...draft.deliveryProfile,
+                        provider: e.target.value as DeliveryProfile["provider"],
+                      } })}>
+                <option value="web">Web / command</option>
+                <option value="app_store_connect">Apple App Store Connect</option>
+                <option value="google_play">Google Play</option>
+              </select>
+            </label>
             {(["target_branch", "target", "predeploy_command", "deploy_command",
                "verify_command"] as (keyof DeliveryProfile)[]).map((key) => (
               <label className="res-field" key={key}>
@@ -673,6 +690,54 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
                          ...draft.deliveryProfile, [key]: e.target.value } })} />
               </label>
             ))}
+            {(draft.deliveryProfile.provider === "app_store_connect"
+              || draft.deliveryProfile.provider === "google_play") && (<>
+              <label className="res-field">
+                <span>{t("project.delivery.release_goal")}</span>
+                <select value={draft.deliveryProfile.release_goal ?? "published"}
+                        disabled={!canOperate}
+                        onChange={(e) => patch({ deliveryProfile: {
+                          ...draft.deliveryProfile,
+                          release_goal: e.target.value as DeliveryProfile["release_goal"],
+                        } })}>
+                  {(["uploaded", "submitted", "approved", "published"] as const)
+                    .map((goal) => <option key={goal} value={goal}>{goal}</option>)}
+                </select>
+              </label>
+              {draft.deliveryProfile.provider === "app_store_connect" ? (
+                <label className="res-field">
+                  <span>{t("project.delivery.app_id")}</span>
+                  <input value={draft.deliveryProfile.app_id ?? ""}
+                         disabled={!canOperate}
+                         onChange={(e) => patch({ deliveryProfile: {
+                           ...draft.deliveryProfile, app_id: e.target.value } })} />
+                </label>
+              ) : (<>
+                <label className="res-field">
+                  <span>{t("project.delivery.package_name")}</span>
+                  <input value={draft.deliveryProfile.package_name ?? ""}
+                         disabled={!canOperate}
+                         onChange={(e) => patch({ deliveryProfile: {
+                           ...draft.deliveryProfile, package_name: e.target.value } })} />
+                </label>
+                <label className="res-field">
+                  <span>{t("project.delivery.track")}</span>
+                  <input value={draft.deliveryProfile.track ?? "production"}
+                         disabled={!canOperate}
+                         onChange={(e) => patch({ deliveryProfile: {
+                           ...draft.deliveryProfile, track: e.target.value } })} />
+                </label>
+              </>)}
+              <label className="res-field">
+                <span>{t("project.delivery.poll_interval_seconds")}</span>
+                <input type="number" min="1" max="86400"
+                       value={draft.deliveryProfile.poll_interval_seconds ?? "300"}
+                       disabled={!canOperate}
+                       onChange={(e) => patch({ deliveryProfile: {
+                         ...draft.deliveryProfile,
+                         poll_interval_seconds: e.target.value } })} />
+              </label>
+            </>)}
           </div>
           <p className="muted">{t("project.deliveryHint")}</p>
         </div>

@@ -178,6 +178,9 @@ async def test_graph_and_delivery_events_become_progress_updates(channel):
                       "job_id": "job1", "stage": "design"})
     await ch._notify({"type": "job.delivery_pending", "project_id": "proj1",
                       "job_id": "job1", "mode": "integration"})
+    await ch._notify({"type": "job.delivery_waiting", "project_id": "proj1",
+                      "job_id": "job1", "provider_status": "IN_REVIEW",
+                      "next_poll_at": "2026-09-01T00:00:00+00:00"})
     await ch._notify({"type": "job.delivered", "project_id": "proj1",
                       "job_id": "job1", "target": "origin/main",
                       "commit_sha": "0123456789abcdef"})
@@ -186,6 +189,7 @@ async def test_graph_and_delivery_events_become_progress_updates(channel):
     assert any("階段開始：build" in text and "DAG：1/2" in text for text in texts)
     assert any("階段通過：design" in text for text in texts)
     assert any("開始交付" in text and "integration" in text for text in texts)
+    assert any("等待審核／發布" in text and "IN_REVIEW" in text for text in texts)
     assert any("主線交付完成" in text and "0123456789ab" in text for text in texts)
 
 

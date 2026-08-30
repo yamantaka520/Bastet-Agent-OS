@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,8 @@ from .db import Db
 MODES = {"none", "branch", "integration", "production"}
 COMMAND_TIMEOUT_S = 1800
 OUTPUT_LIMIT = 8000
+STORE_PROVIDERS = {"app_store_connect", "google_play"}
+STORE_MILESTONES = {"uploaded": 0, "submitted": 1, "approved": 2, "published": 3}
 
 
 class DeliveryError(RuntimeError):
@@ -33,6 +36,9 @@ class DeliveryResult:
     version: str
     commit_sha: str
     evidence: dict[str, Any]
+    complete: bool = True
+    provider_status: str = ""
+    next_poll_at: str = ""
 
 
 def normalize(raw: dict | None) -> dict[str, Any]:
@@ -65,6 +71,28 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
     if missing:
         raise ValueError(
             f"{mode} delivery profile is missing: {', '.join(missing)}")
+    provider = str(profile.get("provider") or "web").strip()
+    if provider != "web" and provider not in STORE_PROVIDERS:
+        raise ValueError(
+            f"delivery profile provider must be web or one of {sorted(STORE_PROVIDERS)}")
+    if provider in STORE_PROVIDERS:
+        goal = str(profile.get("release_goal") or "published").strip()
+        if goal not in STORE_MILESTONES:
+            raise ValueError(
+                f"store release_goal must be one of {sorted(STORE_MILESTONES)}")
+        identity_fields = (["app_id"] if provider == "app_store_connect"
+                           else ["package_name", "track"])
+        missing_identity = [field for field in identity_fields
+                            if not str(profile.get(field) or "").strip()]
+        if missing_identity:
+            raise ValueError(
+                f"{provider} profile is missing: {', '.join(missing_identity)}")
+        try:
+            interval = int(profile.get("poll_interval_seconds") or 300)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("store poll_interval_seconds must be an integer") from exc
+        if interval < 1 or interval > 86400:
+            raise ValueError("store poll_interval_seconds must be between 1 and 86400")
     return profile
 
 
@@ -100,7 +128,8 @@ def _package_version(workdir: str, source: str) -> str:
 
 
 def _verification_receipt(output: str, *, commit_sha: str, version: str,
-                          target: str) -> dict[str, Any]:
+                          target: str, profile: dict[str, Any] | None = None,
+                          ) -> tuple[dict[str, Any], bool]:
     """Parse and bind provider-observed state to this exact release.
 
     Exit zero alone is not evidence that the provider serves the requested
@@ -122,8 +151,9 @@ def _verification_receipt(output: str, *, commit_sha: str, version: str,
     if receipt is None:
         raise DeliveryError(
             "online verification must emit a JSON deployment receipt")
+    profile = profile or {}
+    provider = str(profile.get("provider") or "web")
     expected = {
-        "status": "verified",
         "commit_sha": commit_sha,
         "version": version,
         "target": target,
@@ -136,7 +166,43 @@ def _verification_receipt(output: str, *, commit_sha: str, version: str,
     if mismatches:
         raise DeliveryError(
             "online deployment receipt mismatch: " + "; ".join(mismatches))
-    return receipt
+    if provider == "web":
+        if receipt.get("status") != "verified":
+            raise DeliveryError(
+                "online deployment receipt mismatch: status expected 'verified', "
+                f"got {receipt.get('status')!r}")
+        return receipt, True
+
+    if receipt.get("provider") != provider:
+        raise DeliveryError(
+            "store receipt provider mismatch: "
+            f"expected {provider!r}, got {receipt.get('provider')!r}")
+    identity_fields = (["app_id"] if provider == "app_store_connect"
+                       else ["package_name", "track"])
+    identity_mismatches = [
+        f"{field} expected {profile.get(field)!r}, got {receipt.get(field)!r}"
+        for field in identity_fields
+        if str(receipt.get(field) or "") != str(profile.get(field) or "")
+    ]
+    if identity_mismatches:
+        raise DeliveryError("store receipt identity mismatch: "
+                            + "; ".join(identity_mismatches))
+    milestone = str(receipt.get("milestone") or "")
+    provider_status = str(receipt.get("provider_status") or "")
+    if milestone == "rejected":
+        raise DeliveryError(
+            f"{provider} rejected release: {provider_status or 'no provider status'}")
+    if milestone not in STORE_MILESTONES:
+        raise DeliveryError(
+            f"store receipt milestone must be one of {sorted(STORE_MILESTONES)} "
+            "or 'rejected'")
+    goal = str(profile.get("release_goal") or "published")
+    return receipt, STORE_MILESTONES[milestone] >= STORE_MILESTONES[goal]
+
+
+def _next_poll_at(profile: dict[str, Any]) -> str:
+    seconds = int(profile.get("poll_interval_seconds") or 300)
+    return (datetime.now(UTC) + timedelta(seconds=seconds)).isoformat(timespec="seconds")
 
 
 def execute(db: Db, job, workdir: str, contract: dict,
@@ -218,6 +284,44 @@ def execute(db: Db, job, workdir: str, contract: dict,
     evidence["verify"] = _run(
         str(profile.get("verify_command") or ""), workdir, delivery_env,
         "online verification")
-    evidence["verification_receipt"] = _verification_receipt(
-        evidence["verify"], commit_sha=commit_sha, version=expected, target=target)
-    return DeliveryResult(mode, target, expected, commit_sha, evidence)
+    receipt, complete = _verification_receipt(
+        evidence["verify"], commit_sha=commit_sha, version=expected, target=target,
+        profile=profile)
+    evidence["verification_receipt"] = receipt
+    return DeliveryResult(
+        mode, target, expected, commit_sha, evidence, complete=complete,
+        provider_status=str(receipt.get("provider_status") or ""),
+        next_poll_at="" if complete else _next_poll_at(profile))
+
+
+def poll(workdir: str, contract: dict, delivery_row, *,
+         env: dict[str, str] | None = None) -> DeliveryResult:
+    """Poll a previously submitted asynchronous store delivery without redeploying."""
+    contract = normalize(contract)
+    profile = validate_profile(contract.get("profile") or {}, contract["mode"])
+    provider = str(profile.get("provider") or "web")
+    if provider not in STORE_PROVIDERS:
+        raise DeliveryError("only store providers support asynchronous polling")
+    commit_sha = str(delivery_row["commit_sha"] or "")
+    version = str(delivery_row["version"] or contract.get("version") or "")
+    target = str(delivery_row["target"] or profile.get("target") or "")
+    if not commit_sha:
+        raise DeliveryError("store delivery poll has no integrated commit receipt")
+    delivery_env = {
+        **(env or {}),
+        "BASTET_DELIVERY_VERSION": version,
+        "BASTET_DELIVERY_TAG": f"v{version}",
+        "BASTET_DELIVERY_TARGET": target,
+        "BASTET_DELIVERY_COMMIT": commit_sha,
+    }
+    output = _run(str(profile.get("verify_command") or ""), workdir, delivery_env,
+                  "store status verification")
+    receipt, complete = _verification_receipt(
+        output, commit_sha=commit_sha, version=version, target=target, profile=profile)
+    evidence = json.loads(delivery_row["evidence_json"] or "{}")
+    evidence["verify"] = output
+    evidence["verification_receipt"] = receipt
+    return DeliveryResult(
+        contract["mode"], target, version, commit_sha, evidence,
+        complete=complete, provider_status=str(receipt.get("provider_status") or ""),
+        next_poll_at="" if complete else _next_poll_at(profile))

@@ -262,6 +262,26 @@ exercise the provider-neutral contract in isolation. It proves one exact HTTP
 readback succeeds and one stale readback blocks. Then run the equivalent canary
 against the actual provider using that project's trusted deploy and verify commands.
 
+Mobile store delivery is asynchronous. The built-in `mobile-app` workflow already
+ends at a release-manager `human-approve` stage, which is mandatory for
+`app_store_connect` and `google_play`. Store adapters must emit the common identity
+fields plus one monotonic milestone (`uploaded` → `submitted` → `approved` →
+`published`) and retain Apple's or Google's raw `provider_status`. A receipt below
+the profile's `release_goal` schedules another verification poll; it does not rerun
+the upload command. A `rejected` milestone is terminal failure.
+
+Apple submission and review are separate operations, and approval can still leave a
+version at Pending Developer Release. Google Play edits are not live until committed;
+managed publishing can further hold reviewed changes before publication. Templates
+must therefore state whether their completion promise is submission, approval, staged
+rollout, or actual public publication.
+
+Official provider references: [Apple app and submission statuses](https://developer.apple.com/help/app-store-connect/reference/app-information/app-and-submission-statuses),
+[Apple review submissions](https://developer.apple.com/documentation/appstoreconnectapi/reviewsubmission),
+[Google Play edits](https://developers.google.com/android-publisher/edits),
+[Google Play track release states](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks),
+and [Google Play managed publishing](https://support.google.com/googleplay/android-developer/answer/9859654).
+
 ## 10. Liveness: telling working from stuck
 
 An in-progress card shows a stage progress bar and a **heartbeat** — which is

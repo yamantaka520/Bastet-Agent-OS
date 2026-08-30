@@ -278,6 +278,24 @@ deliberately leaves the provider on `v1.4.0`; the online receipt mismatch must k
 the card blocked and produce no `job.deployed` audit. The command touches no configured
 project, remote, Bastet home, or external production service.
 
+The seventeenth extends delivery beyond synchronous web deployments. App Store
+Connect and Google Play profiles declare provider identity, app/package identity,
+release goal (`uploaded`, `submitted`, `approved`, or `published`) and poll interval.
+Their unique terminal stage must be `human-approve`; upload or review submission
+cannot be hidden behind an automatic gate. A receipt below the declared goal moves
+the card to durable `waiting_external`, stores raw provider status and schedules a
+CAS-protected five-minute verification lease without rerunning build, upload,
+submission or Agent work. Startup immediately reclaims a crashed poll owner; a second
+live server reclaims it after lease expiry and continues from the same receipt.
+Published completes once; rejected blocks and never emits `job.deployed`.
+
+Provider adapters normalize official state into milestones while retaining the raw
+status. Apple distinguishes `WAITING_FOR_REVIEW`, `IN_REVIEW`,
+`PENDING_DEVELOPER_RELEASE`, and `READY_FOR_DISTRIBUTION`; Google Play track releases
+distinguish `draft`, `inProgress`, `halted`, and `completed`, with managed publishing
+review/readiness handled separately by its verifier. The engine therefore does not
+equate API upload, edit commit, review acceptance, or staged rollout with public sale.
+
 No phase is shipped solely from unit tests. Multiprocess dispatch/restart/race now
 has an executable acceptance receipt, and the multi-branch DAG-to-remote release path
 now has an end-to-end Git receipt. The production provider boundary is now

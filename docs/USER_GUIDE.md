@@ -126,6 +126,20 @@ receipt is rejected. A failed required delivery stays
 blocked and keeps its worktree; it cannot be marked done. `git_auto_push: false`
 therefore applies only to legacy/best-effort `none` tasks, not to an explicit
 delivery promise.
+
+For App Store Connect or Google Play, choose that provider in the delivery profile,
+set the app ID or package name/track, choose a release goal, and configure a poll
+interval. The terminal workflow stage must be `human-approve`. Store verification
+receipts additionally include `provider`, `milestone`, `provider_status`, and the
+matching `app_id` or `package_name`/`track`. A submitted or approved receipt below
+the goal parks the card as `waiting_external`; service restarts continue read-only
+status polling without uploading or submitting again. `rejected` blocks the card,
+while only a receipt at or beyond the chosen goal can finish it.
+
+Apple credentials should be supplied through a granted secret for App Store Connect
+JWT/API-key access; Google Play should use a granted service-account credential with
+the minimum Android Publisher permissions. Never store either credential in the
+profile or verifier output.
 | 刪除 | remove the project (admin only) — see below |
 
 Expanded, a card shows the task plan (with provenance: which conversation it came
