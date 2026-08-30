@@ -321,6 +321,12 @@ credential field is a picker over the credentials saved on the Admin tab: the
 resource stores a `secret:<id>` pointer, so rotating a key updates every
 resource that uses it. Kinds that need no credential (skills) don't show one.
 
+Managed Skills add a stable capability id, version, install target, expected
+SHA-256, executor compatibility and health command. A stage can declare
+`requires: [skill:<id>]`; Bastet admits it only when a granted install has a
+matching digest and passing health receipt, otherwise it creates an explicit
+supply block before any Agent runs or rework is charged.
+
 MCP servers keep the vendor's install command; you run it from the WebUI and get
 the full output back, so a failed install can be fixed in place and retried.
 Nothing installs implicitly.

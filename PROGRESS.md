@@ -34,7 +34,12 @@ Last updated: 2026-08-31
   delivery transitions and evidence-grounded completion summaries. `/job` reads
   the durable task snapshot; `/ask` gives the configured responder a task-scoped
   system context. Parallel human gates receive distinct run-bound callback tokens.
-  Validation: 595 non-loopback plus 15 loopback Python tests (610 total), ruff clean.
+  Managed Skills now declare stable id/version, source/target, SHA-256, compatible
+  executors, install and health commands. Admin installation records target/digest/
+  health receipts; `skill:<id>` stage admission accepts only enabled, project-granted,
+  installed, healthy and executor-compatible resources. Missing supply blocks before
+  Agent execution without spending rework and is reported through Telegram.
+  Validation: 616 Python tests, ruff clean, Web production build clean.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month
   (2026-07-28 → 2026-08-30), ~132 commits. See [CHANGELOG.md](CHANGELOG.md) for

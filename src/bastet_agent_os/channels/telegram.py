@@ -632,6 +632,12 @@ class TelegramChannel:
             text = (f"🟠 交付失敗，任務不會被標記完成\n{self._job_line(event)}\n"
                     f"模式：{event.get('mode')}\n"
                     f"{self._detail_block(event.get('detail'))}")
+        elif etype == "skill.supply_required":
+            text = (f"🧰 缺少可驗證 Skill，工作流已暫停\n{self._job_line(event)}\n"
+                    f"階段：{event.get('stage')}\n"
+                    f"需求：{event.get('capability')}\n"
+                    "請到資源池建立或修正 Skill、授權此專案，完成安裝與健康檢查後重試。\n"
+                    f"{self._detail_block(event.get('detail'))}")
         elif etype == "job.blocked":
             text = self._blocked_text(event)
             keyboard = {"inline_keyboard": [[

@@ -27,7 +27,9 @@ def state_of(config: dict[str, Any]) -> dict[str, Any]:
     return {"status": install.get("status", "absent"),
             "at": install.get("at"), "exit_code": install.get("exit_code"),
             "command": config.get("install_command", ""),
-            "log": install.get("log", "")}
+            "log": install.get("log", ""), "digest": install.get("digest", ""),
+            "target": install.get("target", ""),
+            "version": install.get("version", "")}
 
 
 def run(db, resource_id: str, actor: str, timeout_s: int = DEFAULT_TIMEOUT_S,
@@ -56,8 +58,23 @@ def run(db, resource_id: str, actor: str, timeout_s: int = DEFAULT_TIMEOUT_S,
     except OSError as exc:                       # no shell, permissions, …
         output, exit_code, status = f"{type(exc).__name__}: {exc}", None, "failed"
 
+    extra: dict[str, Any] = {}
+    if row["kind"] == "skill" and status == "installed":
+        # Installation is not success until the target, digest and optional
+        # health command have been verified through the same probe used later.
+        from .resource_test import _test_skill
+        from .skill_supply import effective_path
+        health = _test_skill(config)
+        config["test"] = {**health, "at": now()}
+        path = effective_path(config)
+        extra = {"digest": health.get("digest", ""),
+                 "target": str(path) if path else "",
+                 "version": config.get("skill_version", "")}
+        if health["status"] != "ok":
+            status = "failed"
+            output += f"\npost-install verification failed: {health['detail']}"
     config["install"] = {"status": status, "at": now(), "exit_code": exit_code,
-                         "log": output[-LOG_LIMIT:]}
+                         "log": output[-LOG_LIMIT:], **extra}
     db.write("UPDATE resources SET config_json=?, updated_at=? WHERE id=?",
              (json.dumps(config), now(), resource_id))
     db.audit(actor, f"resource.install.{status}", "resource", resource_id,

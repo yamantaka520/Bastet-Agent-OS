@@ -42,7 +42,8 @@ MCP_PROTOCOL = "2024-11-05"
 def state_of(config: dict[str, Any]) -> dict[str, Any]:
     test = config.get("test") or {}
     return {"status": test.get("status", "unknown"), "at": test.get("at"),
-            "checked": test.get("checked", ""), "detail": test.get("detail", "")}
+            "checked": test.get("checked", ""), "detail": test.get("detail", ""),
+            "digest": test.get("digest", "")}
 
 
 def run(db, resource_id: str, actor: str) -> dict[str, Any]:
@@ -78,9 +79,11 @@ def run(db, resource_id: str, actor: str) -> dict[str, Any]:
 
 def _store(db, resource_id: str, config: dict[str, Any], actor: str,
            result: dict[str, Any]) -> dict[str, Any]:
-    # only the three fields the UI shows are persisted; probes may carry more
+    # Digest is execution evidence for managed Skills; other probe internals
+    # stay transient.
     result = {"status": result["status"], "checked": result.get("checked", ""),
-              "detail": str(result.get("detail", ""))[:DETAIL_LIMIT]}
+              "detail": str(result.get("detail", ""))[:DETAIL_LIMIT],
+              **({"digest": result["digest"]} if result.get("digest") else {})}
     config["test"] = {**result, "at": now()}
     db.write("UPDATE resources SET config_json=?, updated_at=? WHERE id=?",
              (json.dumps(config), now(), resource_id))
@@ -376,19 +379,40 @@ def _git_ls_remote(url: str) -> dict[str, Any]:
 
 
 def _test_skill(config: dict[str, Any]) -> dict[str, Any]:
+    from .skill_supply import digest_path, effective_path, normalise_digest
+
     source = (config.get("skill_source") or "").strip()
     if not source:
         return {"status": "failed", "checked": "skill_source",
                 "detail": "no skill source configured"}
-    if source.startswith(("http://", "https://", "git@")):
+    if source.startswith(("http://", "https://", "git@")) and not config.get("skill_target"):
         return _git_ls_remote(source)
-    path = Path(source).expanduser()
-    exists = path.exists()
-    return {"status": "ok" if exists else "failed",
-            "checked": f"path {path}",
-            "detail": ("found on the Bastet host" if exists else
-                       "not found on the Bastet host (the path is resolved there, "
-                       "not on your machine)")}
+    path = effective_path(config) or Path(source).expanduser().resolve()
+    if not path.exists():
+        return {"status": "failed", "checked": f"path {path}",
+                "detail": "not found on the Bastet host (source/target paths are "
+                          "resolved there, not on the browser machine)"}
+    actual = digest_path(path)
+    expected = normalise_digest(config.get("skill_digest") or "")
+    if expected and actual != expected:
+        return {"status": "failed", "checked": f"digest {path}", "digest": actual,
+                "detail": f"digest mismatch: expected {expected}, got {actual}"}
+    command = (config.get("health_command") or "").strip()
+    if command:
+        try:
+            proc = subprocess.run(command, shell=True, capture_output=True, text=True,
+                                  timeout=60, cwd=str(path if path.is_dir() else path.parent))
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {"status": "failed", "checked": f"health: {command}",
+                    "digest": actual, "detail": f"{type(exc).__name__}: {exc}"}
+        output = ((proc.stdout or "") + (proc.stderr or "")).strip()[-800:]
+        if proc.returncode:
+            return {"status": "failed", "checked": f"health: {command}",
+                    "digest": actual,
+                    "detail": f"health command exited {proc.returncode}: {output}"}
+    return {"status": "ok", "checked": f"path/digest/health {path}",
+            "digest": actual,
+            "detail": f"installed Skill is healthy; digest {actual}"}
 
 
 # ---- MCP: speak the protocol ------------------------------------------------------

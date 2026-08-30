@@ -25,7 +25,9 @@ KINDS: list[dict[str, Any]] = [
     {"id": "api", "group": "tool", "auth": "required",
      "fields": ["endpoint", "auth_header", "secret"]},
     {"id": "skill", "group": "asset", "auth": "none",
-     "fields": ["skill_source", "install_command"]},
+     "fields": ["skill_id", "skill_version", "skill_source", "skill_target",
+                "skill_digest", "compatible_executors", "install_command",
+                "health_command"]},
     {"id": "git", "group": "asset", "auth": "optional",
      "fields": ["git_provider", "endpoint", "secret"]},
     {"id": "image", "group": "media", "auth": "required",
@@ -50,7 +52,9 @@ BY_ID = {k["id"]: k for k in KINDS}
 # config keys that are plain strings (validated, stored verbatim)
 CONFIG_FIELDS = {"default_model", "mcp_transport", "mcp_command", "mcp_url",
                  "mcp_secret_env", "install_command", "skill_source",
-                 "git_provider", "auth_header"}
+                 "skill_id", "skill_version", "skill_target", "skill_digest",
+                 "compatible_executors", "health_command", "git_provider",
+                 "auth_header"}
 
 MCP_TRANSPORTS = ("stdio", "http")
 GIT_PROVIDERS = ("github", "gitlab", "custom")
@@ -118,8 +122,20 @@ def validate(kind: str, endpoint: str | None, secret_ref: str | None,
             problems.append("endpoint-missing")
         elif base_endpoint(endpoint)[1]:
             problems.append("endpoint-is-operation-url")
-    if kind == "skill" and not config.get("skill_source"):
-        problems.append("skill-source-missing")
+    if kind == "skill":
+        if not config.get("skill_source"):
+            problems.append("skill-source-missing")
+        # Declaring an id opts into schedulable Skill semantics.  The complete
+        # supply contract is required so admission never guesses.
+        if config.get("skill_id"):
+            for key, problem in (("skill_version", "skill-version-missing"),
+                                 ("skill_target", "skill-target-missing"),
+                                 ("skill_digest", "skill-digest-missing"),
+                                 ("compatible_executors",
+                                  "skill-compatible-executors-missing"),
+                                 ("install_command", "skill-install-command-missing")):
+                if not config.get(key):
+                    problems.append(problem)
     if kind == "git":
         provider = config.get("git_provider") or "custom"
         if provider not in GIT_PROVIDERS:

@@ -12,9 +12,10 @@ type Catalog = { groups: string[]; kinds: KindSpec[];
                  enums: Record<string, string[]> };
 type Scope = { grant_id: string; scope_type: string; scope_id: string };
 type Install = { status: string; at: string | null; exit_code: number | null;
-                 command: string; log: string };
+                 command: string; log: string; digest: string; target: string;
+                 version: string };
 type TestState = { status: string; at: string | null; checked: string;
-                   detail: string };
+                   detail: string; digest: string };
 type Resource = {
   id: string; kind: string; name: string; endpoint: string | null;
   api_flavor: string | null; enabled: number; secret_ref: string;
@@ -400,8 +401,14 @@ function ResourceForm({ draft, setDraft, catalog, secrets, projects, teams, edit
         {fields.includes("mcp_command") && transport === "stdio"
           && text("mcp_command", true)}
         {fields.includes("mcp_url") && transport === "http" && text("mcp_url", true)}
+        {fields.includes("skill_id") && text("skill_id")}
+        {fields.includes("skill_version") && text("skill_version")}
         {fields.includes("skill_source") && text("skill_source", true)}
+        {fields.includes("skill_target") && text("skill_target", true)}
+        {fields.includes("skill_digest") && text("skill_digest", true)}
+        {fields.includes("compatible_executors") && text("compatible_executors", true)}
         {fields.includes("install_command") && text("install_command", true)}
+        {fields.includes("health_command") && text("health_command", true)}
       </div>
 
       {fields.includes("secret") && (
@@ -512,6 +519,9 @@ function InstallPanel({ resource, isAdmin, busy, onInstall, t }: {
       {state.command
         ? <code className="detail">{state.command}</code>
         : <span className="muted">{t("res.field.install_command")}: —</span>}
+      {state.version && <span className="card-meta">v{state.version}</span>}
+      {state.target && <code className="detail">{state.target}</code>}
+      {state.digest && <code className="detail">{state.digest}</code>}
       {isAdmin && state.command && (
         <button className="ghost" disabled={busy} onClick={onInstall}>
           {busy ? t("res.installing")

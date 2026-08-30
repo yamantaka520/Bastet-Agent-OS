@@ -39,6 +39,12 @@ def test_missing_model_api_key_is_non_retryable_executor_configuration():
     ) == "executor_unconfigured:llm_credentials"
 
 
+def test_skill_preflight_classification_is_non_retryable():
+    assert caps.classify_failure(
+        "capability_unavailable: skill:slides via resource-pool: not installed"
+    ) == "capability_unavailable:skill:slides"
+
+
 def test_trusted_gate_marks_browser_launch_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
         a[0], 133, "", "Chrome Crashpad setsockopt: Operation not permitted SIGTRAP"))
@@ -70,6 +76,21 @@ async def test_missing_preflight_blocks_before_agent_without_spending_rework(
                       "AND target_id=?", (job_id,))
     room = seeded.one("SELECT content FROM room_messages ORDER BY rowid DESC LIMIT 1")
     assert room and "停止原路重跑" in room["content"]
+
+
+@pytest.mark.asyncio
+async def test_missing_managed_skill_creates_explicit_supply_block(orch, seeded):
+    add_template(seeded, "skill-needed", [{"name": "build", "gate": "auto",
+                                            "max_retries": 2,
+                                            "requires": ["skill:slides"]}])
+    job_id = orch.dispatch(req(template_id="skill-needed"))
+    await orch.wait_idle()
+
+    job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+    assert (job["status"], job["rework_count"]) == ("blocked", 0)
+    assert not SCRIPT
+    assert seeded.one("SELECT id FROM audit_log WHERE action='skill.supply_required' "
+                      "AND target_id=?", (job_id,))
 
 
 @pytest.mark.asyncio

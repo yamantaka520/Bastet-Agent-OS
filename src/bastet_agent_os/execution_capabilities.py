@@ -56,8 +56,12 @@ def classify_failure(text: str) -> str:
     if ("no api key found for the selected model" in lowered
             or ("log into a provider" in lowered and "api key" in lowered)):
         return "executor_unconfigured:llm_credentials"
-    if "capability_unavailable" in lowered and "browser.playwright" in lowered:
-        return "capability_unavailable:browser.playwright"
+    if "capability_unavailable" in lowered:
+        if "browser.playwright" in lowered:
+            return "capability_unavailable:browser.playwright"
+        if "skill:" in lowered:
+            skill = lowered.split("skill:", 1)[1].split()[0].rstrip(";,.：)")
+            return f"capability_unavailable:skill:{skill}"
     browser_context = any(word in lowered for word in
                           ("chrome", "chromium", "playwright", "crashpad", "browser"))
     if browser_context and any(marker in lowered for marker in _BROWSER_FAILURE_MARKERS):
@@ -99,6 +103,20 @@ def probe(capability: str) -> CapabilityStatus:
 def probe_required(required: list[str]) -> list[CapabilityStatus]:
     """Probe every declared capability once, preserving workflow order."""
     return [probe(item) for item in dict.fromkeys(required)]
+
+
+def resolve_skill_required(db, project_id: str, team_id: str, executor_type: str,
+                           required: list[str]) -> list[CapabilityStatus]:
+    """Resolve project-granted managed Skills without invoking an Agent."""
+    from .skill_supply import capability_id, resolve
+    statuses = []
+    for item in dict.fromkeys(required):
+        if capability_id(item) is None:
+            continue
+        available, provider, detail = resolve(
+            db, project_id, team_id, executor_type, item)
+        statuses.append(CapabilityStatus(item, available, provider, detail))
+    return statuses
 
 
 def catalog() -> list[dict]:

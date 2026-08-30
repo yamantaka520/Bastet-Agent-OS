@@ -89,7 +89,7 @@ def cleanup(home_root: Path | str, run_id: str) -> None:
 
 
 def build(db, home_root: Path | str, project_id: str, team_id: str,
-          run_id: str, audit_actor: str = "") -> RunAccess:
+          run_id: str, audit_actor: str = "", executor_type: str = "") -> RunAccess:
     access = RunAccess()
     mcp_servers: dict[str, Any] = {}
 
@@ -99,6 +99,11 @@ def build(db, home_root: Path | str, project_id: str, team_id: str,
         kind = row["kind"]
         how: list[str] = []
         secret = _secret_value(db, row["secret_ref"] or "")
+
+        if kind == "skill":
+            from .skill_supply import usable
+            if not usable(config, executor_type):
+                continue
 
         if kind == "git" and _is_ssh_url(row["endpoint"] or ""):
             # SSH repos need a key on disk and a git that will use it; without
@@ -122,9 +127,10 @@ def build(db, home_root: Path | str, project_id: str, team_id: str,
             if config.get("default_model"):
                 access.env[f"{prefix}_MODEL"] = config["default_model"]
                 how.append(f"model `{config['default_model']}`")
-            if config.get("skill_source"):
-                access.env[f"{prefix}_SOURCE"] = config["skill_source"]
-                how.append(f"source `{config['skill_source']}`")
+            skill_path = config.get("skill_target") or config.get("skill_source")
+            if skill_path:
+                access.env[f"{prefix}_SOURCE"] = skill_path
+                how.append(f"source `{skill_path}`")
             if kind == "api" and config.get("auth_header"):
                 access.env[f"{prefix}_AUTH_HEADER"] = config["auth_header"]
                 how.append(f"auth header `{config['auth_header']}`")

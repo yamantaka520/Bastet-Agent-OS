@@ -17,6 +17,7 @@ from bastet_agent_os import resource_access, resource_install, resource_kinds
 from bastet_agent_os.config import Home
 from bastet_agent_os.db import Db, now
 from bastet_agent_os.server import create_app
+from bastet_agent_os.skill_supply import digest_path
 
 
 @pytest.fixture
@@ -170,6 +171,80 @@ def test_install_never_happens_implicitly(client, tmp_path):
 
 def test_install_state_starts_absent():
     assert resource_install.state_of({})["status"] == "absent"
+
+
+def test_managed_skill_install_verifies_target_digest_and_health(client, tmp_path):
+    target = tmp_path / "installed-skill"
+    target.mkdir()
+    (target / "SKILL.md").write_text("# verified\n")
+    expected = digest_path(target)
+    rid = client.post("/api/resources", json={
+        "name": "verified skill", "kind": "skill", "scope_type": "global",
+        "config": {"skill_id": "docs", "skill_version": "1.2.0",
+                   "skill_source": str(target), "skill_target": str(target),
+                   "skill_digest": expected, "compatible_executors": "fake,claude-code",
+                   "install_command": "true",
+                   "health_command": "test -s SKILL.md"}}).json()["id"]
+
+    state = client.post(f"/api/resources/{rid}/install").json()
+    assert state["status"] == "installed"
+    assert state["digest"] == expected and state["version"] == "1.2.0"
+    row = next(r for r in client.get("/api/resources").json() if r["id"] == rid)
+    assert row["test"]["status"] == "ok" and row["test"]["digest"] == expected
+
+
+def test_managed_skill_digest_mismatch_fails_install(client, tmp_path):
+    target = tmp_path / "tampered-skill"
+    target.mkdir()
+    (target / "SKILL.md").write_text("tampered")
+    rid = client.post("/api/resources", json={
+        "name": "tampered skill", "kind": "skill", "scope_type": "global",
+        "config": {"skill_id": "unsafe", "skill_version": "1",
+                   "skill_source": str(target), "skill_target": str(target),
+                   "skill_digest": "sha256:" + "0" * 64,
+                   "compatible_executors": "*", "install_command": "true"}
+    }).json()["id"]
+    state = client.post(f"/api/resources/{rid}/install").json()
+    assert state["status"] == "failed"
+    assert "digest mismatch" in state["log"]
+
+
+def test_unhealthy_managed_skill_is_not_exposed(client, tmp_path):
+    target = tmp_path / "unhealthy"
+    target.mkdir()
+    rid = client.post("/api/resources", json={
+        "name": "not ready", "kind": "skill", "scope_type": "global",
+        "config": {"skill_id": "not-ready", "skill_version": "1",
+                   "skill_source": str(target), "skill_target": str(target),
+                   "skill_digest": digest_path(target),
+                   "compatible_executors": "fake", "install_command": "false"}
+    }).json()["id"]
+    db = Db(tmp_path / "home" / "bastet.db")
+    try:
+        access = resource_access.build(db, tmp_path / "home", "proj1", "team1",
+                                       "skill-run", executor_type="fake")
+        assert rid not in {item["id"] for item in access.manifest}
+    finally:
+        db.close()
+
+
+def test_editing_managed_skill_contract_invalidates_receipts(client, tmp_path):
+    target = tmp_path / "mutable-skill"
+    target.mkdir()
+    (target / "SKILL.md").write_text("v1")
+    rid = client.post("/api/resources", json={
+        "name": "mutable", "kind": "skill", "scope_type": "global",
+        "config": {"skill_id": "mutable", "skill_version": "1",
+                   "skill_source": str(target), "skill_target": str(target),
+                   "skill_digest": digest_path(target),
+                   "compatible_executors": "*", "install_command": "true"}
+    }).json()["id"]
+    assert client.post(f"/api/resources/{rid}/install").json()["status"] == "installed"
+
+    row = client.put(f"/api/resources/{rid}", json={
+        "config": {"skill_version": "2"}}).json()
+    assert row["install"]["status"] == "absent"
+    assert row["test"]["status"] == "unknown"
 
 
 # ---- project attach / detach ------------------------------------------------------

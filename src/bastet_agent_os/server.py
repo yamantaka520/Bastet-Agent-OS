@@ -1894,6 +1894,7 @@ def create_app(home: Home) -> FastAPI:
         if row is None:
             raise HTTPException(status_code=404, detail="resource not found")
         config = json.loads(row["config_json"] or "{}")
+        old_config = dict(config)
         if r.config is not None:
             try:
                 secrets_store.reject_secrets_in_config(r.config)
@@ -1922,6 +1923,19 @@ def create_app(home: Home) -> FastAPI:
                     status_code=400,
                     detail=f"cannot reclassify to {r.kind}: {', '.join(problems)}")
             kind = r.kind
+        # An install/health receipt proves one exact Skill contract. Editing
+        # any load-bearing field invalidates it; otherwise changing target or
+        # digest after a green check could bypass admission.
+        skill_contract_fields = {
+            "skill_id", "skill_version", "skill_source", "skill_target",
+            "skill_digest", "compatible_executors", "install_command",
+            "health_command",
+        }
+        if kind == "skill" and any(
+                old_config.get(key) != config.get(key)
+                for key in skill_contract_fields):
+            config.pop("install", None)
+            config.pop("test", None)
         db.write("UPDATE resources SET name=?, kind=?, endpoint=?, api_flavor=?, "
                  "secret_ref=?, config_json=?, updated_at=? WHERE id=?",
                  (r.name or row["name"], kind,

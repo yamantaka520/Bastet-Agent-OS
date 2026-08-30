@@ -86,6 +86,22 @@ snapshot. Project-bound channels reject cross-project queries and notifications.
 Parallel human gates use run-bound callback tokens so each Telegram approval names
 one exact stage.
 
+## Implemented Skill supply contract
+
+`skill:<id>` is now a schedulable workflow requirement rather than prompt text.
+A managed Skill resource declares its stable id, version, source, install target,
+expected SHA-256, compatible executors, explicit admin-run install command and an
+optional health command. Installation is successful only after the target exists,
+its deterministic file/tree digest matches and the health command passes; those
+receipts persist with the resource. Project grants determine visibility.
+
+Before an Agent starts, stage admission resolves every required Skill against an
+enabled, granted, installed, healthy and executor-compatible resource. A miss
+creates a durable `skill.supply_required` block and Telegram instruction without
+running the Agent or consuming rework. Only verified managed Skills are exposed to
+an executor. Legacy source-only Skill resources remain compatible as prompt assets,
+but cannot satisfy a workflow capability contract.
+
 ## Target model
 
 ### Planning round
@@ -158,13 +174,14 @@ integration delivery.
    node starts, its receiver reviews the latest handoff from every dependency;
    source and receiver then alternate for at most five durable exchanges,
    resulting in acceptance, predecessor rework, or human ruling.
-5. **Evidence/delivery (typed matrix implemented, delivery hardening pending):**
+5. **Evidence/delivery (implemented):**
    every built-in family declares required evidence dimensions and assigns each
    dimension to a non-auto gate. Job detail exposes the frozen stage, gate,
    verdict, run and commit for every evidence row. Mandatory target-main and
-   remote receipts still require the next delivery-contract hardening slice.
-6. **Experience:** graph UI, frozen/intake conversations, Telegram progress and
-   grounded questions, Skill install/supply wizard.
+   remote receipts are enforced by the integration and production delivery modes.
+6. **Experience (implemented foundation):** graph UI, frozen/intake conversations,
+   Telegram progress and grounded questions, verified Skill install/supply form
+   and stage admission.
 
 The first slice also removes the whole-chat single-card dispatch API (HTTP 410),
 removes project-page PM decomposition, gates chat decomposition on a `proposed`
@@ -188,7 +205,12 @@ migrates all eight built-in families to explicit DAGs, separates system-analysis
 UX, UI, visual-art, implementation, integration, security and release roles in
 development work, and adds typed evidence contracts plus the live job evidence
 matrix. Graph gate rejection now performs bounded source-subgraph rework while
-preserving passed siblings. Mandatory main/remote delivery receipts remain pending.
+preserving passed siblings. The eighth slice enforces integration/production
+delivery with trusted candidate gates and remote target receipts. The ninth adds
+Telegram graph progress, grounded `/job` and `/ask`, and run-bound approvals. The
+tenth makes managed Skills installable, digest/health verified and resolvable as
+`skill:<id>` stage admission contracts; missing supply blocks without consuming
+Agent time or rework.
 
 No phase is shipped solely from unit tests. It needs migration, restart and race
 tests, a real multi-branch rehearsal, and an end-to-end receipt proving the target

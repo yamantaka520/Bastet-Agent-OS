@@ -2210,8 +2210,19 @@ class Orchestrator:
 
         capability_statuses = []
         if stage.requires:
-            from .execution_capabilities import CapabilityStatus, probe_required
-            capability_statuses = await asyncio.to_thread(probe_required, stage.requires)
+            from .execution_capabilities import (
+                CapabilityStatus,
+                probe_required,
+                resolve_skill_required,
+            )
+            host_required = [item for item in stage.requires
+                             if not item.startswith("skill:")]
+            capability_statuses = await asyncio.to_thread(
+                probe_required, host_required)
+            capability_statuses += await asyncio.to_thread(
+                resolve_skill_required, self.db, job["project_id"],
+                self._project_team(job["project_id"]), agent["executor_type"],
+                stage.requires)
             # A host capability is useful only when the workflow gives Bastet
             # an operator-controlled command to execute. Merely seeing Chrome
             # on the host must never be misrepresented as access inside an LLM
@@ -2276,7 +2287,7 @@ class Orchestrator:
             access = resource_access.build(
                 self.db, self.home.root, job["project_id"],
                 self._project_team(job["project_id"]), run_id,
-                audit_actor=f"run:{run_id}")
+                audit_actor=f"run:{run_id}", executor_type=agent["executor_type"])
             extra_env.update(access.env)
             account_id = agent["account_id"] if "account_id" in agent.keys() else None
             if account_id:
@@ -3065,6 +3076,13 @@ class Orchestrator:
         self.db.audit("orchestrator", "capability.unavailable", "job", job["id"],
                       {"stage": stage.name, "capability": capability,
                        "detail": detail[:1200]})
+        if kind.startswith("capability_unavailable:skill:"):
+            self.db.audit("orchestrator", "skill.supply_required", "job", job["id"],
+                          {"stage": stage.name, "capability": capability,
+                           "detail": detail[:1200]})
+            self._emit("skill.supply_required", job["project_id"], job_id=job["id"],
+                       title=job["title"], stage=stage.name,
+                       capability=capability, detail=detail[:1000])
         collaboration.post(
             self.db, job["project_id"], author_type="system", author_id="orchestrator",
             kind="escalation",
