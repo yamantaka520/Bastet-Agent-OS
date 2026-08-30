@@ -207,37 +207,48 @@ def test_image_is_attached_as_a_data_url_for_openai_wire(llm):
                for b in blocks)
 
 
-# ---- acting: dispatch + approve ----------------------------------------------------
+# ---- acting: planning graph + approve ---------------------------------------------
 
-def test_chat_can_dispatch_a_job_for_its_project(llm, monkeypatch):
+def test_whole_chat_single_card_dispatch_is_removed(llm):
     c, _, rid, _ = llm
     session = c.post("/api/chat/sessions", json={
         "scope_type": "project", "scope_id": "proj1", "responder_kind": "resource",
         "responder_id": rid}).json()["id"]
     c.post(f"/api/chat/sessions/{session}/messages", json={"content": "做登入頁"})
 
-    calls = {}
-    from bastet_agent_os.orchestrator import Orchestrator
-    monkeypatch.setattr(Orchestrator, "dispatch",
-                        lambda self, actor, req: calls.setdefault("req", req) and "job_x"
-                        or "job_x")
     out = c.post(f"/api/chat/sessions/{session}/dispatch",
-                 json={"agent_id": "ag1", "title": "登入頁"}).json()
-    assert out["job_id"] == "job_x"
-    assert calls["req"].project_id == "proj1"       # the session's real project
-    assert "做登入頁" in calls["req"].prompt        # spec built from the discussion
-
-    messages = c.get(f"/api/chat/sessions/{session}/messages").json()["messages"]
-    assert messages[-1]["role"] == "system" and messages[-1]["meta"]["job_id"] == "job_x"
+                 json={"agent_id": "ag1", "title": "登入頁"})
+    assert out.status_code == 410 and "任務圖" in out.json()["detail"]
 
 
-def test_global_session_cannot_dispatch(llm):
+def test_dispatch_removal_also_applies_to_global_session(llm):
     c, _, rid, _ = llm
     session = c.post("/api/chat/sessions", json={
         "scope_type": "global", "responder_kind": "resource",
         "responder_id": rid}).json()["id"]
     assert c.post(f"/api/chat/sessions/{session}/dispatch",
-                  json={"agent_id": "ag1"}).status_code == 400
+                  json={"agent_id": "ag1"}).status_code == 410
+
+
+def test_planning_round_api_gates_confirmation_and_freezes_chat(client):
+    c, _ = client
+    session = c.post("/api/chat/sessions", json={
+        "scope_type": "project", "scope_id": "proj1",
+        "responder_kind": "agent", "responder_id": "ag1"}).json()["id"]
+    round_id = c.post(f"/api/chat/sessions/{session}/planning-round").json()["id"]
+    tasks = [{"id": "ui", "title": "UI", "spec": "build", "needs": []}]
+    blocked = c.put("/api/projects/proj1/tasks", json={"tasks": tasks})
+    assert blocked.status_code == 400 and "方案" in blocked.json()["detail"]
+    assert c.put(f"/api/planning-rounds/{round_id}/proposal", json={
+        "solution": "approved solution", "negotiation": [{"result": "accept"}]
+    }).status_code == 200
+    assert c.put("/api/projects/proj1/tasks", json={"tasks": tasks}).status_code == 200
+    body = c.get(f"/api/chat/sessions/{session}/messages").json()
+    assert body["session"]["state"] == "frozen"
+    assert body["planning"]["round"]["state"] == "frozen"
+    denied = c.post(f"/api/chat/sessions/{session}/messages",
+                    json={"content": "late request"})
+    assert denied.status_code == 400 and "等待區" in denied.json()["detail"]
 
 
 def test_blocked_gates_surface_in_the_session(client, tmp_path):

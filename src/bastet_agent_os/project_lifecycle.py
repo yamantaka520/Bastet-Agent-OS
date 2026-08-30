@@ -19,6 +19,7 @@ in the UI is this status — never a guess derived from job rows.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .db import now
@@ -87,6 +88,18 @@ def apply(db, project_id: str, transition: str, actor: str = "",
             f"{transition} needs status in {list(froms)}, project is {current!r}")
     db.write("UPDATE projects SET status=?, updated_at=? WHERE id=?",
              (target, now(), project_id))
+    # Planning rounds follow the project lifecycle but remain separate records:
+    # the frozen conversation is never reopened or rewritten.
+    if transition == "start":
+        db.write("UPDATE planning_rounds SET state='executing', updated_at=? "
+                 "WHERE project_id=? AND state='frozen'",
+                 (now(), project_id))
+    elif transition == "close":
+        db.write("UPDATE planning_rounds SET state='accepted', accepted_at=?, "
+                 "updated_at=? WHERE id=(SELECT id FROM planning_rounds "
+                 "WHERE project_id=? ORDER BY ordinal DESC LIMIT 1) "
+                 "AND state IN ('frozen','executing')",
+                 (now(), now(), project_id))
     db.audit(actor or "system", f"project.{transition}", "project", project_id,
              {"from": current, "to": target, **(detail or {})})
     return target
@@ -104,6 +117,81 @@ def task_plan(db, project_id: str) -> dict[str, Any]:
             "source": plan.get("source") or {}}
 
 
+def _task_id(value: str, index: int, used: set[str]) -> str:
+    """Return a stable, human-readable node id for old and new plans."""
+    base = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+    base = base[:48] or f"task-{index + 1}"
+    candidate, suffix = base, 2
+    while candidate in used:
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
+def normalize_task_graph(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize and validate a project task DAG.
+
+    Legacy ordered plans have no ids or dependencies. They remain deliberately
+    sequential by receiving an edge from each task to its predecessor. A new
+    plan that declares any ``needs`` field is graph-native: omitted ``needs``
+    means that node is a root and may run in parallel.
+    """
+    if not isinstance(tasks, list):
+        raise LifecycleError("task plan must be a list")
+    graph_native = any("needs" in task for task in tasks if isinstance(task, dict))
+    used: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for index, raw in enumerate(tasks):
+        if not isinstance(raw, dict):
+            raise LifecycleError(f"task {index + 1} must be an object")
+        item = dict(raw)
+        node_id = str(item.get("id") or "").strip()
+        if node_id:
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", node_id):
+                raise LifecycleError(f"task {index + 1} has invalid id {node_id!r}")
+            if node_id in used:
+                raise LifecycleError(f"duplicate task id {node_id!r}")
+            used.add(node_id)
+        else:
+            node_id = _task_id(str(item.get("title") or ""), index, used)
+        needs = item.get("needs")
+        if needs is None:
+            needs = [] if graph_native or index == 0 else [normalized[index - 1]["id"]]
+        if not isinstance(needs, list) or any(not isinstance(dep, str) for dep in needs):
+            raise LifecycleError(f"task {node_id!r}: needs must be a list of task ids")
+        item["id"] = node_id
+        item["needs"] = list(dict.fromkeys(dep.strip() for dep in needs if dep.strip()))
+        normalized.append(item)
+
+    ids = {task["id"] for task in normalized}
+    for task in normalized:
+        unknown = [dep for dep in task["needs"] if dep not in ids]
+        if unknown:
+            raise LifecycleError(f"task {task['id']!r}: unknown dependencies {unknown}")
+        if task["id"] in task["needs"]:
+            raise LifecycleError(f"task {task['id']!r}: cannot depend on itself")
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    by_id = {task["id"]: task for task in normalized}
+
+    def visit(node_id: str) -> None:
+        if node_id in visiting:
+            raise LifecycleError(f"task graph contains a cycle at {node_id!r}")
+        if node_id in visited:
+            return
+        visiting.add(node_id)
+        for dependency in by_id[node_id]["needs"]:
+            visit(dependency)
+        visiting.remove(node_id)
+        visited.add(node_id)
+
+    for node_id in by_id:
+        visit(node_id)
+    return normalized
+
+
 def save_task_plan(db, project_id: str, tasks: list[dict[str, Any]], by: str,
                    confirmed: bool = False,
                    source: dict[str, Any] | None = None) -> None:
@@ -112,6 +200,7 @@ def save_task_plan(db, project_id: str, tasks: list[dict[str, Any]], by: str,
     row = db.one("SELECT config_json FROM projects WHERE id=?", (project_id,))
     config = json.loads(row["config_json"] or "{}")
     previous = config.get("task_plan") or {}
+    tasks = normalize_task_graph(tasks)
     config["task_plan"] = {"tasks": tasks, "at": now(), "by": by,
                            "confirmed": confirmed,
                            "source": source if source is not None

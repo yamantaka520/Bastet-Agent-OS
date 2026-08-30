@@ -1,4 +1,4 @@
-"""Executing a project: PM decomposition, then task-by-task dispatch.
+"""Executing a project: PM decomposition, then dependency-aware dispatch.
 
 Two halves of the same idea. First a **project-manager agent** turns the agreed
 plan into concrete tasks — it proposes, a human confirms, nothing runs before
@@ -6,11 +6,11 @@ that. Then the **runner** walks the confirmed list: dispatch a task, let the
 project's workflow drive it through its stages and role-assigned agents, wait
 for it to settle, take the next one.
 
-Sequential by default (`config_json.max_parallel`, default 1) because that is
-what makes 暫停 and 停止 mean something: pause stops the *next* dispatch and
-leaves the current task to finish; stop cancels what is in flight. A task that
-sits `blocked` is waiting for a human at a gate — the runner keeps waiting, it
-never approves anything itself.
+Legacy plans remain sequential. Graph-native plans declare stable task ids and
+``needs`` edges; every ready node may run concurrently up to
+``config_json.max_parallel``. Pause stops new claims and leaves current tasks to
+finish; stop cancels in-flight jobs. A blocked task waits for a human and blocks
+only its descendants, never an independent branch.
 """
 
 from __future__ import annotations
@@ -36,7 +36,8 @@ DECOMPOSE_INSTRUCTIONS = """\
 
 規則：
 - 每個任務要能由一個 agent 在一次工作流中完成，有明確的完成定義
-- 依執行順序排列；前置任務排前面
+- 每個任務必須有穩定、簡短的 id，並用 needs 宣告直接前置任務 id
+- 沒有相依關係的任務 needs 為 []，讓它們可以並行；不要用陣列順序假裝依賴
 - 任務數量控制在 3～12 個之間，不要拆到無法驗收的碎片
 - spec 要寫得讓執行者不必回頭問人：範圍、驗收條件、要動到哪些部分
 - 每個任務必須宣告 delivery：純分析用 none、一般程式工作用 branch、真正上線用
@@ -48,7 +49,7 @@ DECOMPOSE_INSTRUCTIONS = """\
 不要執行指令）。headless 模式無法詢問權限，工具呼叫會被拒絕而讓這次拆分失敗。
 
 只輸出 JSON，格式如下，不要有其他文字：
-{"tasks":[{"title":"任務標題","spec":"完整任務說明與驗收條件","role":"（可留空）建議角色 id","delivery":{"mode":"none|branch|production","version":"production 時必填"}}]}
+{"tasks":[{"id":"stable-id","title":"任務標題","needs":[],"spec":"完整任務說明與驗收條件","role":"（可留空）建議角色 id","delivery":{"mode":"none|branch|production","version":"production 時必填"}}]}
 """
 
 
@@ -149,9 +150,17 @@ def parse_tasks(text: str) -> list[dict[str, Any]]:
             delivery_value = normalize(delivery_value)
         except (TypeError, ValueError) as exc:
             raise PlanError(f"task {title!r} has invalid delivery: {exc}") from exc
-        tasks.append({"title": title[:120], "spec": spec or title,
-                      "role": str(item.get("role") or "").strip(),
-                      "delivery": delivery_value})
+        needs = item.get("needs", [])
+        if not isinstance(needs, list):
+            raise PlanError(f"task {title!r} has invalid needs; expected a list")
+        task = {"title": title[:120], "spec": spec or title,
+                "role": str(item.get("role") or "").strip(),
+                "delivery": delivery_value}
+        if item.get("id"):
+            task["id"] = str(item["id"]).strip()
+        if "needs" in item:
+            task["needs"] = needs
+        tasks.append(task)
     if not tasks:
         raise PlanError("no usable tasks in the decomposition")
     return tasks
@@ -207,7 +216,10 @@ async def decompose(db, home_root, project_id: str, agent_id: str = "",
               "output": (result.summary or "")[:1500]})
     if not result.summary:
         raise PlanError(f"PM agent produced no output (status: {result.status})")
-    fresh = parse_tasks(result.summary)
+    try:
+        fresh = lifecycle.normalize_task_graph(parse_tasks(result.summary))
+    except lifecycle.LifecycleError as exc:
+        raise PlanError(str(exc)) from exc
     # a re-run replaces the *proposal*, not the work already dispatched: losing
     # those rows would cut the plan's link to running jobs
     dispatched = [t for t in lifecycle.task_plan(db, project_id)["tasks"]
@@ -344,30 +356,99 @@ class ProjectRunner:
         return {"jobs_cancelled": cancelled}
 
     async def _loop(self, project_id: str, agent_id: str, actor: str) -> None:
-        plan = lifecycle.task_plan(self.db, project_id)
-        for index, task in enumerate(plan["tasks"]):
-            status = lifecycle.status_of(self.db, project_id)
-            if status != lifecycle.RUNNING:
-                log.info("project %s left running (%s) — runner stops", project_id, status)
+        while lifecycle.status_of(self.db, project_id) == lifecycle.RUNNING:
+            plan = lifecycle.task_plan(self.db, project_id)
+            tasks = lifecycle.normalize_task_graph(plan["tasks"])
+            states = self._task_states(tasks)
+            if states and all(state in TERMINAL for state in states.values()):
+                self._settle(project_id, actor or "runner")
                 return
-            if task.get("job_id"):
-                if await self._await_job(project_id, task["job_id"]) is None:
-                    return
+
+            max_parallel = self._max_parallel(project_id)
+            active = sum(state in ("open", "in_progress") for state in states.values())
+            capacity = max(0, max_parallel - active)
+            dispatched = 0
+            for index, task in enumerate(tasks):
+                if capacity <= 0:
+                    break
+                if task.get("job_id"):
+                    continue
+                dependency_states = [states.get(dep, "missing") for dep in task["needs"]]
+                if any(state != "done" for state in dependency_states):
+                    continue
+                agent = self._agent_for(project_id, task, agent_id)
+                if agent is None:
+                    self.db.audit(actor or "runner", "project.task.skipped", "project",
+                                  project_id, {"task": task.get("title"),
+                                               "task_id": task["id"],
+                                               "reason": "no agent available"})
+                    continue
+                job_id = self.orch.dispatch(actor=actor or "runner", req=DispatchRequest(
+                    project_id=project_id, prompt=task.get("spec") or task["title"],
+                    title=task["title"], agent_id=agent, origin="runner",
+                    delivery=task.get("delivery")))
+                self._remember_job(project_id, index, job_id)
+                for dependency in task["needs"]:
+                    dependency_job = next((candidate.get("job_id") for candidate in tasks
+                                           if candidate["id"] == dependency), None)
+                    if dependency_job:
+                        self.db.write(
+                            "INSERT OR IGNORE INTO job_deps(job_id, depends_on_job_id, effect) "
+                            "VALUES(?,?,'block')", (job_id, dependency_job))
+                states[task["id"]] = "open"
+                capacity -= 1
+                dispatched += 1
+
+            if dispatched:
+                await asyncio.sleep(0)
                 continue
-            agent = self._agent_for(project_id, task, agent_id)
-            if agent is None:
-                self.db.audit(actor or "runner", "project.task.skipped", "project",
-                              project_id, {"task": task.get("title"),
-                                           "reason": "no agent available"})
-                continue
-            job_id = self.orch.dispatch(actor=actor or "runner", req=DispatchRequest(
-                project_id=project_id, prompt=task.get("spec") or task["title"],
-                title=task["title"], agent_id=agent, origin="runner",
-                delivery=task.get("delivery")))
-            self._remember_job(project_id, index, job_id)
-            if await self._await_job(project_id, job_id) is None:
+
+            # No node was claimable. This is expected while jobs execute or a
+            # human gate is blocked. If only cancelled/missing prerequisites
+            # remain, stop honestly instead of spinning forever.
+            undispatched = [task for task in tasks if not task.get("job_id")]
+            permanently_blocked = [task for task in undispatched if any(
+                states.get(dep) in ("cancelled", "missing") for dep in task["needs"])]
+            ready_without_agent = [task for task in undispatched
+                                   if all(states.get(dep) == "done"
+                                          for dep in task["needs"])
+                                   and self._agent_for(project_id, task, agent_id) is None]
+            if ready_without_agent and not any(
+                    state in ("open", "in_progress", "blocked")
+                    for state in states.values()):
+                self._settle(project_id, actor or "runner")
                 return
-        self._settle(project_id, actor or "runner")
+            if undispatched and len(permanently_blocked) == len(undispatched) and not any(
+                    state in ("open", "in_progress", "blocked")
+                    for state in states.values()):
+                self.db.audit(actor or "runner", "project.graph.blocked", "project",
+                              project_id, {"tasks": [task["id"]
+                                                     for task in permanently_blocked]})
+                lifecycle.apply(self.db, project_id, "stop", actor or "runner",
+                                {"reason": "task dependencies failed or disappeared",
+                                 "tasks": [task["id"]
+                                           for task in permanently_blocked]})
+                return
+            await asyncio.sleep(POLL_S)
+
+    def _max_parallel(self, project_id: str) -> int:
+        row = self.db.one("SELECT config_json FROM projects WHERE id=?", (project_id,))
+        config = json.loads(row["config_json"] or "{}") if row else {}
+        try:
+            return max(1, min(32, int(config.get("max_parallel", 1))))
+        except (TypeError, ValueError):
+            return 1
+
+    def _task_states(self, tasks: list[dict[str, Any]]) -> dict[str, str]:
+        states: dict[str, str] = {}
+        for task in tasks:
+            job_id = task.get("job_id")
+            if not job_id:
+                states[task["id"]] = "pending"
+                continue
+            row = self.db.one("SELECT status FROM jobs WHERE id=?", (job_id,))
+            states[task["id"]] = row["status"] if row else "missing"
+        return states
 
     def _settle(self, project_id: str, actor: str) -> None:
         """The loop ran out of tasks. Either everything finished (→ maintenance,

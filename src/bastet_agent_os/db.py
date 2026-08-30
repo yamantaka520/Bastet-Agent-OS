@@ -282,6 +282,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   responder_kind TEXT NOT NULL,    -- agent|resource
   responder_id TEXT NOT NULL,
   channel TEXT NOT NULL DEFAULT 'web',   -- web|telegram
+  state TEXT NOT NULL DEFAULT 'open',    -- open|frozen|intake
+  planning_round_id TEXT,
   config_json TEXT NOT NULL DEFAULT '{}',
   created_by TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
@@ -297,6 +299,43 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   meta_json TEXT NOT NULL DEFAULT '{}',   -- model, usage, cost, job_id …
   at TEXT NOT NULL
 );
+
+-- Project planning is a sequence of immutable rounds. A round owns the source
+-- conversation, the PM/system-analysis conclusion, and the task graph snapshot.
+CREATE TABLE IF NOT EXISTS planning_rounds (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  ordinal INTEGER NOT NULL,
+  session_id TEXT REFERENCES chat_sessions(id),
+  state TEXT NOT NULL DEFAULT 'discovery',
+  solution_md TEXT NOT NULL DEFAULT '',
+  final_summary_md TEXT NOT NULL DEFAULT '',
+  negotiation_json TEXT NOT NULL DEFAULT '[]',
+  task_graph_json TEXT NOT NULL DEFAULT '[]',
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  approved_at TEXT,
+  accepted_at TEXT,
+  UNIQUE(project_id, ordinal),
+  UNIQUE(session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_planning_rounds_project
+  ON planning_rounds(project_id, ordinal);
+
+CREATE TABLE IF NOT EXISTS planning_intake (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  kind TEXT NOT NULL DEFAULT 'idea',       -- defect|suggestion|idea
+  content TEXT NOT NULL,
+  attachments_json TEXT NOT NULL DEFAULT '[]',
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  consumed_by_round_id TEXT REFERENCES planning_rounds(id),
+  consumed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_planning_intake_project
+  ON planning_intake(project_id, consumed_at, created_at);
 
 -- One durable internal room per project.  This is agent-to-agent operational
 -- communication, distinct from chat_sessions (the human input channel).
@@ -510,6 +549,14 @@ class Db:
             channel_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(channels)")}
             if "name" not in channel_cols:
                 self._conn.execute("ALTER TABLE channels ADD COLUMN name TEXT")
+            chat_cols = {r[1] for r in
+                         self._conn.execute("PRAGMA table_info(chat_sessions)")}
+            if "state" not in chat_cols:
+                self._conn.execute("ALTER TABLE chat_sessions ADD COLUMN state TEXT "
+                                   "NOT NULL DEFAULT 'open'")
+            if "planning_round_id" not in chat_cols:
+                self._conn.execute(
+                    "ALTER TABLE chat_sessions ADD COLUMN planning_round_id TEXT")
             handoff_cols = {r[1] for r in
                             self._conn.execute("PRAGMA table_info(stage_handoffs)")}
             for col, decl in [

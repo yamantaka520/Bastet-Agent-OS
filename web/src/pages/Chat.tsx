@@ -10,19 +10,21 @@ import { Section, onEnterSubmit, useList, fmtTime } from "../ui";
 type Responder = { kind: string; id: string; label: string; detail: string };
 type Session = { id: string; scope_type: string; scope_id: string; title: string;
                  responder_kind: string; responder_id: string; channel: string;
-                 messages: number; updated_at: string };
+                 messages: number; updated_at: string; state: string;
+                 planning_round_id?: string };
 type Attachment = { id: string; name: string; size: number; mime: string };
 type Message = { id: string; role: string; author: string; content: string;
                  attachments: Attachment[]; meta: Record<string, unknown>;
                  at: string };
 type Pending = { id: string; title: string; stage: string };
 type ProjectRow = { id: string; team_id: string };
-type AgentRow = { id: string; name: string; enabled: number };
+type Planning = { round: null | { id: string; state: string; ordinal: number;
+                                  solution_md: string };
+                  intake: { id: string; kind: string; content: string }[] };
 
 export default function ChatPage(props: { canOperate: boolean; refreshKey: number }) {
   const t = useT();
   const [projects] = useList<ProjectRow>("/api/projects", props.refreshKey);
-  const [agents] = useList<AgentRow>("/api/agents", props.refreshKey);
   const [responders, setResponders] = useState<Responder[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [current, setCurrent] = useState<string>("");
@@ -67,7 +69,7 @@ export default function ChatPage(props: { canOperate: boolean; refreshKey: numbe
           </div>
           <div className="chat-main">
             {current
-              ? <Conversation key={current} sessionId={current} agents={agents}
+              ? <Conversation key={current} sessionId={current}
                               responders={responders} canOperate={props.canOperate}
                               refreshKey={props.refreshKey} t={t}
                               onChanged={loadSessions}
@@ -161,31 +163,33 @@ function NewSession({ projects, responders, onCreated, onError, t }: {
   );
 }
 
-function Conversation({ sessionId, agents, responders, canOperate, refreshKey,
+function Conversation({ sessionId, responders, canOperate, refreshKey,
                         onChanged, onDeleted, t }: {
-  sessionId: string; agents: AgentRow[]; responders: Responder[];
+  sessionId: string; responders: Responder[];
   canOperate: boolean; refreshKey: number; onChanged: () => void;
   onDeleted: () => void; t: T;
 }) {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [pending, setPending] = useState<Pending[]>([]);
+  const [planning, setPlanning] = useState<Planning | null>(null);
+  const [intake, setIntake] = useState("");
   const [busy, setBusy] = useState(false);
   // while the user is mid-message we must not re-render the composer: a WS
   // event arriving during IME composition drops the text being composed
   const typing = useRef(false);
   const [error, setError] = useState("");
-  const [dispatchAgent, setDispatchAgent] = useState("");
-  const [dispatchTitle, setDispatchTitle] = useState("");
   const bottom = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => {
-    api<{ session: Session; messages: Message[]; pending_approvals: Pending[] }>(
+    api<{ session: Session; messages: Message[]; pending_approvals: Pending[];
+          planning: Planning | null }>(
       `/api/chat/sessions/${sessionId}/messages`)
       .then((body) => {
         setSession(body.session);
         setMessages(body.messages);
         setPending(body.pending_approvals);
+        setPlanning(body.planning);
       }).catch((e) => setError(String((e as Error).message)));
   }, [sessionId]);
   useEffect(() => {
@@ -222,16 +226,6 @@ function Conversation({ sessionId, agents, responders, canOperate, refreshKey,
       load();                       // the user's message is kept even on failure
       return false;
     } finally { setBusy(false); }
-  };
-
-  const dispatch = async () => {
-    setError("");
-    try {
-      await post(`/api/chat/sessions/${sessionId}/dispatch`,
-                 { agent_id: dispatchAgent, title: dispatchTitle });
-      setDispatchTitle("");
-      load();
-    } catch (e) { setError(String((e as Error).message)); }
   };
 
   const decide = async (jobId: string, approved: boolean) => {
@@ -327,8 +321,37 @@ function Conversation({ sessionId, agents, responders, canOperate, refreshKey,
 
       {canOperate && (
         <>
-          <Composer busy={busy} onSend={send} onUpload={upload} t={t}
-                    onTypingChange={(active) => { typing.current = active; }} />
+          {session.state !== "frozen" ? (
+            <Composer busy={busy} onSend={send} onUpload={upload} t={t}
+                      onTypingChange={(active) => { typing.current = active; }} />
+          ) : (
+            <div className="chat-pending">
+              <b>{t("chat.roundFrozen")}</b>
+              <p className="muted">{t("chat.roundFrozenHint")}</p>
+              <div className="inline-form">
+                <textarea value={intake} onChange={(e) => setIntake(e.target.value)}
+                          placeholder={t("chat.intakePh")} />
+                <button disabled={!intake.trim()} onClick={async () => {
+                  try {
+                    await post(`/api/projects/${session.scope_id}/planning-intake`,
+                               { kind: "idea", content: intake });
+                    setIntake(""); load();
+                  } catch (e) { setError(String((e as Error).message)); }
+                }}>{t("chat.addIntake")}</button>
+              </div>
+            </div>
+          )}
+
+          {session.scope_type === "project" && !planning?.round && (
+            <div className="chat-dispatch">
+              <button onClick={async () => {
+                try {
+                  await post(`/api/chat/sessions/${sessionId}/planning-round`, {});
+                  load();
+                } catch (e) { setError(String((e as Error).message)); }
+              }}>{t("chat.startRound")}</button>
+            </div>
+          )}
 
           {session.scope_type === "project" && (
             <div className="chat-dispatch">
@@ -346,33 +369,11 @@ function Conversation({ sessionId, agents, responders, canOperate, refreshKey,
                     window.alert(t("chat.decomposed", { n: out.tasks.length }));
                   } catch (e) { setError(String((e as Error).message)); }
                   finally { setBusy(false); }
-                }} disabled={busy}>
+                }} disabled={busy || planning?.round?.state !== "proposed"}>
                   {busy ? t("proj.decomposing") : t("chat.decompose")}</button>
               </div>
-              <p className="muted">{t("chat.decomposeHint")}</p>
-            </div>
-          )}
-
-          {session.scope_type === "project" && (
-            <div className="chat-dispatch">
-              <b>{t("chat.dispatch")}</b>
-              <div className="inline-form">
-                <label className="res-field">
-                  <span>{t("chat.dispatchAgent")}</span>
-                  <select value={dispatchAgent}
-                          onChange={(e) => setDispatchAgent(e.target.value)}>
-                    <option value="">{t("c.pick")}</option>
-                    {agents.filter((a) => a.enabled).map((a) => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <input placeholder={t("chat.dispatchTitlePh")} value={dispatchTitle}
-                       onChange={(e) => setDispatchTitle(e.target.value)} />
-                <button onClick={dispatch} disabled={!dispatchAgent}>
-                  {t("chat.dispatchGo")}</button>
-              </div>
-              <p className="muted">{t("chat.dispatchHint")}</p>
+              <p className="muted">{planning?.round?.state === "proposed"
+                ? t("chat.decomposeHint") : t("chat.decomposeLocked")}</p>
             </div>
           )}
         </>

@@ -22,7 +22,8 @@ type Role = { id: string; label: string };
 type Template = { id: string };
 type PoolResource = { id: string; name: string; kind: string };
 type Delivery = { mode: "none" | "branch" | "production"; version?: string };
-type Task = { title: string; spec: string; role?: string; delivery?: Delivery;
+type Task = { id?: string; title: string; needs?: string[]; spec: string;
+               role?: string; delivery?: Delivery;
                job_id?: string; origin?: string; job_status?: string;
                job_stage?: string; delivery_status?: string };
 type Plan = { tasks: Task[]; confirmed: boolean; by: string; at?: string;
@@ -308,7 +309,7 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
       )}
       <p className="muted">{t("project.assignHint")}</p>
 
-      <TaskPlan projectId={projectId} project={project} agents={agents}
+      <TaskPlan projectId={projectId} project={project}
                 canOperate={canOperate} refreshKey={refreshKey} t={t}
                 onChanged={onChanged} />
 
@@ -419,15 +420,13 @@ function ProjectRoom({ projectId, canOperate, refreshKey, t }: {
 }
 
 /** The PM agent's decomposition: propose → edit → human confirm → runnable. */
-function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChanged,
+function TaskPlan({ projectId, project, canOperate, refreshKey, onChanged,
                     t }: {
-  projectId: string; project: Project; agents: Agent[]; canOperate: boolean;
+  projectId: string; project: Project; canOperate: boolean;
   refreshKey: number; onChanged: () => void; t: T;
 }) {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [pmAgent, setPmAgent] = useState("");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(() => {
@@ -438,18 +437,6 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
       }).catch(() => setPlan(null));
   }, [projectId]);
   useEffect(load, [load, refreshKey]);
-
-  const decompose = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      const out = await post<{ tasks: Task[] }>(
-        `/api/projects/${projectId}/decompose`, { agent_id: pmAgent });
-      setTasks(out.tasks);
-      load();          // pick up provenance + preserved dispatched rows
-    } catch (e) { setError(String((e as Error).message)); }
-    finally { setBusy(false); }
-  };
 
   const confirm = async () => {
     setError("");
@@ -472,25 +459,9 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
     <>
       <h4>{t("proj.tasks")}</h4>
       {error && <p className="error">{error}</p>}
-      {canOperate && (
-        <div className="inline-form">
-          <label className="res-field">
-            <span>{t("proj.pmAgent")}</span>
-            <select value={pmAgent} onChange={(e) => setPmAgent(e.target.value)}>
-              <option value="">pm</option>
-              {agents.filter((a) => a.enabled).map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </label>
-          <button onClick={decompose} disabled={busy}>
-            {busy ? t("proj.decomposing") : t("proj.decompose")}</button>
-          {plan && (plan.confirmed
-            ? <span className="muted">{t("proj.tasksConfirmed")}</span>
-            : !!tasks.length
-              && <span className="danger-text">{t("proj.tasksPending")}</span>)}
-        </div>
-      )}
+      {plan && (plan.confirmed
+        ? <span className="muted">{t("proj.tasksConfirmed")}</span>
+        : !!tasks.length && <span className="danger-text">{t("proj.tasksPending")}</span>)}
       {plan?.stale && (
         <p className="error">{t("proj.planStale",
           { messages: plan.chat?.messages ?? 0 })}</p>
@@ -513,6 +484,9 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
       {tasks.map((task, i) => (
         <div key={i} className="task-row">
           <span className="card-meta">{i + 1}</span>
+          <input value={task.id ?? ""} placeholder="task-id"
+                 disabled={!canOperate || !!task.job_id} style={{ width: "8rem" }}
+                 onChange={(e) => patch(i, "id", e.target.value)} />
           <input value={task.title} placeholder={t("proj.taskTitlePh")}
                  disabled={!canOperate} style={{ width: "14rem" }}
                  onChange={(e) => patch(i, "title", e.target.value)} />
@@ -522,6 +496,11 @@ function TaskPlan({ projectId, project, agents, canOperate, refreshKey, onChange
           <input value={task.role ?? ""} placeholder={t("proj.taskRolePh")}
                  disabled={!canOperate} style={{ width: "9rem" }}
                  onChange={(e) => patch(i, "role", e.target.value)} />
+          <input value={(task.needs ?? []).join(",")} placeholder="needs: id,id"
+                 disabled={!canOperate || !!task.job_id} style={{ width: "11rem" }}
+                 onChange={(e) => setTasks(tasks.map((item, idx) => idx === i
+                   ? { ...item, needs: e.target.value.split(",").map((x) => x.trim())
+                       .filter(Boolean) } : item))} />
           <select value={task.delivery?.mode ?? "branch"}
                   disabled={!canOperate || !!task.job_id}
                   title={t("proj.deliveryMode")}

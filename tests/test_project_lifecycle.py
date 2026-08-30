@@ -99,6 +99,31 @@ def test_parse_tasks_accepts_json_in_prose_and_rejects_prose_only():
         runner_mod.parse_tasks('{"tasks":[{"spec":"no title"}]}')
 
 
+def test_task_graph_is_validated_and_legacy_plans_stay_sequential(proj):
+    lifecycle.save_task_plan(proj, "proj1", [
+        {"title": "A", "spec": "a"}, {"title": "B", "spec": "b"}], by="pm")
+    legacy = lifecycle.task_plan(proj, "proj1")["tasks"]
+    assert legacy[0]["needs"] == []
+    assert legacy[1]["needs"] == [legacy[0]["id"]]
+
+    graph = lifecycle.normalize_task_graph([
+        {"id": "contract", "title": "Contract", "needs": []},
+        {"id": "ui", "title": "UI", "needs": ["contract"]},
+        {"id": "core", "title": "Core", "needs": ["contract"]},
+        {"id": "join", "title": "Join", "needs": ["ui", "core"]},
+    ])
+    assert graph[1]["needs"] == graph[2]["needs"] == ["contract"]
+    with pytest.raises(lifecycle.LifecycleError, match="cycle"):
+        lifecycle.normalize_task_graph([
+            {"id": "a", "title": "A", "needs": ["b"]},
+            {"id": "b", "title": "B", "needs": ["a"]},
+        ])
+    with pytest.raises(lifecycle.LifecycleError, match="unknown dependencies"):
+        lifecycle.normalize_task_graph([
+            {"id": "a", "title": "A", "needs": ["ghost"]},
+        ])
+
+
 async def test_decompose_uses_the_pm_agent_and_stores_an_unconfirmed_plan(orch, proj,
                                                                          tmp_path):
     proj.write("INSERT INTO project_agent_roles(project_id, agent_id, role, preference) "
@@ -176,6 +201,39 @@ async def test_runner_dispatches_the_confirmed_tasks_in_order(runner):
     plan = lifecycle.task_plan(db, "proj1")
     assert all(t.get("job_id") for t in plan["tasks"])
     # all tasks settled → the project is waiting for acceptance
+    assert lifecycle.status_of(db, "proj1") == lifecycle.MAINTENANCE
+
+
+async def test_runner_dispatches_ready_dag_nodes_and_persists_edges(runner):
+    r, _, db = runner
+    project = db.one("SELECT config_json FROM projects WHERE id='proj1'")
+    config = json.loads(project["config_json"] or "{}")
+    config["max_parallel"] = 2
+    db.write("UPDATE projects SET config_json=? WHERE id='proj1'", (json.dumps(config),))
+    lifecycle.save_task_plan(db, "proj1", [
+        {"id": "contract", "title": "Contract", "spec": "contract", "needs": []},
+        {"id": "ui", "title": "UI", "spec": "ui", "needs": ["contract"]},
+        {"id": "core", "title": "Core", "spec": "core", "needs": ["contract"]},
+        {"id": "join", "title": "Join", "spec": "join", "needs": ["ui", "core"]},
+    ], by="pm", confirmed=True)
+    lifecycle.apply(db, "proj1", "confirm_plan")
+    lifecycle.apply(db, "proj1", "start")
+    for _ in range(4):
+        SCRIPT.append(RunResult(status="succeeded", summary="ok"))
+
+    r.start("proj1", "fakebot")
+    for _ in range(400):
+        if lifecycle.status_of(db, "proj1") == lifecycle.MAINTENANCE:
+            break
+        await asyncio.sleep(0.02)
+
+    plan = lifecycle.task_plan(db, "proj1")["tasks"]
+    jobs = {task["id"]: task["job_id"] for task in plan}
+    edges = {(row["job_id"], row["depends_on_job_id"])
+             for row in db.query("SELECT * FROM job_deps")}
+    assert (jobs["ui"], jobs["contract"]) in edges
+    assert (jobs["core"], jobs["contract"]) in edges
+    assert {(jobs["join"], jobs["ui"]), (jobs["join"], jobs["core"])} <= edges
     assert lifecycle.status_of(db, "proj1") == lifecycle.MAINTENANCE
 
 

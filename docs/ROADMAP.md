@@ -8,6 +8,14 @@ it is to build.
 
 ## Next
 
+- **Core engine redesign (accepted 2026-08-30).** Replace the linear project
+  runner and stage array with durable planning rounds plus validated task/stage
+  DAGs; add bounded visible PM↔system-analysis negotiation, frozen planning
+  sessions with next-round intake, adversarial handoff challenges, role/evidence
+  coverage, mandatory development integration receipts, Telegram progress/Q&A,
+  and schedulable Skill installation. See
+  [CORE-ENGINE-REDESIGN.md](CORE-ENGINE-REDESIGN.md).
+
 - **Scheduled workflows.** The 持續維護 preset is written to be run repeatedly,
   but something still has to press the button. A schedule per project (cron-like,
   with the same audit trail) is the missing half.

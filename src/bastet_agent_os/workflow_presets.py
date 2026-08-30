@@ -10,7 +10,10 @@ from __future__ import annotations
 # Roles a stage can call for. Stage → agent matching uses these ids
 # (project_agent_roles); the labels are for humans in the UI.
 ROLES = [
+    {"id": "product-planner", "label": "產品策劃", "hint": "產品目標、受眾、玩法與成功指標"},
     {"id": "pm", "label": "專案/產品經理", "hint": "規劃、驗收、對外溝通"},
+    {"id": "system-analyst", "label": "系統分析師", "hint": "邊界、資料流、依賴、風險與驗收模型"},
+    {"id": "software-architect", "label": "軟體架構師", "hint": "架構契約、模組責任與整合策略"},
     {"id": "engineer", "label": "工程師", "hint": "通用開發"},
     {"id": "backend-engineer", "label": "後端工程師", "hint": "API、資料層"},
     {"id": "frontend-engineer", "label": "前端工程師", "hint": "介面實作"},
@@ -18,7 +21,12 @@ ROLES = [
     {"id": "tester", "label": "測試工程師", "hint": "測試撰寫與執行"},
     {"id": "reviewer", "label": "審查者", "hint": "程式/內容審查"},
     {"id": "security-reviewer", "label": "安全審查者", "hint": "資安風險把關"},
-    {"id": "designer", "label": "設計師", "hint": "版型、使用者流程"},
+    {"id": "ux-researcher", "label": "UX 研究／設計", "hint": "使用者流程、可用性與無障礙"},
+    {"id": "ui-designer", "label": "UI 設計師", "hint": "資訊層級、元件、狀態與響應式規格"},
+    {"id": "visual-artist", "label": "視覺美術", "hint": "視覺語言、素材、動態與資產規格"},
+    {"id": "designer", "label": "通用設計師（相容）", "hint": "版型、使用者流程"},
+    {"id": "integrator", "label": "整合工程師", "hint": "跨分支整合、契約核對與衝突處理"},
+    {"id": "release-manager", "label": "Git／發布管理", "hint": "合併候選、主線、標籤與交付證據"},
     {"id": "researcher", "label": "研究員", "hint": "調查設計與資料蒐集"},
     {"id": "analyst", "label": "分析師", "hint": "數據與市場分析"},
     {"id": "writer", "label": "撰稿", "hint": "文件、腳本、報告"},

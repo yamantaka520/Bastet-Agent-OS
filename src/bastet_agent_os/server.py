@@ -359,6 +359,16 @@ class TaskPlanIn(BaseModel):
     tasks: list[dict[str, Any]]    # edited plan straight from the UI
 
 
+class PlanningProposalIn(BaseModel):
+    solution: str
+    negotiation: list[dict[str, Any]] = []
+
+
+class PlanningIntakeIn(BaseModel):
+    kind: str = "idea"
+    content: str
+
+
 class ProjectRunIn(BaseModel):
     agent_id: str = ""             # fallback executor when a task names no role
 
@@ -1357,14 +1367,11 @@ def create_app(home: Home) -> FastAPI:
     @app.post("/api/projects/{project_id}/decompose")
     async def decompose_project(project_id: str, body: DecomposeIn,
                                auth: Auth = Depends(require_role("operator"))):
-        """Hand the agreed plan to the PM agent and get a task list back. It is
-        a proposal: nothing is dispatched until a human confirms it."""
-        try:
-            tasks = await runner_mod.decompose(db, home.root, project_id,
-                                              body.agent_id, actor=auth.actor)
-        except runner_mod.PlanError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"tasks": tasks, "confirmed": False}
+        """Removed: decomposition belongs to a proposed planning round."""
+        del project_id, body, auth
+        raise HTTPException(
+            status_code=410,
+            detail="請在專案對話完成 PM／系統分析方案後，由該規劃輪次產生任務圖")
 
     @app.delete("/api/projects/{project_id}/tasks")
     def clear_project_tasks(project_id: str,
@@ -1391,7 +1398,7 @@ def create_app(home: Home) -> FastAPI:
                 title = str(t.get("title", "")).strip()
                 if not title:
                     continue
-                tasks.append({
+                task = {
                     "title": title,
                     "spec": str(t.get("spec", "")).strip(),
                     "role": str(t.get("role", "")).strip(),
@@ -1399,13 +1406,31 @@ def create_app(home: Home) -> FastAPI:
                         t.get("delivery") or {"mode": "branch"}),
                     **({"job_id": t["job_id"]} if t.get("job_id") else {}),
                     **({"origin": t["origin"]} if t.get("origin") else {}),
-                })
+                }
+                if t.get("id"):
+                    task["id"] = str(t["id"]).strip()
+                if "needs" in t:
+                    task["needs"] = t["needs"]
+                tasks.append(task)
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not tasks:
             raise HTTPException(status_code=400, detail="至少需要一個任務")
-        lifecycle_mod.save_task_plan(db, project_id, tasks, by=auth.actor,
-                                     confirmed=True)
+        from . import planning_rounds
+        try:
+            round_row = planning_rounds.current(db, project_id)
+            if round_row is not None and round_row["state"] != "proposed":
+                raise planning_rounds.PlanningRoundError(
+                    "方案與系統分析結論完成後才能確認任務圖")
+            lifecycle_mod.save_task_plan(db, project_id, tasks, by=auth.actor,
+                                         confirmed=True)
+            if round_row is not None:
+                planning_rounds.approve(db, project_id,
+                                        lifecycle_mod.task_plan(db, project_id)["tasks"],
+                                        actor=auth.actor)
+        except (lifecycle_mod.LifecycleError,
+                planning_rounds.PlanningRoundError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         db.audit(auth.actor, "project.tasks.confirm", "project", project_id,
                  {"tasks": len(tasks)})
         status = lifecycle_mod.status_of(db, project_id)
@@ -1413,6 +1438,54 @@ def create_app(home: Home) -> FastAPI:
             status = lifecycle_mod.apply(db, project_id, "confirm_plan", auth.actor,
                                          {"tasks": len(tasks)})
         return {"tasks": tasks, "confirmed": True, "status": status}
+
+    # ---- durable project planning rounds -----------------------------------
+
+    from . import planning_rounds as planning_rounds_mod
+
+    @app.get("/api/projects/{project_id}/planning")
+    def planning_overview(project_id: str,
+                          auth: Auth = Depends(require_role("viewer"))):
+        del auth
+        return planning_rounds_mod.overview(db, project_id)
+
+    @app.post("/api/chat/sessions/{session_id}/planning-round")
+    def start_planning_round(session_id: str,
+                             auth: Auth = Depends(require_role("operator"))):
+        try:
+            session = chat_mod.get_session(db, session_id)
+            if session["scope_type"] != "project":
+                raise planning_rounds_mod.PlanningRoundError(
+                    "planning rounds require a project session")
+            round_id = planning_rounds_mod.start(
+                db, session["scope_id"], session_id, actor=auth.actor)
+            return {"id": round_id, **planning_rounds_mod.overview(
+                db, session["scope_id"])}
+        except (chat_mod.ChatError,
+                planning_rounds_mod.PlanningRoundError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/api/planning-rounds/{round_id}/proposal")
+    def propose_planning_round(round_id: str, body: PlanningProposalIn,
+                               auth: Auth = Depends(require_role("operator"))):
+        try:
+            planning_rounds_mod.propose(db, round_id, solution=body.solution,
+                                        negotiation=body.negotiation,
+                                        actor=auth.actor)
+        except planning_rounds_mod.PlanningRoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"id": round_id, "state": "proposed"}
+
+    @app.post("/api/projects/{project_id}/planning-intake")
+    def add_planning_intake(project_id: str, body: PlanningIntakeIn,
+                            auth: Auth = Depends(require_role("operator"))):
+        try:
+            item_id = planning_rounds_mod.add_intake(
+                db, project_id, kind=body.kind, content=body.content,
+                actor=auth.actor)
+        except planning_rounds_mod.PlanningRoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"id": item_id}
 
     # ---- chat: the human input + authorisation channel (SPEC §5.11) ----------
 
@@ -1478,9 +1551,13 @@ def create_app(home: Home) -> FastAPI:
             pending = [dict(j) for j in db.query(
                 "SELECT id, title, stage FROM jobs WHERE project_id=? AND "
                 "status='blocked' ORDER BY updated_at DESC", (session["scope_id"],))]
+        planning = None
+        if session["scope_type"] == "project":
+            planning = planning_rounds_mod.overview(db, session["scope_id"])
         return {"session": dict(session),
                 "messages": chat_mod.messages(db, session_id, limit),
-                "pending_approvals": pending}
+                "pending_approvals": pending,
+                "planning": planning}
 
     @app.post("/api/chat/sessions/{session_id}/files")
     async def upload_chat_file(session_id: str, file: UploadFile = File(...),
@@ -1561,40 +1638,11 @@ def create_app(home: Home) -> FastAPI:
     @app.post("/api/chat/sessions/{session_id}/dispatch")
     async def dispatch_from_chat(session_id: str, body: ChatDispatchIn,
                                  auth: Auth = Depends(require_role("operator"))):
-        """Turn the discussion into a real job — the chat's whole point."""
-        try:
-            session = chat_mod.get_session(db, session_id)
-        except chat_mod.ChatError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        if session["scope_type"] != "project":
-            raise HTTPException(status_code=400,
-                                detail="只有專案範圍的對話可以派工")
-        spec = body.spec.strip()
-        if not spec:
-            history = chat_mod.messages(db, session_id, limit=20)
-            spec = "\n\n".join(f"### {m['role']}\n{m['content']}"
-                                for m in history if m["role"] != "system")
-        try:
-            job_id = orch.dispatch(actor=auth.actor, req=DispatchRequest(
-                project_id=session["scope_id"], prompt=spec,
-                title=body.title or f"chat: {session['title']}"[:60],
-                agent_id=body.agent_id, template_id=body.template_id,
-                origin="chat", delivery=body.delivery))
-        except QuotaError as exc:
-            raise HTTPException(status_code=429, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        # linking onto the plan + moving the light happens in orch.dispatch(), so
-        # every entry point (chat, board, runner) behaves identically
-        tasks = lifecycle_mod.task_plan(db, session["scope_id"])["tasks"]
-        chat_mod.add_message(db, session_id, role="system", author=auth.actor,
-                             content=f"✅ 已派工：{job_id}",
-                             meta={"job_id": job_id})
-        db.audit(auth.actor, "chat.dispatch", "chat", session_id,
-                 {"job_id": job_id, "project": session["scope_id"],
-                  "tasks_on_plan": len(tasks)})
-        bus.emit("project.status", session["scope_id"], status="dispatched")
-        return {"job_id": job_id, "tasks_on_plan": len(tasks)}
+        """Removed: one conversation must become a reviewed task graph, not one card."""
+        del session_id, body, auth
+        raise HTTPException(
+            status_code=410,
+            detail="整段對話單卡派工已取消；請完成規劃輪次並確認任務圖")
 
     # ---- WebUI login wizard (PTY over WS) -----------------------------------------
 

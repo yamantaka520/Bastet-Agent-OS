@@ -164,7 +164,9 @@ def find_or_create_channel_session(db, *, channel: str, external_id: str,
 def add_message(db, session_id: str, *, role: str, content: str, author: str = "",
                 attachments: list[dict[str, Any]] | None = None,
                 meta: dict[str, Any] | None = None) -> str:
-    get_session(db, session_id)
+    session = get_session(db, session_id)
+    if role == "user" and session["state"] == "frozen":
+        raise ChatError("這一輪規劃已凍結；缺陷、建議或想法請放入下一輪等待區")
     message_id = new_id("msg")
     db.write("INSERT INTO chat_messages(id, session_id, role, author, content, "
              "attachments_json, meta_json, at) VALUES(?,?,?,?,?,?,?,?)",
