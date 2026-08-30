@@ -88,6 +88,10 @@ audit trail behind every state change.
   are distinguishable. The drawer takes 任務補給 — data handed to a running job
   mid-flight — and human approvals arrive with real evidence: screenshots and
   summaries the agent left in `._bastet/preview/`, sent as photos on Telegram.
+  Telegram also receives DAG node starts/passes, handoff reviews, delivery
+  receipts and evidence-grounded completion summaries. `/job <id>` returns the
+  live graph/evidence state; `/ask <id> <question>` opens a task-scoped responder
+  session grounded in that same durable snapshot.
 - **Resource pool + metering gateway.** LLM / MCP / API / skill / git resources
   with per-resource visibility (global / team / project), a credential picker
   that stores a reference rather than a copy, a real test button per resource,

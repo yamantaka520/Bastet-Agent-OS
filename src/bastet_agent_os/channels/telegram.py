@@ -31,6 +31,8 @@ HELP_TEXT = (
     "🐈 Bastet Agent OS\n"
     "/status — jobs overview\n"
     "/jobs — recent jobs\n"
+    "/job <job_id> — DAG progress, evidence and delivery receipt\n"
+    "/ask <job_id> <question> — ask the configured responder about live task evidence\n"
     "/approve <job_id> — decide a waiting gate\n"
     "/pair <code> — link this Telegram account\n"
     "any other message — talk to this channel's agent/LLM about the project"
@@ -86,6 +88,13 @@ class TelegramChannel:
     def _binding(self, telegram_id: int) -> dict | None:
         return self._config().get("bindings", {}).get(str(telegram_id))
 
+    def _job_allowed(self, job_id: str) -> bool:
+        project_id = str(self._config().get("project_id") or "")
+        if not project_id:
+            return True
+        row = self.db.one("SELECT project_id FROM jobs WHERE id=?", (job_id,))
+        return bool(row and row["project_id"] == project_id)
+
     # -- main loops -------------------------------------------------------------
 
     async def run(self) -> None:
@@ -122,9 +131,10 @@ class TelegramChannel:
 
     def _awaits_human(self, job_id: str) -> bool:
         row = self.db.one(
-            "SELECT g.verdict FROM gate_results g JOIN runs r ON r.id = g.run_id "
-            "WHERE r.job_id=? ORDER BY g.at DESC LIMIT 1", (job_id,))
-        return bool(row and row["verdict"] == "pending")
+            "SELECT 1 AS waiting FROM gate_results g JOIN runs r ON r.id=g.run_id "
+            "WHERE r.job_id=? AND g.gate_type='human-approve' "
+            "AND g.verdict='pending' LIMIT 1", (job_id,))
+        return bool(row)
 
     async def _poll_loop(self) -> None:
         offset = 0
@@ -199,6 +209,23 @@ class TelegramChannel:
             await self._send(chat["id"], self._status_text())
         elif text.startswith("/jobs"):
             await self._send(chat["id"], self._jobs_text())
+        elif text.startswith("/job"):
+            parts = text.split(maxsplit=1)
+            if len(parts) != 2:
+                await self._send(chat["id"], "usage: /job <job_id>")
+                return
+            if not self._job_allowed(parts[1].strip()):
+                await self._send(chat["id"], f"找不到任務 {parts[1].strip()}")
+                return
+            from ..job_reporting import render
+            await self._send(chat["id"], render(self.db, parts[1].strip()))
+        elif text.startswith("/ask"):
+            parts = text.split(maxsplit=2)
+            if len(parts) != 3:
+                await self._send(chat["id"], "usage: /ask <job_id> <question>")
+                return
+            await self._job_question(binding, chat["id"], telegram_id,
+                                     parts[1], parts[2])
         elif text.startswith("/approve"):
             parts = text.split()
             if len(parts) != 2:
@@ -209,6 +236,45 @@ class TelegramChannel:
             await self._send(chat["id"], HELP_TEXT)
         else:
             await self._chat_turn(message, binding, chat["id"], telegram_id, text)
+
+    async def _job_question(self, binding: dict, chat_id: int, telegram_id: int,
+                            job_id: str, question: str) -> None:
+        """Answer in a task-specific session whose system prompt owns the snapshot."""
+        from .. import chat as chat_mod
+        from ..job_reporting import snapshot
+
+        report = snapshot(self.db, job_id)
+        if report is None or not self._job_allowed(job_id):
+            await self._send(chat_id, f"找不到任務 {job_id}")
+            return
+        target = self._responder()
+        if target is None:
+            await self._send(chat_id, NO_RESPONDER_TEXT)
+            return
+        kind, rid, _, _ = target
+        project_id = report["job"]["project_id"]
+        try:
+            session_id = chat_mod.find_or_create_channel_session(
+                self.db, channel="telegram",
+                external_id=f"{self.channel_id}:{telegram_id}:job:{job_id}",
+                scope_type="project", scope_id=project_id,
+                responder_kind=kind, responder_id=rid,
+                title=f"telegram · {job_id} · {binding.get('name', telegram_id)}",
+                actor=f"user:{binding.get('user_id', '')}", config={"job_id": job_id})
+            chat_mod.add_message(self.db, session_id, role="user", content=question,
+                                 author=f"telegram:{telegram_id}",
+                                 meta={"job_id": job_id, "kind": "job_question"})
+            session = chat_mod.get_session(self.db, session_id)
+            answer = await chat_mod.reply(self.db, self.home_root, session_id,
+                                          actor=f"telegram:{telegram_id}")
+            chat_mod.remember(self.db, session, "user", question)
+        except Exception as exc:
+            log.warning("telegram job question failed: %s", exc)
+            await self._send(chat_id, f"⚠️ {type(exc).__name__}: {exc}"[:400])
+            return
+        self.bus.emit("chat.message", project_id, session_id=session_id, job_id=job_id)
+        await self._send(chat_id, (answer["content"] or "")[:MAX_TELEGRAM_TEXT],
+                         purpose=f"job.ask:{job_id}")
 
     # ---- chat: the second authorisation channel (SPEC §5.11) --------------------
 
@@ -309,7 +375,7 @@ class TelegramChannel:
                       user=payload["name"])  # WS -> the admin page refreshes live
         await self._send(chat_id, f"✅ Paired as {payload['name']}. {HELP_TEXT}")
 
-    def _review_checklist(self, job_id: str) -> str:
+    def _review_checklist(self, job_id: str, stage_name: str = "") -> str:
         """What the approver is being asked to check, in the message itself.
 
         An approval request that says only "stage X wants approval" forces the
@@ -324,8 +390,9 @@ class TelegramChannel:
         parts = []
         try:
             stages = json.loads(job["stages_snapshot_json"] or "[]")
+            target = stage_name or job["stage"]
             desc = next((s.get("desc") for s in stages
-                         if s.get("name") == job["stage"]), "")
+                         if s.get("name") == target), "")
             if desc:
                 parts.append(f"這一關要確認：{desc}")
         except (json.JSONDecodeError, TypeError):
@@ -337,16 +404,36 @@ class TelegramChannel:
             parts.append(f"── 檢核項目 ──\n{excerpt.strip()}")
         return "\n".join(parts)
 
-    async def _send_approval_card(self, chat_id: int, job_id: str) -> None:
+    def _pending_approval_runs(self, job_id: str) -> list[dict]:
+        return [dict(row) for row in self.db.query(
+            "SELECT r.id AS run_id,r.stage FROM runs r JOIN gate_results g "
+            "ON g.run_id=r.id WHERE r.job_id=? AND g.gate_type='human-approve' "
+            "AND g.verdict='pending' ORDER BY g.at", (job_id,))]
+
+    async def _send_approval_card(self, chat_id: int, job_id: str,
+                                  stage_name: str = "") -> None:
         job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
-        if job is None:
+        if job is None or not self._job_allowed(job_id):
             await self._send(chat_id, f"unknown job {job_id}")
             return
-        text = (f"⏸ {job['title']}\n{job_id} · stage {job['stage']} · {job['status']}\n\n"
-                f"{self._review_checklist(job_id)}")
+        pending = self._pending_approval_runs(job_id)
+        if stage_name:
+            pending = [item for item in pending if item["stage"] == stage_name]
+        if not pending:
+            await self._send(chat_id, f"{job_id} 目前沒有等待中的人工核准")
+            return
+        if len(pending) > 1:
+            for item in pending:
+                await self._send_approval_card(chat_id, job_id, item["stage"])
+            return
+        target = pending[0]
+        text = (f"⏸ {job['title']}\n{job_id} · stage {target['stage']} · "
+                f"{job['status']}\n\n{self._review_checklist(job_id, target['stage'])}")
         keyboard = {"inline_keyboard": [[
-            {"text": "✅ Approve", "callback_data": f"apv:{job_id}:yes"},
-            {"text": "❌ Reject", "callback_data": f"apv:{job_id}:no"},
+            {"text": "✅ Approve",
+             "callback_data": f"apv:{job_id}:yes:{target['run_id']}"},
+            {"text": "❌ Reject",
+             "callback_data": f"apv:{job_id}:no:{target['run_id']}"},
         ]]}
         await self._send(chat_id, text, reply_markup=keyboard,
                          purpose=f"approval-card:{job_id}")
@@ -365,11 +452,21 @@ class TelegramChannel:
             return
         try:
             if data.startswith("apv:"):
-                _, job_id, decision = data.split(":", 2)
+                parts = data.split(":", 3)
+                _, job_id, decision = parts[:3]
+                if not self._job_allowed(job_id):
+                    raise ValueError("unknown job")
+                stage_name = ""
+                if len(parts) == 4:
+                    run = self.db.one("SELECT stage FROM runs WHERE id=? AND job_id=?",
+                                      (parts[3], job_id))
+                    if run is None:
+                        raise ValueError("approval target is stale or invalid")
+                    stage_name = run["stage"]
                 approved = decision == "yes"
                 outcome = self.orch.approve(job_id, approved,
                                             comment=f"via telegram by {binding['name']}",
-                                            user=binding["name"])
+                                            user=binding["name"], stage_name=stage_name)
                 if chat_id:
                     verdict = "approved ✅" if approved else "rejected ❌"
                     await self._send(chat_id, f"{job_id} {verdict} → {outcome['status']}")
@@ -394,6 +491,14 @@ class TelegramChannel:
 
     async def _notify(self, event: dict) -> None:
         etype = event.get("type", "")
+        configured_project = str(self._config().get("project_id") or "")
+        event_project = str(event.get("project_id") or "")
+        if not event_project and event.get("job_id"):
+            row = self.db.one("SELECT project_id FROM jobs WHERE id=?",
+                              (event.get("job_id"),))
+            event_project = str(row["project_id"] if row else "")
+        if configured_project and event_project != configured_project:
+            return
         keyboard = None
         if etype == "gate.pending":
             job = self.db.one("SELECT title, project_id FROM jobs WHERE id=?",
@@ -401,15 +506,29 @@ class TelegramChannel:
             previews = event.get("previews") or self._preview_names(event.get("job_id"))
             listing = (f"\n📎 核准附件 {len(previews)} 件（將逐一傳送，可直接檢視）"
                        if previews else "\n（這一關沒有附預覽 —— 判斷依據只有 diff）")
-            checklist = self._review_checklist(event.get("job_id") or "")
+            checklist = self._review_checklist(event.get("job_id") or "",
+                                                event.get("stage") or "")
+            pending = self._pending_approval_runs(event.get("job_id") or "")
+            target = next((item for item in reversed(pending)
+                           if item["stage"] == event.get("stage")), None)
             text = (f"⏸ 需要你核准：{job['title'] if job else event.get('job_id')}\n"
                     f"專案 {job['project_id'] if job else '?'} · "
                     f"階段 {event.get('stage')}\n{event.get('job_id')}{listing}"
                     + (f"\n\n{checklist}" if checklist else ""))
-            keyboard = {"inline_keyboard": [[
-                {"text": "✅ Approve", "callback_data": f"apv:{event.get('job_id')}:yes"},
-                {"text": "❌ Reject", "callback_data": f"apv:{event.get('job_id')}:no"},
-            ]]}
+            if target:
+                keyboard = {"inline_keyboard": [[
+                    {"text": "✅ Approve", "callback_data":
+                    f"apv:{event.get('job_id')}:yes:{target['run_id']}"},
+                    {"text": "❌ Reject", "callback_data":
+                     f"apv:{event.get('job_id')}:no:{target['run_id']}"},
+                ]]}
+            else:
+                keyboard = {"inline_keyboard": [[
+                    {"text": "✅ Approve",
+                     "callback_data": f"apv:{event.get('job_id')}:yes"},
+                    {"text": "❌ Reject",
+                     "callback_data": f"apv:{event.get('job_id')}:no"},
+                ]]}
             for binding in self._config().get("bindings", {}).values():
                 await self._send_previews(binding["chat_id"],
                                           event.get("job_id"), previews)
@@ -461,13 +580,69 @@ class TelegramChannel:
                 ]]}
         elif etype == "job.rework":
             text = self._rework_text(event)
+        elif etype in ("stage.node_started", "stage.node_passed"):
+            from ..job_reporting import progress_line, snapshot
+            report = snapshot(self.db, event.get("job_id") or "")
+            if report is None:
+                return
+            icon = "▶️" if etype == "stage.node_started" else "✅"
+            action = "階段開始" if etype == "stage.node_started" else "階段通過"
+            active = [node["stage"] for node in report["nodes"]
+                      if node["status"] == "running"]
+            text = (f"{icon} {action}：{event.get('stage')}\n"
+                    f"{self._job_line(event)}\n{progress_line(report)}"
+                    + (f"\n並行執行：{', '.join(active)}" if active else ""))
+        elif etype == "stage.handoff_review":
+            status = event.get("status") or "?"
+            icon = {"accepted": "🤝", "rework_required": "🔧",
+                    "human_ruling": "🟠"}.get(status, "🔎")
+            text = (f"{icon} 交接檢核：{event.get('source_stage')} → "
+                    f"{event.get('stage')} · {status}\n{self._job_line(event)}"
+                    + (f"\n{event.get('detail')}" if event.get("detail") else ""))
+        elif etype.startswith("handoff.challenge_"):
+            row = self.db.one(
+                "SELECT * FROM handoff_challenges WHERE id=?",
+                (event.get("challenge_id"),))
+            if row is None:
+                return
+            try:
+                exchanges = json.loads(row["exchanges_json"] or "[]")
+            except (json.JSONDecodeError, TypeError):
+                exchanges = []
+            status = event.get("status") or row["status"]
+            icon = "🔎" if status == "open" else (
+                "🤝" if status == "accepted" else "🟠")
+            event = {**event, "job_id": row["job_id"]}
+            latest = str((exchanges[-1] if exchanges else {}).get("content") or "")
+            text = (f"{icon} 交接挑戰：{row['from_stage']} → {row['to_stage']} · "
+                    f"{status}（{len(exchanges)}/{row['max_exchanges']} 回合）\n"
+                    f"{self._job_line(event)}"
+                    + (f"\n最新：{latest[:700]}" if latest else ""))
+        elif etype == "job.delivery_pending":
+            text = (f"🚚 工作流已驗收，開始交付\n{self._job_line(event)}\n"
+                    f"模式：{event.get('mode')}"
+                    + (f" · v{event.get('version')}" if event.get("version") else ""))
+        elif etype in ("job.delivered", "job.deployed"):
+            action = "主線交付完成" if etype == "job.delivered" else "正式部署完成"
+            text = (f"🚚 {action}\n{self._job_line(event)}\n"
+                    f"目標：{event.get('target') or '—'}\n"
+                    f"receipt：{(event.get('commit_sha') or '')[:12]}"
+                    + (f" · v{event.get('version')}" if event.get("version") else ""))
+        elif etype == "job.delivery_failed":
+            text = (f"🟠 交付失敗，任務不會被標記完成\n{self._job_line(event)}\n"
+                    f"模式：{event.get('mode')}\n"
+                    f"{self._detail_block(event.get('detail'))}")
         elif etype == "job.blocked":
             text = self._blocked_text(event)
             keyboard = {"inline_keyboard": [[
                 {"text": "🔁 重試這一關",
                  "callback_data": f"rty:{event.get('job_id')}"},
             ]]}
-        elif etype in ("job.done", "budget.exceeded", "budget.warning"):
+        elif etype == "job.done":
+            from ..job_reporting import render
+            text = "✅ 任務完成\n" + render(
+                self.db, event.get("job_id") or "", compact=True)
+        elif etype in ("budget.exceeded", "budget.warning"):
             icon = {"job.done": "✅", "budget.exceeded": "🛑",
                     "budget.warning": "⚠️"}[etype]
             detail = event.get("reason") or event.get("stage") or ""
@@ -617,14 +792,24 @@ class TelegramChannel:
     # -- summaries --------------------------------------------------------------------
 
     def _status_text(self) -> str:
-        rows = self.db.query("SELECT status, COUNT(*) n FROM jobs GROUP BY status")
+        project_id = str(self._config().get("project_id") or "")
+        where = " WHERE project_id=?" if project_id else ""
+        params = (project_id,) if project_id else ()
+        rows = self.db.query(
+            f"SELECT status,COUNT(*) n FROM jobs{where} GROUP BY status", params)
         counts = " · ".join(f"{r['status']}: {r['n']}" for r in rows) or "no jobs"
-        cost = self.db.one("SELECT COALESCE(SUM(cost_usd),0) c FROM runs")
+        cost = self.db.one(
+            "SELECT COALESCE(SUM(r.cost_usd),0) c FROM runs r JOIN jobs j ON j.id=r.job_id"
+            + (" WHERE j.project_id=?" if project_id else ""), params)
         return f"🐈 {counts}\nΣ cost ${cost['c']:.4f}"
 
     def _jobs_text(self) -> str:
+        project_id = str(self._config().get("project_id") or "")
         rows = self.db.query(
-            "SELECT id, title, stage, status FROM jobs ORDER BY updated_at DESC LIMIT 8")
+            "SELECT id,title,stage,status FROM jobs"
+            + (" WHERE project_id=?" if project_id else "")
+            + " ORDER BY updated_at DESC LIMIT 8",
+            (project_id,) if project_id else ())
         if not rows:
             return "no jobs yet"
         return "\n".join(f"{r['status']} · {r['id']} · {r['title'][:40]} ({r['stage']})"

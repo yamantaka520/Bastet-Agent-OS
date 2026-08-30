@@ -30,7 +30,11 @@ Last updated: 2026-08-31
   `integration` mode fetches the current remote target, merges, runs its trusted
   candidate gate, pushes without force, and verifies the remote receipt SHA;
   `production` retains version tagging, deployment, and online verification.
-  Validation: 605 Python tests, ruff clean, and Web production build successful.
+  Telegram now renders graph-node starts/passes, handoff reviews/challenges,
+  delivery transitions and evidence-grounded completion summaries. `/job` reads
+  the durable task snapshot; `/ask` gives the configured responder a task-scoped
+  system context. Parallel human gates receive distinct run-bound callback tokens.
+  Validation: 595 non-loopback plus 15 loopback Python tests (610 total), ruff clean.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month
   (2026-07-28 → 2026-08-30), ~132 commits. See [CHANGELOG.md](CHANGELOG.md) for

@@ -74,6 +74,18 @@ back and require its SHA to equal the immutable delivery receipt. Production add
 version-source validation, an atomic version tag, deployment, and online commit
 verification.
 
+## Implemented Telegram task observability
+
+Telegram notifications now consume the same durable job graph used by the Web
+board. Node start/pass, handoff review and challenge, delivery pending/success/
+failure, and final completion messages include graph counts and persisted evidence
+rather than an opaque job id. `/job <job_id>` returns the current nodes, evidence,
+open challenges, latest error/summary and delivery receipt. `/ask <job_id> <question>`
+uses a separate task-scoped chat session whose system prompt embeds that trusted
+snapshot. Project-bound channels reject cross-project queries and notifications.
+Parallel human gates use run-bound callback tokens so each Telegram approval names
+one exact stage.
+
 ## Target model
 
 ### Planning round

@@ -93,6 +93,121 @@ async def test_status_and_jobs_for_paired_user(channel):
     assert any("job1" in t for t in fake.texts())
 
 
+def seed_job_graph(db):
+    db.write("UPDATE jobs SET stages_snapshot_json=?,stage='build' WHERE id='job1'", (
+        json.dumps([
+            {"name": "design", "gate": "agent-review", "needs": [],
+             "evidence": ["ux"]},
+            {"name": "build", "gate": "tests-pass", "needs": ["design"],
+             "evidence": ["functional", "integration"]},
+        ]),))
+    db.write_many([
+        ("INSERT INTO job_stage_nodes(job_id,stage,status,needs_json,workspace,"
+         "head_commit,updated_at) VALUES('job1','design','passed','[]','shared',"
+         "'abc123',datetime('now'))", ()),
+        ("INSERT INTO job_stage_nodes(job_id,stage,status,needs_json,workspace,updated_at) "
+         "VALUES('job1','build','running','[\"design\"]','shared',datetime('now'))",
+         ()),
+    ])
+    db.write("UPDATE runs SET stage='design',status='succeeded' WHERE id='run1'")
+    db.write("INSERT INTO gate_results(id,run_id,gate_type,verdict,reviewer_kind,"
+             "reviewer_id,detail_md,at) VALUES('g-report','run1','agent-review','passed',"
+             "'agent','ag1','ok',datetime('now'))")
+    db.write("INSERT INTO deliveries(id,job_id,mode,status,target,commit_sha,started_at) "
+             "VALUES('d-report','job1','integration','running','origin/main','',"
+             "datetime('now'))")
+
+
+async def test_job_command_reports_dag_evidence_and_delivery(channel):
+    ch, fake, db = channel
+    await pair(ch, db)
+    seed_job_graph(db)
+
+    await ch.handle_update(message("/job job1"))
+
+    text = fake.texts()[-1]
+    assert "DAG：1/2 通過" in text
+    assert "design · passed" in text and "build · running" in text
+    assert "✅ ux" in text and "待驗證 functional, integration" in text
+    assert "integration · running · origin/main" in text
+
+
+async def test_ask_uses_a_task_scoped_evidence_snapshot(channel, monkeypatch):
+    from bastet_agent_os import chat as chat_mod
+
+    ch, fake, db = channel
+    await pair(ch, db)
+    seed_job_graph(db)
+    config = ch._config()
+    config.update({"project_id": "proj1",
+                   "responder": {"kind": "agent", "id": "ag1"}})
+    ch._save_config(config)
+    prompts = []
+
+    async def answer(db, home_root, session_id, actor=""):
+        session = chat_mod.get_session(db, session_id)
+        prompts.append(chat_mod.system_prompt(db, session))
+        message_id = chat_mod.add_message(
+            db, session_id, role="assistant", content="build 正在執行，UX 已通過。",
+            author="agent:ag1")
+        return next(item for item in chat_mod.messages(db, session_id)
+                    if item["id"] == message_id)
+
+    monkeypatch.setattr(chat_mod, "reply", answer)
+    monkeypatch.setattr(chat_mod, "remember", lambda *args, **kwargs: True)
+    await ch.handle_update(message("/ask job1 現在做到哪裡？"))
+
+    assert "build 正在執行" in fake.texts()[-1]
+    assert "指定任務的可信任執行快照" in prompts[0]
+    assert "DAG：1/2 通過" in prompts[0]
+    session = db.one("SELECT config_json FROM chat_sessions WHERE channel='telegram' "
+                     "ORDER BY rowid DESC LIMIT 1")
+    assert json.loads(session["config_json"])["job_id"] == "job1"
+
+
+async def test_graph_and_delivery_events_become_progress_updates(channel):
+    ch, fake, db = channel
+    ch._save_config({"bindings": {"1": {"user_id": "u1", "name": "m",
+                                          "chat_id": 42}},
+                     "project_id": "proj1"})
+    seed_job_graph(db)
+
+    await ch._notify({"type": "stage.node_started", "project_id": "proj1",
+                      "job_id": "job1", "stage": "build"})
+    await ch._notify({"type": "stage.node_passed", "project_id": "proj1",
+                      "job_id": "job1", "stage": "design"})
+    await ch._notify({"type": "job.delivery_pending", "project_id": "proj1",
+                      "job_id": "job1", "mode": "integration"})
+    await ch._notify({"type": "job.delivered", "project_id": "proj1",
+                      "job_id": "job1", "target": "origin/main",
+                      "commit_sha": "0123456789abcdef"})
+
+    texts = fake.texts()
+    assert any("階段開始：build" in text and "DAG：1/2" in text for text in texts)
+    assert any("階段通過：design" in text for text in texts)
+    assert any("開始交付" in text and "integration" in text for text in texts)
+    assert any("主線交付完成" in text and "0123456789ab" in text for text in texts)
+
+
+async def test_project_bound_channel_does_not_leak_another_projects_events(channel):
+    ch, fake, db = channel
+    ch._save_config({"bindings": {"1": {"user_id": "u1", "name": "m",
+                                          "chat_id": 42}},
+                     "project_id": "proj1"})
+    await ch._notify({"type": "job.done", "project_id": "other",
+                      "job_id": "foreign-job"})
+    assert fake.texts() == []
+
+    db.write("INSERT INTO projects(id,team_id,created_at,updated_at) "
+             "VALUES('other','team1',datetime('now'),datetime('now'))")
+    db.write("INSERT INTO jobs(id,project_id,stages_snapshot_json,title,stage,status,"
+             "created_at,updated_at) VALUES('foreign-job','other','[]','secret task',"
+             "'work','in_progress',datetime('now'),datetime('now'))")
+    await ch.handle_update(message("/jobs", telegram_id=1, chat_id=42))
+    assert "job1" in fake.texts()[-1]
+    assert "foreign-job" not in fake.texts()[-1] and "secret task" not in fake.texts()[-1]
+
+
 async def test_approve_flow_end_to_end(channel, orch, seeded):
     ch, fake, db = channel
     await pair(ch, db)
@@ -107,7 +222,7 @@ async def test_approve_flow_end_to_end(channel, orch, seeded):
     await ch.handle_update(message(f"/approve {job_id}"))
     card = [m for m in fake.sent if m["method"] == "sendMessage" and m.get("reply_markup")][-1]
     buttons = card["reply_markup"]["inline_keyboard"][0]
-    assert buttons[0]["callback_data"] == f"apv:{job_id}:yes"
+    assert buttons[0]["callback_data"].startswith(f"apv:{job_id}:yes:run_")
 
     # pressing Approve resolves the gate, attributed to the bound user
     await ch.handle_update({"callback_query": {
@@ -142,6 +257,27 @@ async def test_gate_pending_notification_has_buttons(channel):
     # the card names the work: a job id alone tells the approver nothing
     assert "需要你核准" in sent["text"] and "job_z" in sent["text"]
     assert sent["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "apv:job_z:yes"
+
+
+async def test_parallel_human_gates_get_distinct_stage_safe_callbacks(channel):
+    ch, fake, db = channel
+    db.write("UPDATE runs SET stage='UX',status='succeeded' WHERE id='run1'")
+    db.write("INSERT INTO runs(id,job_id,stage,agent_id,executor_type,status) "
+             "VALUES('run-ui','job1','UI','ag1','claude-code','succeeded')")
+    for gate_id, run_id in (("gate-ux", "run1"), ("gate-ui", "run-ui")):
+        db.write("INSERT INTO gate_results(id,run_id,gate_type,verdict,reviewer_kind,"
+                 "reviewer_id,detail_md,at) VALUES(?,?,'human-approve','pending',"
+                 "'agent','ag1','waiting',datetime('now'))", (gate_id, run_id))
+
+    await ch._send_approval_card(555, "job1")
+
+    cards = [item for item in fake.sent if item["method"] == "sendMessage"
+             and item.get("reply_markup")]
+    assert len(cards) == 2
+    callbacks = [item["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+                 for item in cards]
+    assert callbacks == ["apv:job1:yes:run1", "apv:job1:yes:run-ui"]
+    assert "stage UX" in cards[0]["text"] and "stage UI" in cards[1]["text"]
 
 
 async def test_review_package_sends_images_video_and_documents(channel, tmp_path):
@@ -354,6 +490,9 @@ async def test_approval_card_carries_the_checklist(channel):
     db.write("UPDATE jobs SET stages_snapshot_json=? WHERE id='job1'",
              (json.dumps([{"name": "work", "role": "pm", "gate": "human-approve",
                            "desc": "確認頁面結構與視覺方向"}]),))
+    db.write("INSERT INTO gate_results(id,run_id,gate_type,verdict,reviewer_kind,"
+             "reviewer_id,detail_md,at) VALUES('g-check','run1','human-approve',"
+             "'pending','agent','ag1','waiting',datetime('now'))")
     await ch._send_approval_card(555, "job1")
     text = fake.texts()[-1]
     assert "確認頁面結構與視覺方向" in text     # the stage's own description
