@@ -90,6 +90,16 @@ class StageDef:
     # allowed to start.  This is intentionally not a promise about a CLI
     # sandbox: browser gates run through Bastet's trusted host process.
     requires: list[str] = field(default_factory=list)
+    # Workflow-v2 graph contract. Legacy templates omit ``needs`` and are
+    # normalized into the historical linear chain by parse_stages().
+    needs: list[str] = field(default_factory=list)
+    produces: list[str] = field(default_factory=list)
+    consumes: list[str] = field(default_factory=list)
+    challenge: bool = True
+    max_challenge_exchanges: int = 5
+    # Parallel writable siblings must not share one checkout. ``isolated`` is
+    # an admission promise; the stage scheduler must provision and later join it.
+    workspace: str = "shared"              # shared|isolated
 
     def to_dict(self) -> dict:
         return {
@@ -99,6 +109,10 @@ class StageDef:
             "on_fail": self.on_fail, "rework_target": self.rework_target,
             "max_cycles": self.max_cycles, "timeout_s": self.timeout_s,
             "requires": self.requires,
+            "needs": self.needs, "produces": self.produces,
+            "consumes": self.consumes, "challenge": self.challenge,
+            "max_challenge_exchanges": self.max_challenge_exchanges,
+            "workspace": self.workspace,
         }
 
 
@@ -106,6 +120,7 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
     if not raw:
         raise ValueError("template has no stages")
     stages, seen = [], set()
+    graph_native = any("needs" in item for item in raw if isinstance(item, dict))
     for i, item in enumerate(raw):
         name = item.get("name")
         if not name:
@@ -125,6 +140,23 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
         if not isinstance(requires, list) or any(
                 not isinstance(cap, str) or not cap.strip() for cap in requires):
             raise ValueError(f"stage {name!r}: requires must be a list of capability ids")
+        needs = item.get("needs")
+        if needs is None:
+            needs = [] if graph_native or i == 0 else [stages[i - 1].name]
+        if not isinstance(needs, list) or any(not isinstance(dep, str) for dep in needs):
+            raise ValueError(f"stage {name!r}: needs must be a list of stage names")
+        workspace = item.get("workspace", "shared")
+        if workspace not in ("shared", "isolated"):
+            raise ValueError(f"stage {name!r}: workspace must be shared or isolated")
+        challenge_exchanges = int(item.get("max_challenge_exchanges", 5))
+        if not 0 <= challenge_exchanges <= 5:
+            raise ValueError(f"stage {name!r}: max_challenge_exchanges must be 0..5")
+        produces = item.get("produces") or []
+        consumes = item.get("consumes") or []
+        for field_name, values in (("produces", produces), ("consumes", consumes)):
+            if not isinstance(values, list) or any(
+                    not isinstance(value, str) or not value.strip() for value in values):
+                raise ValueError(f"stage {name!r}: {field_name} must be artifact ids")
         stages.append(StageDef(
             name=name,
             role=item.get("role"),
@@ -138,13 +170,124 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
             max_cycles=int(item.get("max_cycles", DEFAULT_MAX_CYCLES)),
             timeout_s=max(0, int(item.get("timeout_s", 0) or 0)),
             requires=list(dict.fromkeys(cap.strip() for cap in requires)),
+            needs=list(dict.fromkeys(dep.strip() for dep in needs if dep.strip())),
+            produces=list(dict.fromkeys(value.strip() for value in produces)),
+            consumes=list(dict.fromkeys(value.strip() for value in consumes)),
+            challenge=bool(item.get("challenge", True)),
+            max_challenge_exchanges=challenge_exchanges,
+            workspace=workspace,
         ))
     names = {s.name for s in stages}
     for stage in stages:
         if stage.rework_target and stage.rework_target not in names:
             raise ValueError(f"stage {stage.name!r}: rework_target "
                              f"{stage.rework_target!r} is not a stage in this template")
+        unknown = [dependency for dependency in stage.needs if dependency not in names]
+        if unknown:
+            raise ValueError(f"stage {stage.name!r}: unknown dependencies {unknown}")
+        if stage.name in stage.needs:
+            raise ValueError(f"stage {stage.name!r}: cannot depend on itself")
+
+    by_name = {stage.name: stage for stage in stages}
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(name: str) -> None:
+        if name in visiting:
+            raise ValueError(f"workflow stage graph contains a cycle at {name!r}")
+        if name in visited:
+            return
+        visiting.add(name)
+        for dependency in by_name[name].needs:
+            visit(dependency)
+        visiting.remove(name)
+        visited.add(name)
+
+    for name in by_name:
+        visit(name)
+
+    def ancestors(name: str) -> set[str]:
+        result: set[str] = set()
+        pending = list(by_name[name].needs)
+        while pending:
+            dependency = pending.pop()
+            if dependency in result:
+                continue
+            result.add(dependency)
+            pending.extend(by_name[dependency].needs)
+        return result
+
+    ancestry = {name: ancestors(name) for name in by_name}
+    producers: dict[str, set[str]] = {}
+    for stage in stages:
+        for artifact in stage.produces:
+            producers.setdefault(artifact, set()).add(stage.name)
+    for stage in stages:
+        for artifact in stage.consumes:
+            candidates = producers.get(artifact, set())
+            if not candidates:
+                raise ValueError(f"stage {stage.name!r}: artifact {artifact!r} has no producer")
+            if not candidates.intersection(ancestry[stage.name]):
+                raise ValueError(f"stage {stage.name!r}: artifact {artifact!r} is not "
+                                 "produced by a dependency")
+
+    # Two unordered writable stages can be ready together. Sharing a checkout
+    # would make their edits race and makes either handoff unverifiable.
+    for left_index, left in enumerate(stages):
+        if left.read_only:
+            continue
+        for right in stages[left_index + 1:]:
+            if right.read_only or left.name in ancestry[right.name] or \
+                    right.name in ancestry[left.name]:
+                continue
+            if left.workspace != "isolated" or right.workspace != "isolated":
+                raise ValueError(
+                    f"parallel writable stages {left.name!r} and {right.name!r} "
+                    "must both declare workspace='isolated'")
     return stages
+
+
+def ready_stages(stages: list[StageDef], passed: set[str],
+                 active: set[str] | None = None) -> list[StageDef]:
+    """Return graph nodes whose dependencies have passed."""
+    active = active or set()
+    return [stage for stage in stages if stage.name not in passed
+            and stage.name not in active
+            and all(dependency in passed for dependency in stage.needs)]
+
+
+def seed_stage_nodes(db, job_id: str, stages: list[StageDef]) -> list[dict]:
+    """Persist a frozen DAG's node state without disturbing resumed jobs."""
+    from .db import now
+
+    stamp = now()
+    roots = {stage.name for stage in ready_stages(stages, set())}
+    db.write_many([
+        ("INSERT OR IGNORE INTO job_stage_nodes(job_id,stage,status,needs_json,"
+         "workspace,updated_at) VALUES(?,?,?,?,?,?)",
+         (job_id, stage.name, "ready" if stage.name in roots else "pending",
+          json.dumps(stage.needs, ensure_ascii=False), stage.workspace, stamp))
+        for stage in stages
+    ])
+    return [dict(row) for row in db.query(
+        "SELECT * FROM job_stage_nodes WHERE job_id=? ORDER BY rowid", (job_id,))]
+
+
+def refresh_ready_nodes(db, job_id: str, stages: list[StageDef]) -> list[str]:
+    """Promote dependency-satisfied pending nodes and return their names."""
+    from .db import now
+
+    rows = db.query("SELECT stage,status FROM job_stage_nodes WHERE job_id=?", (job_id,))
+    states = {row["stage"]: row["status"] for row in rows}
+    passed = {name for name, status in states.items() if status == "passed"}
+    active = {name for name, status in states.items()
+              if status in ("ready", "running", "passed", "failed", "blocked")}
+    names = [stage.name for stage in ready_stages(stages, passed, active)]
+    stamp = now()
+    for name in names:
+        db.write("UPDATE job_stage_nodes SET status='ready',updated_at=? "
+                 "WHERE job_id=? AND stage=? AND status='pending'", (stamp, job_id, name))
+    return names
 
 
 def rework_target_for(stages: list[StageDef], idx: int,

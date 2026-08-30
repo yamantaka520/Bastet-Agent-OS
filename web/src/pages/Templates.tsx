@@ -8,6 +8,9 @@ type Stage = {
   name: string; role?: string | null; gate: string;
   gate_config?: { command?: string; precheck_command?: string }; read_only?: boolean;
   requires?: string[];
+  needs?: string[]; produces?: string[]; consumes?: string[];
+  challenge?: boolean; max_challenge_exchanges?: number;
+  workspace?: "shared" | "isolated";
   max_retries?: number; desc?: string;
 };
 type Preset = { id: string; name: string; description: string; stages: Stage[] };
@@ -86,6 +89,13 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
             : {}),
         ...(s.read_only ? { read_only: true } : {}),
         ...(s.requires?.length ? { requires: s.requires } : {}),
+        ...(s.needs !== undefined ? { needs: s.needs } : {}),
+        ...(s.produces?.length ? { produces: s.produces } : {}),
+        ...(s.consumes?.length ? { consumes: s.consumes } : {}),
+        ...(s.challenge === false ? { challenge: false } : {}),
+        ...(s.max_challenge_exchanges !== undefined
+          ? { max_challenge_exchanges: Number(s.max_challenge_exchanges) } : {}),
+        ...(s.workspace === "isolated" ? { workspace: "isolated" } : {}),
         ...(s.max_retries ? { max_retries: Number(s.max_retries) } : {}),
         ...(s.desc ? { desc: s.desc } : {}),
       }));
@@ -261,6 +271,9 @@ function Flow({ stages, roleLabel, gateInfo, t }: {
             <span className="flow-role">👤 {roleLabel(s.role)}</span>
             <span className="flow-gate">{gateInfo(s.gate).icon} {gateInfo(s.gate).label}</span>
             {s.read_only && <span className="flow-tag">{t("tpl.readOnlyTag")}</span>}
+            {s.needs?.map((dep) =>
+              <span className="flow-tag" key={`need:${dep}`}>↳ {dep}</span>)}
+            {s.workspace === "isolated" && <span className="flow-tag">⑂ isolated</span>}
             {s.requires?.map((cap) =>
               <span className="flow-tag" key={cap}>⚙ {cap}</span>)}
           </div>
@@ -290,7 +303,10 @@ function StageTable({ stages, roleLabel, gateInfo, t }: {
               <td>{gateInfo(s.gate).icon} {gateInfo(s.gate).label}
                 {s.gate === "tests-pass" && s.gate_config?.command
                   ? <code className="detail"> {s.gate_config.command}</code> : null}</td>
-              <td className="card-meta">{s.desc ?? ""}</td>
+              <td className="card-meta">
+                {s.needs?.length ? `needs: ${s.needs.join(", ")} · ` : ""}
+                {s.desc ?? ""}
+              </td>
               <td>{s.max_retries ?? 0}</td>
             </tr>
           ))}
@@ -439,6 +455,38 @@ function Builder({ builder, catalog, setBuilder, onSave, onCancel, roleLabel,
           <input placeholder={t("tpl.stageDescPh")}
                  style={{ width: "100%" }} value={s.desc ?? ""}
                  onChange={(e) => update(i, { desc: e.target.value })} />
+          <div className="inline-form">
+            <input placeholder="needs: stage-a, stage-b" value={(s.needs ?? []).join(", ")}
+                   onChange={(e) => update(i, { needs: e.target.value.split(",")
+                     .map((x) => x.trim()).filter(Boolean) })} />
+            <input placeholder="produces: artifact ids" value={(s.produces ?? []).join(", ")}
+                   onChange={(e) => update(i, { produces: e.target.value.split(",")
+                     .map((x) => x.trim()).filter(Boolean) })} />
+            <input placeholder="consumes: artifact ids" value={(s.consumes ?? []).join(", ")}
+                   onChange={(e) => update(i, { consumes: e.target.value.split(",")
+                     .map((x) => x.trim()).filter(Boolean) })} />
+            <select value={s.workspace ?? "shared"}
+                    onChange={(e) => update(i, {
+                      workspace: e.target.value as "shared" | "isolated",
+                    })}>
+              <option value="shared">shared workspace</option>
+              <option value="isolated">isolated workspace</option>
+            </select>
+            <label className="chk">
+              <input type="checkbox" checked={s.challenge !== false}
+                     onChange={(e) => update(i, { challenge: e.target.checked })} />
+              handoff challenge
+            </label>
+            {s.challenge !== false && (
+              <label className="chk">max exchanges
+                <input type="number" min={0} max={5} style={{ width: "4rem" }}
+                       value={s.max_challenge_exchanges ?? 5}
+                       onChange={(e) => update(i, {
+                         max_challenge_exchanges: Number(e.target.value),
+                       })} />
+              </label>
+            )}
+          </div>
           <p className="muted">{gateInfo(s.gate).hint}</p>
         </div>
       ))}

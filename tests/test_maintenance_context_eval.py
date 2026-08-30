@@ -1,3 +1,5 @@
+import pytest
+
 from bastet_agent_os import collaboration, maintenance_mode
 from bastet_agent_os.context_engine import build_context
 from bastet_agent_os.context_eval import evaluate
@@ -105,3 +107,56 @@ def test_replacement_agent_gets_own_receipt_and_completion_ack(seeded):
     room = seeded.one("SELECT content FROM room_messages WHERE kind='handoff_ack' "
                       "ORDER BY rowid DESC LIMIT 1")
     assert "implemented" in room["content"]
+
+
+def test_receiving_agent_can_challenge_and_only_it_can_accept(seeded):
+    seeded.write("INSERT INTO agents(id,amos_agent_id,name,executor_type,created_at,"
+                 "updated_at) VALUES('ag2','ag2','Agent Two','fake',?,?)",
+                 (now(), now()))
+    seeded.write("UPDATE jobs SET stages_snapshot_json=? WHERE id='job1'", (
+        '[{"name":"review","challenge":true,"max_challenge_exchanges":5}]',))
+    handoff_id = collaboration.record_handoff(
+        seeded, project_id="proj1", job_id="job1", run_id="run1",
+        from_stage="build", to_stage="review", agent_id="ag1",
+        summary="Ready for review", paths=["src/app.py"])
+    collaboration.deliver_handoffs(seeded, "job1", "review", "ag2")
+
+    challenge = collaboration.open_handoff_challenge(
+        seeded, handoff_id, agent_id="ag2", claim="Test evidence omits migration rollback",
+        evidence_gap="No rollback command", requested_resolution="Provide a reversible proof")
+    assert challenge["status"] == "open" and len(challenge["exchanges"]) == 1
+    answer = collaboration.respond_handoff_challenge(
+        seeded, challenge["id"], agent_id="ag1",
+        content="Added rollback verification to the evidence bundle")
+    assert answer["status"] == "open"
+    with pytest.raises(ValueError, match="receiving agent"):
+        collaboration.respond_handoff_challenge(
+            seeded, challenge["id"], agent_id="ag1", content="Looks fine",
+            resolution="accepted")
+    accepted = collaboration.respond_handoff_challenge(
+        seeded, challenge["id"], agent_id="ag2", content="Evidence is now sufficient",
+        resolution="accepted")
+    assert accepted["status"] == "accepted" and accepted["resolved_at"]
+    assert len(collaboration.job_handoff_challenges(seeded, "job1")) == 1
+
+
+def test_unresolved_challenge_escalates_at_the_five_exchange_limit(seeded):
+    seeded.write("INSERT INTO agents(id,amos_agent_id,name,executor_type,created_at,"
+                 "updated_at) VALUES('ag2','ag2','Agent Two','fake',?,?)",
+                 (now(), now()))
+    seeded.write("UPDATE jobs SET stages_snapshot_json=? WHERE id='job1'", (
+        '[{"name":"review","max_challenge_exchanges":5}]',))
+    handoff_id = collaboration.record_handoff(
+        seeded, project_id="proj1", job_id="job1", run_id="run1",
+        from_stage="build", to_stage="review", agent_id="ag1",
+        summary="Review this", paths=[])
+    collaboration.deliver_handoffs(seeded, "job1", "review", "ag2")
+    challenge = collaboration.open_handoff_challenge(
+        seeded, handoff_id, agent_id="ag2", claim="I cannot verify this")
+    for turn, agent_id in enumerate(["ag1", "ag2", "ag1", "ag2"], start=2):
+        challenge = collaboration.respond_handoff_challenge(
+            seeded, challenge["id"], agent_id=agent_id, content=f"turn {turn}")
+    assert challenge["status"] == "human_ruling"
+    with pytest.raises(ValueError, match="already human_ruling"):
+        collaboration.respond_handoff_challenge(
+            seeded, challenge["id"], agent_id="ag1", content="turn 6")

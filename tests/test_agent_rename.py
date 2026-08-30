@@ -42,11 +42,14 @@ def _seed_graph(home: Home, run_status: str = "succeeded") -> None:
          "responder_id,created_at,updated_at) "
          "VALUES('chat1','project','p1','Chat','agent','old-agent',?,?)", (ts, ts)),
         ("INSERT INTO stage_handoffs(id,project_id,job_id,run_id,from_stage,agent_id,"
-         "delivered_to_agent_id,acknowledged_by,at) "
-         "VALUES('h1','p1','j1','run1','work','old-agent','old-agent','old-agent',?)",
+         "to_stage,delivered_to_agent_id,acknowledged_by,at) "
+         "VALUES('h1','p1','j1','run1','work','old-agent','next','old-agent','old-agent',?)",
          (ts,)),
         ("INSERT INTO handoff_receipts(id,handoff_id,job_id,stage,agent_id,delivered_at) "
          "VALUES('hr1','h1','j1','next','old-agent',?)", (ts,)),
+        ("INSERT INTO handoff_challenges(id,handoff_id,project_id,job_id,from_stage,"
+         "to_stage,opened_by_agent_id,created_at,updated_at) "
+         "VALUES('hc1','h1','p1','j1','work','next','old-agent',?,?)", (ts, ts)),
     ])
     db.close()
 
@@ -64,6 +67,7 @@ def test_agent_id_rename_moves_every_reference_and_keeps_memory_identity(tmp_pat
     checks = [
         ("project_agent_roles", "agent_id"), ("runs", "agent_id"),
         ("stage_handoffs", "agent_id"), ("handoff_receipts", "agent_id"),
+        ("handoff_challenges", "opened_by_agent_id"),
     ]
     for table, column in checks:
         assert db.one(f"SELECT {column} AS value FROM {table}")["value"] == "new-agent"

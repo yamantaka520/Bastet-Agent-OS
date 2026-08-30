@@ -7,7 +7,13 @@ import pytest
 from fake_executor import SCRIPT, add_template, req
 
 from bastet_agent_os.executors.base import RunResult
-from bastet_agent_os.workflow import evaluate_gate, parse_stages
+from bastet_agent_os.workflow import (
+    evaluate_gate,
+    parse_stages,
+    ready_stages,
+    refresh_ready_nodes,
+    seed_stage_nodes,
+)
 
 # ---- stage/template validation ---------------------------------------------------
 
@@ -20,6 +26,63 @@ def test_parse_stages_validates():
         parse_stages([{"name": "a"}, {"name": "a"}])  # duplicate
     with pytest.raises(ValueError):
         parse_stages([{"name": "a", "gate": "tests-pass"}])  # no command
+
+
+def test_legacy_stages_become_a_linear_graph():
+    stages = parse_stages([{"name": "plan"}, {"name": "build"}, {"name": "verify"}])
+    assert [stage.needs for stage in stages] == [[], ["plan"], ["build"]]
+    assert [stage.name for stage in ready_stages(stages, set())] == ["plan"]
+
+
+def test_graph_stages_expose_parallel_roots_and_join_contract():
+    stages = parse_stages([
+        {"name": "architecture", "needs": [], "read_only": True,
+         "produces": ["system-contract"]},
+        {"name": "ux", "needs": ["architecture"], "workspace": "isolated",
+         "consumes": ["system-contract"], "produces": ["ux-spec"]},
+        {"name": "core", "needs": ["architecture"], "workspace": "isolated",
+         "consumes": ["system-contract"], "produces": ["core-api"]},
+        {"name": "integration", "needs": ["ux", "core"],
+         "consumes": ["ux-spec", "core-api"]},
+    ])
+    assert [s.name for s in ready_stages(stages, {"architecture"})] == ["ux", "core"]
+    assert [s.name for s in ready_stages(stages, {"architecture", "ux"})] == ["core"]
+    assert [s.name for s in ready_stages(stages, {"architecture", "ux", "core"})] == [
+        "integration"]
+
+
+@pytest.mark.parametrize("raw,match", [
+    ([{"name": "a", "needs": ["missing"]}], "unknown dependencies"),
+    ([{"name": "a", "needs": ["b"]}, {"name": "b", "needs": ["a"]}], "cycle"),
+    ([{"name": "a", "needs": [], "produces": ["x"]},
+      {"name": "b", "needs": [], "consumes": ["x"]}], "not produced by a dependency"),
+    ([{"name": "a", "needs": []}, {"name": "b", "needs": []}],
+     "parallel writable stages"),
+])
+def test_graph_contract_rejects_unsafe_or_unsatisfied_dags(raw, match):
+    with pytest.raises(ValueError, match=match):
+        parse_stages(raw)
+
+
+def test_stage_node_state_is_durable_and_promotes_join_only_after_all_needs(seeded):
+    stages = parse_stages([
+        {"name": "plan", "needs": [], "read_only": True},
+        {"name": "ui", "needs": ["plan"], "workspace": "isolated"},
+        {"name": "core", "needs": ["plan"], "workspace": "isolated"},
+        {"name": "join", "needs": ["ui", "core"]},
+    ])
+    nodes = seed_stage_nodes(seeded, "job1", stages)
+    assert [(node["stage"], node["status"]) for node in nodes] == [
+        ("plan", "ready"), ("ui", "pending"), ("core", "pending"), ("join", "pending")]
+    seeded.write("UPDATE job_stage_nodes SET status='passed' WHERE job_id='job1' "
+                 "AND stage='plan'")
+    assert refresh_ready_nodes(seeded, "job1", stages) == ["ui", "core"]
+    seeded.write("UPDATE job_stage_nodes SET status='passed' WHERE job_id='job1' "
+                 "AND stage='ui'")
+    assert refresh_ready_nodes(seeded, "job1", stages) == []
+    seeded.write("UPDATE job_stage_nodes SET status='passed' WHERE job_id='job1' "
+                 "AND stage='core'")
+    assert refresh_ready_nodes(seeded, "job1", stages) == ["join"]
 
 
 def test_tests_pass_gate_runs_command(tmp_path):

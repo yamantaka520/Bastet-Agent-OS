@@ -22,6 +22,7 @@ log = logging.getLogger("bastet.events")
 # emits a literal type that is not listed here.
 EVENT_TYPES = {
     "handoff.acknowledged",
+    "handoff.challenge_opened", "handoff.challenge_updated", "handoff.challenge_resolved",
     # jobs
     "job.created", "job.stage_changed", "job.done", "job.blocked", "job.cancelled",
     "job.rework", "job.resumed", "job.retried", "job.archived", "job.deleted",

@@ -152,6 +152,118 @@ def acknowledge_handoff(db, handoff_id: str, *, agent_id: str,
     return dict(db.one("SELECT * FROM stage_handoffs WHERE id=?", (handoff_id,)))
 
 
+def _challenge_dict(row) -> dict[str, Any]:
+    item = dict(row)
+    item["exchanges"] = json.loads(item.pop("exchanges_json") or "[]")
+    return item
+
+
+def _challenge_limit(db, handoff) -> int:
+    """Read the receiving stage's frozen contract; default safely for v1 jobs."""
+    job = db.one("SELECT stages_snapshot_json FROM jobs WHERE id=?", (handoff["job_id"],))
+    if job:
+        try:
+            for stage in json.loads(job["stages_snapshot_json"] or "[]"):
+                if stage.get("name") == handoff["to_stage"]:
+                    if not stage.get("challenge", True):
+                        return 0
+                    return max(0, min(5, int(stage.get("max_challenge_exchanges", 5))))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return 5
+
+
+def open_handoff_challenge(db, handoff_id: str, *, agent_id: str,
+                           claim: str, evidence_gap: str = "",
+                           requested_resolution: str = "") -> dict[str, Any]:
+    handoff = db.one("SELECT * FROM stage_handoffs WHERE id=?", (handoff_id,))
+    if handoff is None:
+        raise ValueError(f"unknown handoff {handoff_id!r}")
+    if not handoff["to_stage"]:
+        raise ValueError("completed-job handoff cannot be challenged")
+    receipt = db.one("SELECT id FROM handoff_receipts WHERE handoff_id=? AND agent_id=?",
+                     (handoff_id, agent_id))
+    expected = handoff["delivered_to_agent_id"]
+    if receipt is None and expected != agent_id:
+        raise ValueError("only the receiving agent can open a handoff challenge")
+    if not claim.strip():
+        raise ValueError("challenge claim is required")
+    limit = _challenge_limit(db, handoff)
+    if limit == 0:
+        raise ValueError("challenge is disabled for the receiving stage")
+    existing = db.one("SELECT id FROM handoff_challenges WHERE handoff_id=? "
+                      "AND to_stage=?", (handoff_id, handoff["to_stage"]))
+    if existing:
+        raise ValueError(f"handoff challenge already exists: {existing['id']}")
+    challenge_id = new_id("chl")
+    stamp = now()
+    exchange = {"turn": 1, "agent_id": agent_id, "kind": "challenge",
+                "content": claim.strip(), "evidence_gap": evidence_gap.strip(),
+                "requested_resolution": requested_resolution.strip(), "at": stamp}
+    db.write(
+        "INSERT INTO handoff_challenges(id,handoff_id,project_id,job_id,from_stage,"
+        "to_stage,opened_by_agent_id,status,exchanges_json,max_exchanges,created_at,"
+        "updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        (challenge_id, handoff_id, handoff["project_id"], handoff["job_id"],
+         handoff["from_stage"], handoff["to_stage"], agent_id, "open",
+         json.dumps([exchange], ensure_ascii=False), limit, stamp, stamp))
+    post(db, handoff["project_id"], author_type="agent", author_id=agent_id,
+         kind="handoff_challenge", content=claim.strip(),
+         meta={"challenge_id": challenge_id, "handoff_id": handoff_id,
+               "job_id": handoff["job_id"], "evidence_gap": evidence_gap,
+               "requested_resolution": requested_resolution, "turn": 1})
+    return _challenge_dict(db.one("SELECT * FROM handoff_challenges WHERE id=?",
+                                  (challenge_id,)))
+
+
+def respond_handoff_challenge(db, challenge_id: str, *, agent_id: str,
+                              content: str, resolution: str = "") -> dict[str, Any]:
+    row = db.one("SELECT c.*,h.agent_id AS source_agent_id FROM handoff_challenges c "
+                 "JOIN stage_handoffs h ON h.id=c.handoff_id WHERE c.id=?",
+                 (challenge_id,))
+    if row is None:
+        raise ValueError(f"unknown handoff challenge {challenge_id!r}")
+    if row["status"] != "open":
+        raise ValueError(f"challenge is already {row['status']}")
+    if agent_id not in (row["source_agent_id"], row["opened_by_agent_id"]):
+        raise ValueError("only the source or receiving agent can answer this challenge")
+    if not content.strip():
+        raise ValueError("challenge response is required")
+    allowed = {"", "accepted", "rework_required", "human_ruling"}
+    if resolution not in allowed:
+        raise ValueError(f"resolution must be one of {sorted(allowed - {''})}")
+    if resolution == "accepted" and agent_id != row["opened_by_agent_id"]:
+        raise ValueError("only the receiving agent can accept the handoff")
+    if resolution == "rework_required" and agent_id != row["source_agent_id"]:
+        raise ValueError("only the source agent can accept rework")
+    exchanges = json.loads(row["exchanges_json"] or "[]")
+    turn = len(exchanges) + 1
+    if turn > row["max_exchanges"]:
+        raise ValueError("challenge exchange limit reached")
+    stamp = now()
+    exchanges.append({"turn": turn, "agent_id": agent_id, "kind": "response",
+                      "content": content.strip(), "resolution": resolution, "at": stamp})
+    status = resolution or "open"
+    if status == "open" and turn >= row["max_exchanges"]:
+        status = "human_ruling"
+    resolved_at = stamp if status != "open" else None
+    db.write("UPDATE handoff_challenges SET status=?,exchanges_json=?,updated_at=?,"
+             "resolved_at=? WHERE id=?", (status, json.dumps(exchanges, ensure_ascii=False),
+                                           stamp, resolved_at, challenge_id))
+    post(db, row["project_id"], author_type="agent", author_id=agent_id,
+         kind="handoff_challenge", content=content.strip(),
+         meta={"challenge_id": challenge_id, "handoff_id": row["handoff_id"],
+               "job_id": row["job_id"], "turn": turn, "status": status})
+    return _challenge_dict(db.one("SELECT * FROM handoff_challenges WHERE id=?",
+                                  (challenge_id,)))
+
+
+def job_handoff_challenges(db, job_id: str) -> list[dict[str, Any]]:
+    return [_challenge_dict(row) for row in db.query(
+        "SELECT * FROM handoff_challenges WHERE job_id=? ORDER BY created_at,rowid",
+        (job_id,))]
+
+
 def acknowledge_delivered_handoffs(db, *, job_id: str, stage: str,
                                     agent_id: str, summary: str) -> list[str]:
     """Close delivered receipts using the receiving Agent's own stage report."""

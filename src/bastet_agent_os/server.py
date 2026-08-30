@@ -332,6 +332,19 @@ class HandoffAckIn(BaseModel):
     questions: list[str] = []
 
 
+class HandoffChallengeIn(BaseModel):
+    agent_id: str
+    claim: str
+    evidence_gap: str = ""
+    requested_resolution: str = ""
+
+
+class HandoffChallengeResponseIn(BaseModel):
+    agent_id: str
+    content: str
+    resolution: str = ""
+
+
 class ContextEvalIn(BaseModel):
     job_id: str
     stage: str
@@ -638,6 +651,59 @@ def create_app(home: Home) -> FastAPI:
         bus.emit("handoff.acknowledged", project_id, handoff_id=handoff_id,
                  agent_id=body.agent_id)
         return result
+
+    @app.post("/api/projects/{project_id}/handoffs/{handoff_id}/challenges")
+    def open_project_handoff_challenge(
+        project_id: str, handoff_id: str, body: HandoffChallengeIn,
+        auth: Auth = Depends(require_role("operator")),
+    ):
+        from . import collaboration
+        row = db.one("SELECT project_id FROM stage_handoffs WHERE id=?", (handoff_id,))
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="handoff not found")
+        try:
+            result = collaboration.open_handoff_challenge(
+                db, handoff_id, agent_id=body.agent_id, claim=body.claim,
+                evidence_gap=body.evidence_gap,
+                requested_resolution=body.requested_resolution)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        db.audit(auth.actor, "handoff.challenge_opened", "handoff_challenge",
+                 result["id"], {"handoff_id": handoff_id, "agent_id": body.agent_id})
+        bus.emit("handoff.challenge_opened", project_id, challenge_id=result["id"],
+                 handoff_id=handoff_id, agent_id=body.agent_id)
+        return result
+
+    @app.post("/api/projects/{project_id}/handoff-challenges/{challenge_id}/exchanges")
+    def respond_project_handoff_challenge(
+        project_id: str, challenge_id: str, body: HandoffChallengeResponseIn,
+        auth: Auth = Depends(require_role("operator")),
+    ):
+        from . import collaboration
+        row = db.one("SELECT project_id FROM handoff_challenges WHERE id=?", (challenge_id,))
+        if row is None or row["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="handoff challenge not found")
+        try:
+            result = collaboration.respond_handoff_challenge(
+                db, challenge_id, agent_id=body.agent_id, content=body.content,
+                resolution=body.resolution)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        event = ("handoff.challenge_resolved" if result["status"] != "open"
+                 else "handoff.challenge_updated")
+        db.audit(auth.actor, event, "handoff_challenge", challenge_id,
+                 {"agent_id": body.agent_id, "status": result["status"]})
+        bus.emit(event, project_id, challenge_id=challenge_id,
+                 agent_id=body.agent_id, status=result["status"])
+        return result
+
+    @app.get("/api/jobs/{job_id}/handoff-challenges",
+             dependencies=[Depends(require_role("viewer"))])
+    def list_job_handoff_challenges(job_id: str):
+        if db.one("SELECT id FROM jobs WHERE id=?", (job_id,)) is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        from . import collaboration
+        return collaboration.job_handoff_challenges(db, job_id)
 
     @app.post("/api/projects/{project_id}/room/messages")
     def post_project_room_message(project_id: str, body: RoomMessageIn,

@@ -116,6 +116,25 @@ CREATE TABLE IF NOT EXISTS jobs (
   updated_at TEXT NOT NULL
 );
 
+-- Runtime state is per graph node, not inferred from the legacy jobs.stage
+-- cursor.  The cursor remains during the v1/v2 transition; graph scheduling
+-- reads these rows once a job has been admitted by the v2 scheduler.
+CREATE TABLE IF NOT EXISTS job_stage_nodes (
+  job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  stage TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending|ready|running|passed|failed|blocked
+  needs_json TEXT NOT NULL DEFAULT '[]',
+  workspace TEXT NOT NULL DEFAULT 'shared',
+  worktree_path TEXT,
+  head_commit TEXT,
+  started_at TEXT,
+  finished_at TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(job_id, stage)
+);
+CREATE INDEX IF NOT EXISTS idx_job_stage_nodes_ready
+  ON job_stage_nodes(job_id, status);
+
 CREATE TABLE IF NOT EXISTS deliveries (
   id TEXT PRIMARY KEY,
   job_id TEXT NOT NULL REFERENCES jobs(id),
@@ -392,6 +411,27 @@ CREATE TABLE IF NOT EXISTS handoff_receipts (
 CREATE INDEX IF NOT EXISTS idx_handoff_receipts_job
   ON handoff_receipts(job_id, stage, delivered_at);
 
+-- A receiving stage may challenge evidence or assumptions before accepting a
+-- handoff.  Exchanges are bounded so two agents cannot debate forever.
+CREATE TABLE IF NOT EXISTS handoff_challenges (
+  id TEXT PRIMARY KEY,
+  handoff_id TEXT NOT NULL REFERENCES stage_handoffs(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  from_stage TEXT NOT NULL,
+  to_stage TEXT NOT NULL,
+  opened_by_agent_id TEXT NOT NULL REFERENCES agents(id),
+  status TEXT NOT NULL DEFAULT 'open', -- open|accepted|rework_required|human_ruling
+  exchanges_json TEXT NOT NULL DEFAULT '[]',
+  max_exchanges INTEGER NOT NULL DEFAULT 5,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  resolved_at TEXT,
+  UNIQUE(handoff_id, to_stage)
+);
+CREATE INDEX IF NOT EXISTS idx_handoff_challenges_job
+  ON handoff_challenges(job_id, status, updated_at);
+
 -- A durable dispatch fence for safe upgrades.  The row exists even while the
 -- fence is open so status checks never depend on process-local state.
 CREATE TABLE IF NOT EXISTS maintenance_lock (
@@ -614,6 +654,8 @@ class Db:
                 ("UPDATE runs SET agent_id=? WHERE agent_id=?", (new_id, old_id)),
                 ("UPDATE stage_handoffs SET agent_id=? WHERE agent_id=?", (new_id, old_id)),
                 ("UPDATE handoff_receipts SET agent_id=? WHERE agent_id=?", (new_id, old_id)),
+                ("UPDATE handoff_challenges SET opened_by_agent_id=? "
+                 "WHERE opened_by_agent_id=?", (new_id, old_id)),
                 ("UPDATE jobs SET default_agent_id=? WHERE default_agent_id=?", (new_id, old_id)),
                 ("UPDATE jobs SET agent_override=? WHERE agent_override=?", (new_id, old_id)),
                 ("UPDATE grants SET scope_id=? WHERE scope_type='agent' AND scope_id=?",

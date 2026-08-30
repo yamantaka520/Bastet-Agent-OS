@@ -121,8 +121,11 @@ integration delivery.
    persisted PM/system-analysis negotiation with a lifetime five-exchange cap;
    solution readiness and server-side decomposition gate; role/capability
    coverage lint remains pending.
-4. **Workflow graph:** stage dependencies, artifact contracts, challenge records
-   and joins; migrate built-in templates and role prompts.
+4. **Workflow graph (contract implemented, runtime pending):** stage dependency,
+   artifact, workspace-isolation and challenge contracts now validate and persist;
+   legacy lists normalize to linear dependencies. The runtime still needs to
+   schedule isolated stage worktrees and join their outputs before built-in
+   templates can safely become parallel graphs.
 5. **Evidence/delivery:** evidence matrix and mandatory merge/integration receipt
    for development work.
 6. **Experience:** graph UI, frozen/intake conversations, Telegram progress and
@@ -135,8 +138,13 @@ planning, system analysis, architecture, UX, UI, visual art, integration and
 release management. The second slice runs the assigned PM and system analyst as
 separate read-only agents, persists and displays each proposal/challenge, emits
 live exchange events, resumes without resetting the five-exchange lifetime cap,
-and unlocks decomposition only after an `accept` verdict. Workflow-stage DAGs
-and handoff challenges remain the next core slice.
+and unlocks decomposition only after an `accept` verdict. The third slice adds
+cycle/dependency/artifact/parallel-write linting, durable per-stage node state,
+template-editor graph fields, and structured handoff challenges. Only a receiving
+agent can open or accept a challenge; source and receiver responses are recorded
+in the project room, bounded at five exchanges, and unresolved discussions become
+`human_ruling`. This is the admission and persistence layer, not yet a claim that
+the stage runtime executes parallel writable branches.
 
 No phase is shipped solely from unit tests. It needs migration, restart and race
 tests, a real multi-branch rehearsal, and an end-to-end receipt proving the target

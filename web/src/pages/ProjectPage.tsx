@@ -16,7 +16,8 @@ type Project = {
   transitions: string[]; progress: Progress; task_count: number;
   running: boolean; created_at: string; updated_at: string;
 };
-type Stage = { name: string; role?: string | null; gate: string; read_only?: boolean };
+type Stage = { name: string; role?: string | null; gate: string; read_only?: boolean;
+               needs?: string[]; workspace?: "shared" | "isolated" };
 type Agent = { id: string; name: string; executor_type: string; enabled: number };
 type Role = { id: string; label: string };
 type Template = { id: string };
