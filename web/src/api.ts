@@ -39,6 +39,7 @@ export type Run = {
 };
 
 export type Gate = {
+  run_id: string;
   gate_type: string;
   verdict: string;
   reviewer_kind: string;

@@ -158,9 +158,6 @@ class Orchestrator:
             stages_raw = SINGLE_STAGE
         stages = parse_stages(stages_raw)  # validates; job snapshots the raw form
         if not is_linear_stage_graph(stages):
-            if any(stage.gate == "human-approve" for stage in stages):
-                raise ValueError(
-                    "human-approve is not yet supported in a branching stage graph")
             sinks = [stage for stage in stages if not any(
                 stage.name in candidate.needs for candidate in stages)]
             if len(sinks) != 1 or sinks[0].workspace != "shared":
@@ -1707,11 +1704,15 @@ class Orchestrator:
 
     # -- human approval (SPEC §5.4.2) --------------------------------------------
 
-    def approve(self, job_id: str, approved: bool, comment: str, user: str = "user") -> dict:
+    def approve(self, job_id: str, approved: bool, comment: str, user: str = "user",
+                stage_name: str = "") -> dict:
         job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if job is None:
             raise ValueError(f"unknown job {job_id!r}")
         stages = parse_stages(json.loads(job["stages_snapshot_json"]))
+        if not is_linear_stage_graph(stages):
+            return self._approve_graph_node(job, stages, approved, comment, user,
+                                            stage_name)
         names = [s.name for s in stages]
         idx = names.index(job["stage"])
         if stages[idx].gate != "human-approve" or job["status"] != "blocked":
@@ -1777,6 +1778,87 @@ class Orchestrator:
             agent_id=job["default_agent_id"], resource_id=job["resource_id"])
         self._spawn(self._drive_job(job_id, req))
         return {"job_id": job_id, "status": "in_progress", "stage": names[idx + 1]}
+
+    def _approve_graph_node(self, job, stages: list[StageDef], approved: bool,
+                            comment: str, user: str, stage_name: str) -> dict:
+        """Resolve one pending human gate without serialising the whole DAG."""
+        by_name = {stage.name: stage for stage in stages}
+        candidates = [row["stage"] for row in self.db.query(
+            "SELECT n.stage FROM job_stage_nodes n WHERE n.job_id=? AND n.status='blocked' "
+            "AND EXISTS (SELECT 1 FROM runs r JOIN gate_results g ON g.run_id=r.id "
+            "WHERE r.job_id=n.job_id AND r.stage=n.stage AND g.gate_type='human-approve' "
+            "AND g.verdict='pending') ORDER BY n.rowid", (job["id"],))
+            if by_name.get(row["stage"]) and by_name[row["stage"]].gate == "human-approve"]
+        if stage_name:
+            if stage_name not in candidates:
+                raise ValueError(f"stage {stage_name!r} is not waiting for human approval")
+            target = stage_name
+        elif len(candidates) == 1:
+            target = candidates[0]
+        elif not candidates:
+            raise ValueError(f"job {job['id']} has no graph stage waiting for approval")
+        else:
+            raise ValueError("multiple graph stages are waiting for approval; specify stage")
+
+        stage = by_name[target]
+        run = self.db.one(
+            "SELECT * FROM runs WHERE job_id=? AND stage=? ORDER BY attempt DESC LIMIT 1",
+            (job["id"], target))
+        if run is None:
+            raise ValueError(f"stage {target!r} has no run to approve")
+        self._record_gate(run["id"], stage,
+                          GateOutcome("passed" if approved else "failed", comment),
+                          reviewer_kind="user", reviewer_id=user)
+        self.db.audit(f"user:{user}", "gate.human", "job", job["id"],
+                      {"stage": target, "approved": approved,
+                       "comment": comment[:300], "graph": True})
+        if not approved:
+            self.db.write("UPDATE job_stage_nodes SET status='failed',updated_at=? "
+                          "WHERE job_id=? AND stage=?", (now(), job["id"], target))
+            self._block(job["id"], f"stage {target} rejected by {user}", stage=target)
+            return {"job_id": job["id"], "status": "blocked", "stage": target}
+
+        from . import collaboration
+        artifacts = json.loads(run["artifacts_json"] or "{}")
+        summary = str(artifacts.get("summary") or run["progress_text"] or comment
+                      or "已由人工核准完成")
+        workdir = run["workdir"] or job["worktree_path"] or self._project_repo(job)
+        paths = collaboration.changed_paths(workdir)
+        dependents = [candidate.name for candidate in stages if target in candidate.needs]
+        for next_stage in dependents or [None]:
+            handoff_id = collaboration.record_handoff(
+                self.db, project_id=job["project_id"], job_id=job["id"],
+                run_id=run["id"], from_stage=target, to_stage=next_stage,
+                agent_id=run["agent_id"], summary=summary[:3000], paths=paths,
+                verification=[f"human-approve: passed by {user}"])
+            self.db.audit("orchestrator", "stage.handoff", "job", job["id"],
+                          {"handoff_id": handoff_id, "from": target,
+                           "to": next_stage, "changed_paths": paths[:50],
+                           "via": "human-approve", "graph": True})
+        from .stage_runtime import finish_node
+        finish_node(self.db, job["id"], target, status="passed",
+                    head_commit=self._worktree_head(workdir))
+        refresh_ready_nodes(self.db, job["id"], stages)
+        self._emit("stage.node_passed", job["project_id"], job_id=job["id"],
+                   stage=target, head_commit=self._worktree_head(workdir),
+                   dependents=dependents, via="human-approve")
+
+        blockers = self.db.query(
+            "SELECT stage,status FROM job_stage_nodes WHERE job_id=? "
+            "AND status IN ('blocked','failed')", (job["id"],))
+        if blockers:
+            next_blocked = blockers[0]["stage"]
+            self.db.write("UPDATE jobs SET stage=?,status='blocked',updated_at=? WHERE id=?",
+                          (next_blocked, now(), job["id"]))
+            return {"job_id": job["id"], "status": "blocked", "stage": next_blocked}
+        self.db.write("UPDATE jobs SET stage=?,status='in_progress',updated_at=? WHERE id=?",
+                      ((dependents or [target])[0], now(), job["id"]))
+        req = DispatchRequest(
+            project_id=job["project_id"], prompt=job["spec_md"], title=job["title"],
+            agent_id=job["default_agent_id"], resource_id=job["resource_id"])
+        self._spawn(self._drive_job(job["id"], req))
+        return {"job_id": job["id"], "status": "in_progress",
+                "stage": (dependents or [target])[0]}
 
     def retry(self, job_id: str, agent_id: str = "", user: str = "user",
               spec: str = "", refresh_workflow: bool = True,

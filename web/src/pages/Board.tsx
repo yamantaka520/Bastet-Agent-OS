@@ -225,6 +225,7 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   const t = useT();
   const [job, setJob] = useState<JobDetail | null>(null);
   const [comment, setComment] = useState("");
+  const [approvalStage, setApprovalStage] = useState("");
   const [interactions, setInteractions] = useState<Record<string, Interaction[]>>({});
   const [diff, setDiff] = useState<string | null>(null);
   const [agents, setAgents] = useState<{ id: string }[]>([]);
@@ -318,7 +319,21 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
 
   if (!job) return null;
   const lastGate = job.gates[job.gates.length - 1];
-  const waitingApproval = job.status === "blocked" && lastGate?.verdict === "pending";
+  let stageDefs: { name: string; gate?: string }[] = [];
+  try { stageDefs = JSON.parse(job.stages_snapshot_json || "[]"); } catch { /* keep [] */ }
+  const pendingApprovalStages = (job.stage_nodes ?? []).filter((node) => {
+    if (node.status !== "blocked"
+        || stageDefs.find((stage) => stage.name === node.stage)?.gate !== "human-approve") {
+      return false;
+    }
+    const runIds = new Set(job.runs.filter((run) => run.stage === node.stage)
+      .map((run) => run.id));
+    return job.gates.some((gate) => runIds.has(gate.run_id)
+      && gate.gate_type === "human-approve" && gate.verdict === "pending");
+  }).map((node) => node.stage);
+  const waitingApproval = job.status === "blocked"
+    && (pendingApprovalStages.length > 0 || lastGate?.verdict === "pending");
+  const selectedApprovalStage = approvalStage || pendingApprovalStages[0] || job.stage;
 
   // the reason the stage failed: the last run's error, shown where the retry is
   const failure = job.runs.slice().reverse()
@@ -354,7 +369,9 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   };
 
   const decide = async (approved: boolean) => {
-    await post(`/api/jobs/${jobId}/approve`, { approved, comment });
+    await post(`/api/jobs/${jobId}/approve`, {
+      approved, comment, stage: selectedApprovalStage,
+    });
     onChanged();
     load();
   };
@@ -500,6 +517,14 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
       {canOperate && waitingApproval && (
         <div className="approval">
           <h3>{t("board.waitingApproval")}</h3>
+          {pendingApprovalStages.length > 1 && (
+            <select value={selectedApprovalStage}
+                    onChange={(e) => setApprovalStage(e.target.value)}>
+              {pendingApprovalStages.map((stage) => (
+                <option key={stage} value={stage}>{stage}</option>
+              ))}
+            </select>
+          )}
           {previews.length > 0 ? (
             <div className="previews">
               {previews.map((name) => previewUrls[name] ? (

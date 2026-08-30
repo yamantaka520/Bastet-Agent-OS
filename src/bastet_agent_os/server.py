@@ -217,6 +217,7 @@ class RetryIn(BaseModel):
 class ApproveIn(BaseModel):
     approved: bool
     comment: str = ""
+    stage: str = ""  # required only when multiple graph nodes await approval
 
 
 class UserIn(BaseModel):
@@ -2379,7 +2380,8 @@ def create_app(home: Home) -> FastAPI:
                           auth: Auth = Depends(require_role("operator"))):
         # async def: resuming the job driver needs the main event loop
         try:
-            return orch.approve(job_id, a.approved, a.comment, user=auth.name)
+            return orch.approve(job_id, a.approved, a.comment, user=auth.name,
+                                stage_name=a.stage)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

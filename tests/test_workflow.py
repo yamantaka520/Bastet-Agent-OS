@@ -156,6 +156,49 @@ async def test_graph_retry_preserves_passed_sibling_and_resumes_failed_branch(or
     assert core_runs == 1
 
 
+async def test_parallel_human_gates_are_approved_by_explicit_stage(orch, seeded):
+    add_template(seeded, "approval-graph", [
+        {"name": "plan", "needs": [], "read_only": True},
+        {"name": "ux-signoff", "needs": ["plan"], "workspace": "isolated",
+         "gate": "human-approve"},
+        {"name": "api-signoff", "needs": ["plan"], "workspace": "isolated",
+         "gate": "human-approve"},
+        {"name": "join", "needs": ["ux-signoff", "api-signoff"]},
+    ])
+    SCRIPT.extend([
+        RunResult(status="succeeded", summary="plan"),
+        RunResult(status="succeeded", summary="ux ready"),
+        RunResult(status="succeeded", summary="api ready"),
+    ])
+    job_id = orch.dispatch(req(template_id="approval-graph"))
+    await orch.wait_idle()
+    nodes = {row["stage"]: row["status"] for row in seeded.query(
+        "SELECT stage,status FROM job_stage_nodes WHERE job_id=?", (job_id,))}
+    assert nodes["ux-signoff"] == nodes["api-signoff"] == "blocked"
+    with pytest.raises(ValueError, match="specify stage"):
+        orch.approve(job_id, True, "ambiguous")
+
+    first = orch.approve(job_id, True, "UX accepted", stage_name="ux-signoff")
+    assert first == {"job_id": job_id, "status": "blocked", "stage": "api-signoff"}
+    assert seeded.one(
+        "SELECT status FROM job_stage_nodes WHERE job_id=? AND stage='ux-signoff'",
+        (job_id,))["status"] == "passed"
+
+    SCRIPT.append(RunResult(status="succeeded", summary="joined"))
+    second = orch.approve(job_id, True, "API accepted", stage_name="api-signoff")
+    assert second["status"] == "in_progress"
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+    assert seeded.one(
+        "SELECT status FROM job_stage_nodes WHERE job_id=? AND stage='join'",
+        (job_id,))["status"] == "passed"
+    handoffs = seeded.query(
+        "SELECT from_stage,to_stage FROM stage_handoffs WHERE job_id=? "
+        "AND from_stage IN ('ux-signoff','api-signoff') ORDER BY from_stage", (job_id,))
+    assert [(row["from_stage"], row["to_stage"]) for row in handoffs] == [
+        ("api-signoff", "join"), ("ux-signoff", "join")]
+
+
 @pytest.mark.parametrize("raw,match", [
     ([{"name": "a", "needs": ["missing"]}], "unknown dependencies"),
     ([{"name": "a", "needs": ["b"]}, {"name": "b", "needs": ["a"]}], "cycle"),
