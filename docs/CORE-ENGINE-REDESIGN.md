@@ -114,7 +114,7 @@ integration delivery.
 
 1. **Foundation (implemented, unreleased):** durable planning rounds/intake,
    immutable sessions, task ids/dependencies, DAG validation and lifecycle APIs.
-2. **Scheduler (project task DAG implemented, stage DAG pending):** concurrent
+2. **Scheduler (project and stage DAG foundations implemented):** concurrent
    ready-node claiming, dependency persistence, failure propagation, restart
    recovery, per-project and per-resource limits.
 3. **Planning (negotiation implemented, coverage lint pending):** visible,
@@ -130,8 +130,11 @@ integration delivery.
    terminal join. Conflicts block without leaving a half-merged tree. Restart
    recovery returns orphaned nodes to ready; retry invalidates only the failed
    branch and its descendants; completed checkouts are removed while branches
-   and commit receipts remain. Branching graphs with `human-approve` remain
-   admission-blocked until approval is attributable per node.
+   and commit receipts remain. `human-approve` is attributable per node, and a
+   sibling approval cannot release a downstream join early. Before a challenged
+   node starts, its receiver reviews the latest handoff from every dependency;
+   source and receiver then alternate for at most five durable exchanges,
+   resulting in acceptance, predecessor rework, or human ruling.
 5. **Evidence/delivery:** evidence matrix and mandatory merge/integration receipt
    for development work.
 6. **Experience:** graph UI, frozen/intake conversations, Telegram progress and
@@ -152,8 +155,10 @@ in the project room, bounded at five exchanges, and unresolved discussions becom
 `human_ruling`. The fourth slice connects durable stage nodes to the orchestrator,
 runs isolated writable siblings concurrently, joins them into the job branch,
 exposes node state in the Jobs API and board, and emits live node lifecycle events.
-Automatic receiver-agent challenge turns, graph-node human approval, graph rework
-policy beyond explicit retry, and built-in template migration remain pending.
+The fifth and sixth slices add graph-node human approval and automatic, restart-
+durable receiver/source challenge turns before execution. Rework resets the source
+subgraph; an unresolved fifth exchange blocks for human ruling. Built-in template
+migration and broader evidence/delivery coverage remain pending.
 
 No phase is shipped solely from unit tests. It needs migration, restart and race
 tests, a real multi-branch rehearsal, and an end-to-end receipt proving the target

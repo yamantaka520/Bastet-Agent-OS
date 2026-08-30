@@ -1089,6 +1089,49 @@ class Orchestrator:
                             detail="durable node states cannot make progress")
                 return
             selected = ready[:self._stage_parallelism(job["project_id"])]
+            review_restart = False
+            for stage in selected:
+                if not stage.needs or not stage.challenge:
+                    continue
+                try:
+                    from .handoff_review import review
+                    receiver = self._agent_for_stage(job, stage)
+                    review_outcome = await review(
+                        self.db, job=job, stage=stage, receiver=receiver,
+                        workdir=self._ensure_workdir(job, True))
+                except Exception as exc:
+                    from .stage_runtime import finish_node
+                    finish_node(self.db, job_id, stage.name, status="blocked")
+                    self._block(job_id, f"stage {stage.name}: handoff review failed",
+                                stage=stage.name, detail=str(exc)[:1500])
+                    return
+                self.db.audit("orchestrator", "stage.handoff_review", "job", job_id,
+                              {"stage": stage.name, "status": review_outcome.status,
+                               "source_stage": review_outcome.source_stage,
+                               "challenge_id": review_outcome.challenge_id,
+                               "detail": review_outcome.detail[:500]})
+                self._emit("stage.handoff_review", job["project_id"], job_id=job_id,
+                           stage=stage.name, status=review_outcome.status,
+                           source_stage=review_outcome.source_stage,
+                           challenge_id=review_outcome.challenge_id,
+                           detail=review_outcome.detail[:500])
+                if review_outcome.status == "rework_required":
+                    from .stage_runtime import reset_failed_subgraph
+                    reset_failed_subgraph(
+                        self.db, job_id, stages, review_outcome.source_stage)
+                    self.db.write("UPDATE jobs SET stage=?,status='in_progress',updated_at=? "
+                                  "WHERE id=?", (review_outcome.source_stage, now(), job_id))
+                    review_restart = True
+                    break
+                if review_outcome.status == "human_ruling":
+                    from .stage_runtime import finish_node
+                    finish_node(self.db, job_id, stage.name, status="blocked")
+                    self._block(job_id,
+                                f"stage {stage.name}: handoff challenge needs human ruling",
+                                stage=stage.name, detail=review_outcome.detail)
+                    return
+            if review_restart:
+                continue
             prepared: list[tuple[StageDef, str]] = []
             try:
                 for stage in selected:

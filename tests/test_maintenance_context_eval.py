@@ -4,6 +4,7 @@ from bastet_agent_os import collaboration, maintenance_mode
 from bastet_agent_os.context_engine import build_context
 from bastet_agent_os.context_eval import evaluate
 from bastet_agent_os.db import now
+from bastet_agent_os.workflow import parse_stages
 
 
 async def test_human_approval_publishes_handoff_to_project_room(orch, seeded):
@@ -160,3 +161,57 @@ def test_unresolved_challenge_escalates_at_the_five_exchange_limit(seeded):
     with pytest.raises(ValueError, match="already human_ruling"):
         collaboration.respond_handoff_challenge(
             seeded, challenge["id"], agent_id="ag1", content="turn 6")
+
+
+async def test_automatic_handoff_review_challenges_then_accepts(seeded, repo):
+    from fake_executor import SCRIPT
+
+    from bastet_agent_os.executors.base import RunResult
+    from bastet_agent_os.handoff_review import review
+
+    seeded.write("UPDATE agents SET executor_type='fake' WHERE id='ag1'")
+    seeded.write("INSERT INTO agents(id,amos_agent_id,name,executor_type,created_at,"
+                 "updated_at) VALUES('ag2','ag2','Receiver','fake',?,?)",
+                 (now(), now()))
+    stages_raw = [
+        {"name": "build", "needs": []},
+        {"name": "review", "needs": ["build"], "read_only": True,
+         "challenge": True, "max_challenge_exchanges": 5},
+    ]
+    import json
+    seeded.write("UPDATE jobs SET stages_snapshot_json=? WHERE id='job1'",
+                 (json.dumps(stages_raw),))
+    handoff_id = collaboration.record_handoff(
+        seeded, project_id="proj1", job_id="job1", run_id="run1",
+        from_stage="build", to_stage="review", agent_id="ag1",
+        summary="implemented migration", paths=["db/migrate.sql"],
+        verification=["unit tests passed"])
+    SCRIPT.extend([
+        RunResult(status="succeeded", summary=json.dumps({
+            "verdict": "challenge", "response": "rollback proof is missing",
+            "handoff_id": handoff_id, "evidence_gap": "no rollback",
+            "requested_resolution": "show rollback verification"})),
+        RunResult(status="succeeded", summary=json.dumps({
+            "resolution": "answer", "response": "rollback test now passes"})),
+        RunResult(status="succeeded", summary=json.dumps({
+            "verdict": "accept", "response": "rollback evidence is sufficient"})),
+    ])
+    outcome = await review(
+        seeded, job=seeded.one("SELECT * FROM jobs WHERE id='job1'"),
+        stage=parse_stages(stages_raw)[1],
+        receiver=seeded.one("SELECT * FROM agents WHERE id='ag2'"),
+        workdir=str(repo))
+    assert outcome.status == "accepted"
+    challenge = collaboration.job_handoff_challenges(seeded, "job1")[0]
+    assert challenge["status"] == "accepted"
+    assert len(challenge["exchanges"]) == 3
+    receipt = seeded.one("SELECT * FROM handoff_receipts WHERE handoff_id=?",
+                         (handoff_id,))
+    assert receipt["acknowledged_at"]
+    repeated = await review(
+        seeded, job=seeded.one("SELECT * FROM jobs WHERE id='job1'"),
+        stage=parse_stages(stages_raw)[1],
+        receiver=seeded.one("SELECT * FROM agents WHERE id='ag2'"),
+        workdir=str(repo))
+    assert repeated.status == "accepted"
+    assert SCRIPT == []

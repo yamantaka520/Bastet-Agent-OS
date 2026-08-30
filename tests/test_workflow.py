@@ -77,10 +77,10 @@ async def test_branching_stage_graph_runs_ready_nodes_and_reaches_join(orch, see
     add_template(seeded, "branching", [
         {"name": "plan", "needs": [], "read_only": True},
         {"name": "ui", "role": "ui-designer", "needs": ["plan"],
-         "workspace": "isolated"},
+         "workspace": "isolated", "challenge": False},
         {"name": "core", "role": "backend", "needs": ["plan"],
-         "workspace": "isolated"},
-        {"name": "join", "needs": ["ui", "core"]},
+         "workspace": "isolated", "challenge": False},
+        {"name": "join", "needs": ["ui", "core"], "challenge": False},
     ])
     def write_output(name):
         def run(spec):
@@ -131,9 +131,11 @@ def test_branching_graph_requires_one_shared_terminal_join(orch, seeded):
 async def test_graph_retry_preserves_passed_sibling_and_resumes_failed_branch(orch, seeded):
     add_template(seeded, "retry-graph", [
         {"name": "plan", "needs": [], "read_only": True},
-        {"name": "ui", "needs": ["plan"], "workspace": "isolated"},
-        {"name": "core", "needs": ["plan"], "workspace": "isolated"},
-        {"name": "join", "needs": ["ui", "core"]},
+        {"name": "ui", "needs": ["plan"], "workspace": "isolated",
+         "challenge": False},
+        {"name": "core", "needs": ["plan"], "workspace": "isolated",
+         "challenge": False},
+        {"name": "join", "needs": ["ui", "core"], "challenge": False},
     ])
     SCRIPT.extend([
         RunResult(status="succeeded", summary="plan"),
@@ -160,10 +162,11 @@ async def test_parallel_human_gates_are_approved_by_explicit_stage(orch, seeded)
     add_template(seeded, "approval-graph", [
         {"name": "plan", "needs": [], "read_only": True},
         {"name": "ux-signoff", "needs": ["plan"], "workspace": "isolated",
-         "gate": "human-approve"},
+         "gate": "human-approve", "challenge": False},
         {"name": "api-signoff", "needs": ["plan"], "workspace": "isolated",
-         "gate": "human-approve"},
-        {"name": "join", "needs": ["ux-signoff", "api-signoff"]},
+         "gate": "human-approve", "challenge": False},
+        {"name": "join", "needs": ["ux-signoff", "api-signoff"],
+         "challenge": False},
     ])
     SCRIPT.extend([
         RunResult(status="succeeded", summary="plan"),
@@ -197,6 +200,44 @@ async def test_parallel_human_gates_are_approved_by_explicit_stage(orch, seeded)
         "AND from_stage IN ('ux-signoff','api-signoff') ORDER BY from_stage", (job_id,))
     assert [(row["from_stage"], row["to_stage"]) for row in handoffs] == [
         ("api-signoff", "join"), ("ux-signoff", "join")]
+
+
+async def test_graph_receiver_reviews_handoff_before_stage_execution(orch, seeded):
+    seeded.write_many([
+        ("INSERT INTO agents(id,amos_agent_id,name,executor_type,created_at,updated_at) "
+         "VALUES('review-agent','review-agent','Reviewer','fake',datetime('now'),"
+         "datetime('now'))", ()),
+        ("INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+         "VALUES('proj1','review-agent','reviewer',10)", ()),
+    ])
+    add_template(seeded, "review-graph", [
+        {"name": "plan", "needs": [], "read_only": True},
+        {"name": "reviewed", "role": "reviewer", "needs": ["plan"],
+         "workspace": "isolated", "challenge": True},
+        {"name": "sibling", "needs": ["plan"], "workspace": "isolated",
+         "challenge": False},
+        {"name": "join", "needs": ["reviewed", "sibling"], "challenge": False},
+    ])
+    SCRIPT.extend([
+        RunResult(status="succeeded", summary="plan evidence"),
+        RunResult(status="succeeded", summary=json.dumps({
+            "verdict": "accept", "response": "evidence is sufficient"})),
+        RunResult(status="succeeded", summary="reviewed stage ran"),
+        RunResult(status="succeeded", summary="sibling ran"),
+        RunResult(status="succeeded", summary="joined"),
+    ])
+    job_id = orch.dispatch(req(template_id="review-graph"))
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+    receipt = seeded.one(
+        "SELECT hr.acknowledgement FROM handoff_receipts hr "
+        "JOIN stage_handoffs h ON h.id=hr.handoff_id WHERE h.job_id=? "
+        "AND h.to_stage='reviewed'", (job_id,))
+    assert receipt and "sufficient" in receipt["acknowledgement"]
+    review_audit = seeded.one(
+        "SELECT detail_json FROM audit_log WHERE target_id=? "
+        "AND action='stage.handoff_review'", (job_id,))
+    assert json.loads(review_audit["detail_json"])["status"] == "accepted"
 
 
 @pytest.mark.parametrize("raw,match", [
