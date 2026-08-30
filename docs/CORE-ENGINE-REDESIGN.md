@@ -72,7 +72,9 @@ production release without deploying: fetch the current remote target, merge,
 run the configured pre-deploy gate, push without force, then read the remote ref
 back and require its SHA to equal the immutable delivery receipt. Production adds
 version-source validation, an atomic version tag, deployment, and online commit
-verification.
+verification. The verifier must emit a structured receipt with `status=verified`
+and the exact target, version and commit SHA; a successful process exit alone is
+not deployment evidence.
 
 ## Implemented Telegram task observability
 
@@ -259,10 +261,19 @@ integration path to merge the current remote target rather than a stale local ma
 The receipt is accepted only when the remote target SHA exactly matches it and its
 tree contains both parallel results, the join result, and the concurrent remote change.
 
+The fifteenth removes the last implicit production-verification claim. A trusted
+`verify_command` must now emit a JSON provider receipt whose `status`, `target`,
+`version`, and `commit_sha` are bound to the delivery contract and freshly integrated
+commit. The engine parses and compares every field; empty output, legacy exit-zero-only
+checks, stale provider commits, wrong versions, and wrong targets block the card and
+cannot produce `job.deployed`. Incomplete production profiles are rejected before a
+job is created, so Agent work is not spent on an impossible delivery contract.
+
 No phase is shipped solely from unit tests. Multiprocess dispatch/restart/race now
 has an executable acceptance receipt, and the multi-branch DAG-to-remote release path
-now has an end-to-end Git receipt. Provider-specific production deployment remains a
-separate environment acceptance concern.
+now has an end-to-end Git receipt. The production provider boundary is now
+machine-checkable, while each real provider still requires an environment-specific
+verifier and canary rehearsal.
 
 ## Requirement traceability
 

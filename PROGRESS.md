@@ -29,7 +29,9 @@ Last updated: 2026-08-31
   Development workflow sinks now reject `none` and branch-only delivery: the new
   `integration` mode fetches the current remote target, merges, runs its trusted
   candidate gate, pushes without force, and verifies the remote receipt SHA;
-  `production` retains version tagging, deployment, and online verification.
+  `production` retains version tagging and deployment, then requires an online
+  verifier to emit a structured provider receipt. Exit zero alone is rejected;
+  status, target, version and commit SHA must exactly match the release.
   Telegram now renders graph-node starts/passes, handoff reviews/challenges,
   delivery transitions and evidence-grounded completion summaries. `/job` reads
   the durable task snapshot; `/ask` gives the configured responder a task-scoped
@@ -62,7 +64,7 @@ Last updated: 2026-08-31
   concurrent isolated worktrees, reviewed handoffs, terminal join and integration
   delivery. It advances remote main during execution, then proves the integration
   preserved that change and that the delivery receipt equals the remote target SHA.
-  Validation: 633 Python tests,
+  Validation: 636 Python tests,
   ruff clean, Web production build clean.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month

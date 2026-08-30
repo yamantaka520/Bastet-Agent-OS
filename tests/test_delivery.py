@@ -130,7 +130,10 @@ async def test_production_requires_new_version_and_online_verification(
         "verify_command": (
             "test -f .deploy-proof && test \"$BASTET_DELIVERY_VERSION\" = 1.4.0 "
             "&& test \"$BASTET_DELIVERY_TAG\" = v1.4.0 "
-            "&& test -n \"$BASTET_DELIVERY_COMMIT\"")
+            "&& printf '{\"status\":\"verified\",\"commit_sha\":\"%s\","
+            "\"version\":\"%s\",\"target\":\"%s\"}' "
+            "\"$BASTET_DELIVERY_COMMIT\" \"$BASTET_DELIVERY_VERSION\" "
+            "\"$BASTET_DELIVERY_TARGET\"")
     }
     seeded.write("UPDATE projects SET config_json=? WHERE id='proj1'",
                  (json.dumps({"delivery_profile": profile}),))
@@ -147,6 +150,13 @@ async def test_production_requires_new_version_and_online_verification(
     assert receipt["version"] == "1.4.0"
     assert receipt["target"] == "test-production"
     assert receipt["commit_sha"]
+    evidence = json.loads(receipt["evidence_json"])
+    assert evidence["verification_receipt"] == {
+        "status": "verified",
+        "commit_sha": receipt["commit_sha"],
+        "version": "1.4.0",
+        "target": "test-production",
+    }
     tags = subprocess.run(
         ["git", "--git-dir", str(origin), "tag", "--list"],
         capture_output=True, text=True, check=True).stdout.splitlines()
@@ -187,6 +197,56 @@ async def test_production_failure_after_publish_never_claims_done(
                       "AND target_id=?", (job_id,)) is None
     assert seeded.one("SELECT 1 FROM audit_log WHERE action='job.deployed' "
                       "AND target_id=?", (job_id,)) is None
+
+
+@pytest.mark.parametrize(("verify_command", "error"), [
+    ("true", "must emit a JSON deployment receipt"),
+    (("printf '{\"status\":\"verified\",\"commit_sha\":\"stale\","
+      "\"version\":\"1.4.0\",\"target\":\"test-production\"}'"),
+     "commit_sha expected"),
+])
+async def test_production_blocks_without_an_exact_provider_receipt(
+        orch, seeded, origin, verify_command, error):
+    profile = {
+        "target_branch": "main",
+        "target": "test-production",
+        "predeploy_command": "true",
+        "deploy_command": "true",
+        "verify_command": verify_command,
+    }
+    seeded.write("UPDATE projects SET config_json=? WHERE id='proj1'",
+                 (json.dumps({"delivery_profile": profile}),))
+    add_template(seeded, "dev", [{"name": "implement", "gate": "auto"}])
+    SCRIPT.append(writes_release)
+
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True,
+                               delivery={"mode": "production", "version": "1.4.0"}))
+    await orch.wait_idle()
+
+    job = seeded.one("SELECT status,delivery_status FROM jobs WHERE id=?", (job_id,))
+    assert dict(job) == {"status": "blocked", "delivery_status": "failed"}
+    receipt = seeded.one("SELECT status,error FROM deliveries WHERE job_id=?", (job_id,))
+    assert receipt["status"] == "failed"
+    assert error in receipt["error"]
+    assert seeded.one("SELECT 1 FROM audit_log WHERE action='job.deployed' "
+                      "AND target_id=?", (job_id,)) is None
+
+
+async def test_production_profile_is_rejected_before_job_creation_when_incomplete(
+        orch, seeded):
+    seeded.write("UPDATE projects SET config_json=? WHERE id='proj1'",
+                 (json.dumps({"delivery_profile": {
+                     "target_branch": "main",
+                     "predeploy_command": "true",
+                     "deploy_command": "true",
+                 }}),))
+    add_template(seeded, "dev", [{"name": "implement", "gate": "auto"}])
+    before = seeded.one("SELECT COUNT(*) AS n FROM jobs")["n"]
+
+    with pytest.raises(ValueError, match="missing: verify_command"):
+        orch.dispatch(req(template_id="dev", use_worktree=True,
+                          delivery={"mode": "production", "version": "1.4.0"}))
+    assert seeded.one("SELECT COUNT(*) AS n FROM jobs")["n"] == before
 
 
 async def test_failed_predeploy_gate_moves_neither_main_nor_tag(

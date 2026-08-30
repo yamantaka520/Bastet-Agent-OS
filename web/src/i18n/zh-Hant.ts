@@ -554,7 +554,7 @@ const zhHant = {
   "project.delivery.predeploy_command": "部署前驗收",
   "project.delivery.deploy_command": "部署指令",
   "project.delivery.verify_command": "線上驗證",
-  "project.deliveryHint": "正式發布卡只有在整合正式分支、部署及線上驗證全部成功後才會完成。",
+  "project.deliveryHint": "正式發布卡只有在整合正式分支、部署及線上驗證全部成功後才會完成。線上驗證最後必須輸出 JSON receipt：status=verified，且 commit_sha、version、target 與本次交付完全一致。",
   "board.stuck": "⚠ 這張卡片卡住了",
   "board.pmAsks": "PM 需要你的裁定",
   "board.rulingPh": "回答上面的問題 —— 它會進到任務收件匣，卡片接著重跑",

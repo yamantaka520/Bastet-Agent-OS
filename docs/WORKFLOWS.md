@@ -245,7 +245,10 @@ In chat, an agent's generated files return to the conversation via
    `branch` must push `bastet/<job_id>` successfully. `production` must also
    merge a freshly fetched target, atomically push it with the immutable
    `v<version>` tag, run the trusted deployment profile, and verify the exact
-   commit online. A failure is audited, blocks the card, preserves the worktree,
+   commit online. The verify command must finish by emitting a JSON receipt with
+   `status=verified` and the exact `target`, `version`, and `commit_sha`; a zero exit
+   code without that machine-checkable evidence is a failure. A failure is audited,
+   blocks the card, preserves the worktree,
    and invokes PM diagnosis; `job.done` is written only after the durable
    receipt succeeds. `none` retains the old optional best-effort branch push.
 3. The run's summary, any gate rejections, and the completion are written to

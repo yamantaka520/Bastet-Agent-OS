@@ -85,7 +85,8 @@ audit trail behind every state change.
   merges, runs its trusted candidate gate, pushes without force and verifies the
   remote commit. Development workflows require integration or production;
   production additionally publishes an immutable version tag, deploys, and
-  verifies the exact live commit. Any failure blocks with its receipt intact.
+  requires a structured live-provider receipt whose target, version and commit
+  exactly match the release. Any failure blocks with its receipt intact.
 - **Project lifecycle with a light.** planning → ready → running ⇄ paused →
   maintenance → closed, as a real state machine: only declared transitions, each
   one audited. Run / pause / stop controls on the card.

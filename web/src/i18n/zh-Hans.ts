@@ -555,7 +555,7 @@ const zhHans: Dict = {
   "project.delivery.predeploy_command": "部署前验收",
   "project.delivery.deploy_command": "部署命令",
   "project.delivery.verify_command": "线上验证",
-  "project.deliveryHint": "正式发布任务只有在整合正式分支、部署及线上验证全部成功后才会完成。",
+  "project.deliveryHint": "正式发布任务只有在整合正式分支、部署及线上验证全部成功后才会完成。线上验证最后必须输出 JSON receipt：status=verified，且 commit_sha、version、target 与本次交付完全一致。",
   "board.stuck": "⚠ 这张卡片卡住了",
   "board.pmAsks": "PM 需要你的裁定",
   "board.rulingPh": "回答上面的问题 —— 它会进到任务收件箱，卡片接着重跑",

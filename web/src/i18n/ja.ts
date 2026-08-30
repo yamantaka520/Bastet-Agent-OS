@@ -535,7 +535,7 @@ const ja: Dict = {
   "project.delivery.predeploy_command": "デプロイ前検証",
   "project.delivery.deploy_command": "デプロイコマンド",
   "project.delivery.verify_command": "オンライン検証",
-  "project.deliveryHint": "本番カードは統合、デプロイ、オンライン検証がすべて成功した後にのみ完了します。",
+  "project.deliveryHint": "本番カードは統合、デプロイ、オンライン検証がすべて成功した後にのみ完了します。検証の最後に status=verified かつ commit_sha・version・target が今回の配信と完全一致する JSON receipt を出力する必要があります。",
   "board.stuck": "⚠ このカードは止まっています",
   "board.pmAsks": "PM が判断を求めています",
   "board.rulingPh": "上の質問に回答 —— タスクの受信箱に入り、カードが再実行されます",

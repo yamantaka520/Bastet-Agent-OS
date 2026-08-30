@@ -119,7 +119,10 @@ external result. `branch` requires `bastet/<job_id>` to reach the project remote
 `production` additionally requires a new version and the project's delivery
 profile: target branch/target plus trusted pre-deploy, deploy, and online verify
 commands. Bastet atomically publishes the target branch and `v<version>` tag,
-then verifies the exact commit it deployed. A failed required delivery stays
+then requires the online verifier's final output to be a JSON receipt such as
+`{"status":"verified","commit_sha":"<sha>","version":"1.4.0","target":"production"}`.
+All four values must exactly match the current delivery; exit zero without this
+receipt is rejected. A failed required delivery stays
 blocked and keeps its worktree; it cannot be marked done. `git_auto_push: false`
 therefore applies only to legacy/best-effort `none` tasks, not to an explicit
 delivery promise.

@@ -188,11 +188,13 @@ class Orchestrator:
                 f"workflow requires delivery.mode to be one of {required_modes}")
         if delivery_contract["mode"] in ("integration", "production"):
             project_config = json.loads(project["config_json"] or "{}")
-            if not delivery_contract.get("profile") and \
-                    not project_config.get("delivery_profile"):
+            profile = delivery_contract.get("profile") or \
+                project_config.get("delivery_profile")
+            if not profile:
                 raise ValueError(
                     f"{delivery_contract['mode']} delivery requires the project's "
                     "delivery profile")
+            delivery.validate_profile(profile, delivery_contract["mode"])
         if delivery_contract["mode"] == "production":
             project_config = json.loads(project["config_json"] or "{}")
             previous = project_config.get("last_delivery") or {}
@@ -594,11 +596,13 @@ class Orchestrator:
                                   (job["project_id"],))
             project_config = json.loads(project["config_json"] or "{}") \
                 if project else {}
-            if not normalized.get("profile") and \
-                    not project_config.get("delivery_profile"):
+            profile = normalized.get("profile") or \
+                project_config.get("delivery_profile")
+            if not profile:
                 raise ValueError(
                     f"{normalized['mode']} delivery requires the project's "
                     "delivery profile")
+            delivery.validate_profile(profile, normalized["mode"])
         if not job["worktree_path"]:
             workdir = self._ensure_workdir(job, True)
             self.db.write("UPDATE jobs SET worktree_path=? WHERE id=?",

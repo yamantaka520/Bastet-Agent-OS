@@ -535,7 +535,7 @@ const ko: Dict = {
   "project.delivery.predeploy_command": "배포 전 검증",
   "project.delivery.deploy_command": "배포 명령",
   "project.delivery.verify_command": "온라인 검증",
-  "project.deliveryHint": "프로덕션 카드는 통합, 배포 및 온라인 검증이 모두 성공한 후에만 완료됩니다.",
+  "project.deliveryHint": "프로덕션 카드는 통합, 배포 및 온라인 검증이 모두 성공한 후에만 완료됩니다. 검증은 status=verified이고 commit_sha, version, target이 이번 배포와 정확히 일치하는 JSON receipt를 마지막에 출력해야 합니다.",
   "board.stuck": "⚠ 이 카드가 멈춰 있습니다",
   "board.pmAsks": "PM이 결정을 요청합니다",
   "board.rulingPh": "위 질문에 답하세요 — 작업 수신함에 들어가고 카드가 다시 실행됩니다",

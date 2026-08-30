@@ -535,7 +535,7 @@ const en: Dict = {
   "project.delivery.predeploy_command": "pre-deploy acceptance",
   "project.delivery.deploy_command": "deployment command",
   "project.delivery.verify_command": "online verification",
-  "project.deliveryHint": "A production card finishes only after integration, deployment and online verification all pass.",
+  "project.deliveryHint": "A production card finishes only after integration, deployment and online verification all pass. Verification must end with a JSON receipt whose status=verified and commit_sha, version and target exactly match this delivery.",
   "board.stuck": "⚠ This card is stuck",
   "board.pmAsks": "The PM needs your ruling",
   "board.rulingPh": "Answer the question above — it reaches the job inbox and the card runs again",

@@ -125,7 +125,8 @@
 - **正式交付不是 Agent 自述。** 發版卡必須選 `production` 並填新版本；專案的
   delivery profile 由可信任管理者設定，因為其中的 gate/deploy/verify 命令會在
   Bastet 主機執行。只有 main 與不可變 tag 原子推送、部署命令成功，且線上回報的
-  commit 與 `BASTET_DELIVERY_COMMIT` 一致後，卡片才會變成完成。
+  JSON receipt 明確包含 `status=verified`，且 target、version、commit 分別與本次
+  交付完全一致後，卡片才會變成完成；只有 exit code 0 不構成線上證據。
 - **審計是 hash 串接的 append-only。** 不要手動改 audit_log —— 鏈會斷，
   `verify_audit_chain()` 會抓到。刪任務/專案時的用量帳務會被拒絕或要求 force
   並記錄寫掉的金額，這是刻意的。

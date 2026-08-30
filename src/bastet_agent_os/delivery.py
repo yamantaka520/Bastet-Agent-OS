@@ -53,6 +53,21 @@ def required(raw: dict | None) -> bool:
     return normalize(raw).get("mode") != "none"
 
 
+def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
+    """Validate trusted host delivery configuration before Agent work begins."""
+    if not isinstance(profile, dict):
+        raise ValueError("delivery profile must be an object")
+    required_commands = ["predeploy_command"]
+    if mode == "production":
+        required_commands.extend(["deploy_command", "verify_command"])
+    missing = [key for key in required_commands
+               if not str(profile.get(key) or "").strip()]
+    if missing:
+        raise ValueError(
+            f"{mode} delivery profile is missing: {', '.join(missing)}")
+    return profile
+
+
 def _run(command: str, workdir: str, env: dict[str, str], label: str) -> str:
     if not command.strip():
         raise DeliveryError(f"missing {label} command")
@@ -84,6 +99,46 @@ def _package_version(workdir: str, source: str) -> str:
     return version
 
 
+def _verification_receipt(output: str, *, commit_sha: str, version: str,
+                          target: str) -> dict[str, Any]:
+    """Parse and bind provider-observed state to this exact release.
+
+    Exit zero alone is not evidence that the provider serves the requested
+    artifact. The trusted verifier must emit a JSON object, either as its whole
+    output or as its final non-empty line.
+    """
+    candidates = [output.strip()]
+    candidates.extend(line.strip() for line in reversed(output.splitlines())
+                      if line.strip())
+    receipt = None
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(value, dict):
+            receipt = value
+            break
+    if receipt is None:
+        raise DeliveryError(
+            "online verification must emit a JSON deployment receipt")
+    expected = {
+        "status": "verified",
+        "commit_sha": commit_sha,
+        "version": version,
+        "target": target,
+    }
+    mismatches = [
+        f"{field} expected {wanted!r}, got {receipt.get(field)!r}"
+        for field, wanted in expected.items()
+        if str(receipt.get(field) or "") != wanted
+    ]
+    if mismatches:
+        raise DeliveryError(
+            "online deployment receipt mismatch: " + "; ".join(mismatches))
+    return receipt
+
+
 def execute(db: Db, job, workdir: str, contract: dict,
             *, env: dict[str, str] | None = None, emit=None) -> DeliveryResult:
     """Satisfy one explicit contract or raise without declaring the job done."""
@@ -108,8 +163,10 @@ def execute(db: Db, job, workdir: str, contract: dict,
         return DeliveryResult(mode, parked["branch"], "", commit_sha, evidence)
 
     profile = contract.get("profile") or {}
-    if not isinstance(profile, dict):
-        raise DeliveryError("delivery.profile must be an object")
+    try:
+        validate_profile(profile, mode)
+    except ValueError as exc:
+        raise DeliveryError(str(exc)) from exc
     target_branch = str(profile.get("target_branch") or "main").strip()
     predeploy = str(profile.get("predeploy_command") or "").strip()
     if not predeploy:
@@ -161,4 +218,6 @@ def execute(db: Db, job, workdir: str, contract: dict,
     evidence["verify"] = _run(
         str(profile.get("verify_command") or ""), workdir, delivery_env,
         "online verification")
+    evidence["verification_receipt"] = _verification_receipt(
+        evidence["verify"], commit_sha=commit_sha, version=expected, target=target)
     return DeliveryResult(mode, target, expected, commit_sha, evidence)
