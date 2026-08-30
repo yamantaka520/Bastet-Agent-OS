@@ -528,7 +528,7 @@ def _diagnosis_prompt(db, job) -> str:
         f"## 上一輪返工註記\n{(job['rework_note'] or '(無)')[:1500]}\n")
 
 
-async def diagnose(orch, job) -> dict[str, Any]:
+async def diagnose(orch, job, *, lease_owner: str = "") -> dict[str, Any]:
     """Run the PM over one blocked card and execute its bounded decision.
 
     Returns {"action": ..., "reason": ...} for the sweep's report; "skipped"
@@ -537,6 +537,12 @@ async def diagnose(orch, job) -> dict[str, Any]:
     chances, and the card stays for the human)."""
     from .executors.base import TaskSpec, get_executor
     db = orch.db
+    if lease_owner:
+        from . import execution_leases
+        if not execution_leases.owned(
+                db, kind="pm-diagnosis", target_id=job["id"],
+                owner_id=lease_owner):
+            return {"action": "skipped", "reason": "PM diagnosis lease lost"}
     failures = diagnosis_failures(db, job["id"])
     if len(failures) >= MAX_DIAGNOSIS_TRANSPORT_FAILURES:
         return _transport_escalation(orch, job, failures)
@@ -587,6 +593,12 @@ async def diagnose(orch, job) -> dict[str, Any]:
     async for _ in executor.stream(handle):
         pass
     result = await executor.result(handle)
+    if lease_owner:
+        from . import execution_leases
+        if not execution_leases.owned(
+                db, kind="pm-diagnosis", target_id=job["id"],
+                owner_id=lease_owner):
+            return {"action": "skipped", "reason": "PM diagnosis lease lost"}
     decision = parse_decision(result.summary or "")
     fallback = False
     if decision is None:

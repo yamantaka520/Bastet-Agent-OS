@@ -396,6 +396,22 @@ def gc():
     _print(_call("POST", "/api/gc"))
 
 
+@app.command("reliability-rehearsal")
+def reliability_rehearsal():
+    """Run isolated two-process dispatch/claim/kill-restart acceptance checks."""
+    import tempfile
+
+    from .reliability_rehearsal import run
+
+    with tempfile.TemporaryDirectory(prefix="bastet-reliability-") as directory:
+        try:
+            _print(run(directory))
+        except Exception as exc:
+            typer.echo(f"reliability rehearsal failed: {type(exc).__name__}: {exc}",
+                       err=True)
+            raise typer.Exit(1) from exc
+
+
 @app.command("pricing-update")
 def pricing_update():
     """Refresh the local model price table from the public LiteLLM JSON."""

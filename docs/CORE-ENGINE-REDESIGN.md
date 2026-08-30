@@ -242,9 +242,19 @@ only orphaned nodes, and a maintenance fence keeps project runners parked but al
 until release. Strict claiming also invalidates the complete downstream subgraph
 when a linear ruling restarts at its writable rework target.
 
-No phase is shipped solely from unit tests. It needs migration, restart and race
-tests, a real multi-branch rehearsal, and an end-to-end receipt proving the target
-branch contains the result.
+The thirteenth closes the remaining process-local supervisor claim. PM diagnosis
+uses a renewable SQLite execution lease, so two server processes cannot spend two
+Agents on the same blocked card; a killed owner yields after lease expiry. The
+`bastet reliability-rehearsal` acceptance command starts fresh OS processes with
+independent database connections and proves: one atomic task dispatch receipt,
+one stage CAS winner, recovery after terminating a stage owner before run creation,
+one PM-diagnosis winner, and expired-lease reclamation. It operates only on a
+temporary Bastet home and temporary Git repository.
+
+No phase is shipped solely from unit tests. Multiprocess dispatch/restart/race now
+has an executable acceptance receipt; release still needs a live multi-branch
+rehearsal and an end-to-end remote receipt proving the target branch contains the
+result.
 
 ## Requirement traceability
 

@@ -50,6 +50,10 @@ created, then resumed after maintenance is released. Component updates remain
 disabled until the fence reports `drained`; release it with
 `bastet maintenance leave` after restart verification.
 
+Before a release, `bastet reliability-rehearsal` runs an isolated two-process
+acceptance check for duplicate dispatch, stage ownership, kill/restart recovery,
+and PM-supervisor leases. It creates only a temporary Bastet home and Git repository.
+
 ## Why
 
 Running one coding agent is easy. Running a *team* of them across several

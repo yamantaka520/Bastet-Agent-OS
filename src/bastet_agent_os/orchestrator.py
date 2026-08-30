@@ -98,6 +98,7 @@ class Orchestrator:
         self._agent_slots: dict[str, asyncio.Semaphore] = {}
         self._tasks: set[asyncio.Task] = set()
         self._live: dict[str, tuple] = {}  # run_id -> (executor, handle) while streaming
+        self._owner_id = new_id("orch")
         self._driving_jobs: set[str] = set()
         self._pm_diagnosing: set[str] = set()   # jobs with a PM diagnosis in flight
 
@@ -935,12 +936,29 @@ class Orchestrator:
             return
         if job["id"] in self._pm_diagnosing:
             return
+        from . import execution_leases
+        from .pm_supervisor import DIAGNOSIS_TIMEOUT_S
+        lease_ttl = min(120, max(30, DIAGNOSIS_TIMEOUT_S // 5))
+        if not execution_leases.acquire(
+                self.db, kind="pm-diagnosis", target_id=job["id"],
+                owner_id=self._owner_id, ttl_s=lease_ttl):
+            return
+
+        def release_lease() -> None:
+            execution_leases.release(
+                self.db, kind="pm-diagnosis", target_id=job["id"],
+                owner_id=self._owner_id)
+
         if pm_supervisor.intervention_count(self.db, job["id"]) >= \
                 pm_supervisor.MAX_INTERVENTIONS:
-            pm_supervisor.reassess_exhausted(self, job)
+            try:
+                pm_supervisor.reassess_exhausted(self, job)
+            finally:
+                release_lease()
             return
         if pm_supervisor.lifetime_intervention_count(self.db, job["id"]) >= \
                 pm_supervisor.MAX_LIFETIME_INTERVENTIONS:
+            release_lease()
             return
         diagnosis_cutoff = (datetime.now(UTC) - timedelta(
             seconds=pm_supervisor.DIAGNOSIS_RETRY_COOLDOWN_S)).isoformat()
@@ -948,6 +966,7 @@ class Orchestrator:
                 "SELECT 1 AS x FROM audit_log WHERE action='job.pm_diagnosis_failed' "
                 "AND target_id=? AND at>? ORDER BY id DESC LIMIT 1",
                 (job["id"], diagnosis_cutoff)):
+            release_lease()
             return
         # an escalation is a terminal PM answer for this stall: "a human must
         # look". Re-diagnosing the same unchanged card every sweep would burn
@@ -962,18 +981,38 @@ class Orchestrator:
             try:
                 if json.loads(last["detail_json"] or "{}").get(
                         "decision", {}).get("action") == "escalate":
+                    release_lease()
                     return
             except json.JSONDecodeError:
                 pass
         self._pm_diagnosing.add(job["id"])
 
         async def _run() -> None:
+            owner_task = asyncio.current_task()
+
+            async def renew_owned() -> None:
+                while True:
+                    await asyncio.sleep(max(10, lease_ttl // 3))
+                    if execution_leases.renew(
+                            self.db, kind="pm-diagnosis", target_id=job["id"],
+                            owner_id=self._owner_id, ttl_s=lease_ttl):
+                        continue
+                    log.warning("PM diagnosis lease lost for job %s", job["id"])
+                    if owner_task is not None:
+                        owner_task.cancel()
+                    return
+
+            renewer = asyncio.create_task(renew_owned())
             try:
-                outcome = await pm_supervisor.diagnose(self, job)
+                outcome = await pm_supervisor.diagnose(
+                    self, job, lease_owner=self._owner_id)
                 log.info("pm supervision for %s: %s", job["id"], outcome)
             except Exception:
                 log.exception("pm supervision failed for %s", job["id"])
             finally:
+                renewer.cancel()
+                await asyncio.gather(renewer, return_exceptions=True)
+                release_lease()
                 self._pm_diagnosing.discard(job["id"])
 
         self._spawn(_run())

@@ -262,6 +262,7 @@ bastet grant add <resource_id> project:<id> --budget-usd 5 --max-concurrency 2
 
 # operations
 bastet doctor                     # health, executors, gate tools
+bastet reliability-rehearsal      # isolated multiprocess dispatch/restart acceptance
 bastet usage                      # cost by project / agent / precision
 bastet audit                      # the trail
 bastet channel list

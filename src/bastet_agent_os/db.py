@@ -132,6 +132,22 @@ CREATE TABLE IF NOT EXISTS project_task_dispatches (
 CREATE INDEX IF NOT EXISTS idx_project_task_dispatches_job
   ON project_task_dispatches(job_id);
 
+-- Cross-process ownership for bounded control-plane work that is not itself a
+-- workflow node (for example PM incident diagnosis). Owners renew short leases;
+-- a killed process eventually yields without allowing two servers to spend on
+-- the same recovery action at once.
+CREATE TABLE IF NOT EXISTS execution_leases (
+  kind TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  acquired_at TEXT NOT NULL,
+  heartbeat_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  PRIMARY KEY(kind, target_id)
+);
+CREATE INDEX IF NOT EXISTS idx_execution_leases_expiry
+  ON execution_leases(expires_at);
+
 -- Runtime state is per graph node, not inferred from the legacy jobs.stage
 -- cursor.  The cursor remains during the v1/v2 transition; graph scheduling
 -- reads these rows once a job has been admitted by the v2 scheduler.

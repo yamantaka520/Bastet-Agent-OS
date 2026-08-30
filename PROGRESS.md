@@ -52,7 +52,13 @@ Last updated: 2026-08-31
   project runner parked and automatically resumes it after release; restart recovery
   reclaims orphaned nodes explicitly. Strict CAS also exposed and fixed stale
   downstream state when a linear ruling restarts at its writable rework target.
-  Validation: 627 Python tests,
+  PM diagnosis now uses a renewable SQLite lease rather than only a process-local
+  set, preventing two server supervisors from spending twice on one blocked card
+  and allowing a killed owner to be reclaimed after expiry. The isolated
+  `bastet reliability-rehearsal` command starts independent OS processes and proves
+  one dispatch receipt, one stage claimant, kill-before-run startup recovery, one
+  PM diagnosis owner and expired-lease reclamation against a temporary Git repo/DB.
+  Validation: 632 Python tests,
   ruff clean, Web production build clean.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month
