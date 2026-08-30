@@ -44,7 +44,15 @@ Last updated: 2026-08-31
   managed Skills before task confirmation, project start/restart or direct job
   creation. Chat disables breakdown after PM/SA agreement until workflow coverage
   is ready; Project UI shows the same actionable blockers. Explicit task roles no
-  longer silently fall back to unrelated agents. Validation: 623 Python tests,
+  longer silently fall back to unrelated agents. Project-task dispatch now has an
+  atomic database receipt keyed by frozen plan and task: duplicate/restarted runners
+  reuse the same job, and job plus stage graph plus receipt commit together. Stage
+  execution uses a `ready -> running` database CAS before workspace/executor side
+  effects, so competing drivers cannot run one node twice. Maintenance keeps a
+  project runner parked and automatically resumes it after release; restart recovery
+  reclaims orphaned nodes explicitly. Strict CAS also exposed and fixed stale
+  downstream state when a linear ruling restarts at its writable rework target.
+  Validation: 627 Python tests,
   ruff clean, Web production build clean.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month
@@ -168,11 +176,9 @@ feature is confirmed against real vendor CLIs before release:
 - **Async media fetcher**: generation that outlives its run has no background
   claimer; the rule today is poll-to-completion inside the run.
 - **Scheduled workflows**: the 持續維護 preset wants a cron-like trigger.
-- **Merge assistance**: finished branches are reviewed/merged by hand (the push
-  output carries the MR link). Live shape of the gap: an integration card can
-  accumulate a dozen commits on `bastet/<job_id>` while `main` stays where it
-  was, and nothing in the engine will move it — by design, since merging is an
-  authority decision, but the last mile is still manual.
+- **Non-development branch delivery**: analysis/content cards that deliberately
+  request branch-only delivery still leave merge authority to a human. Development
+  templates instead require the verified `integration` or `production` path.
 - **`~/.bastet/secrets` accumulates** rotated credential files.
 - **Telegram bot token** from an early session should still be rotated.
 - **A one-agent role dead-ends less gracefully than it should.** Dispatch now

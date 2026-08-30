@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from bastet_agent_os.stage_runtime import (
+    claim_ready_node,
     cleanup_isolated_workspaces,
     commit_stage_output,
     create_isolated_workspace,
@@ -87,6 +88,21 @@ def test_node_recovery_and_retry_only_invalidate_the_failed_descendants(seeded):
         "SELECT stage,status FROM job_stage_nodes WHERE job_id='job1'")}
     assert states == {"plan": "passed", "ui": "ready",
                       "core": "passed", "join": "pending"}
+
+
+def test_ready_node_has_one_database_owner_across_connections(seeded):
+    """Two server processes may see ready; only one may cross into side effects."""
+    from bastet_agent_os.db import Db
+
+    seeded.write("INSERT INTO job_stage_nodes(job_id,stage,status,needs_json,workspace,"
+                 "updated_at) VALUES('job1','claim-me','ready','[]','shared',"
+                 "datetime('now'))")
+    other = Db(seeded.path)
+    try:
+        assert claim_ready_node(seeded, "job1", "claim-me") is True
+        assert claim_ready_node(other, "job1", "claim-me") is False
+    finally:
+        other.close()
 
 
 def test_isolated_workspace_cleanup_keeps_branch_and_commit(seeded, repo, tmp_path):

@@ -165,6 +165,16 @@ def finish_node(db, job_id: str, stage: str, *, status: str,
              (status, head_commit, now(), now(), job_id, stage))
 
 
+def claim_ready_node(db, job_id: str, stage: str) -> bool:
+    """Atomically acquire one stage before workspace or executor side effects."""
+    stamp = now()
+    return bool(db.write(
+        "UPDATE job_stage_nodes SET status='running',"
+        "started_at=COALESCE(started_at,?),updated_at=? "
+        "WHERE job_id=? AND stage=? AND status='ready'",
+        (stamp, stamp, job_id, stage)).rowcount)
+
+
 def recover_orphaned_nodes(db, job_id: str) -> list[str]:
     """Return running nodes without a live run to ready after process loss."""
     rows = db.query(

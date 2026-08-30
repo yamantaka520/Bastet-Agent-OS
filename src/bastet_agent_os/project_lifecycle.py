@@ -112,9 +112,27 @@ def task_plan(db, project_id: str) -> dict[str, Any]:
         raise LifecycleError("project not found")
     config = json.loads(row["config_json"] or "{}")
     plan = config.get("task_plan") or {}
-    return {"tasks": plan.get("tasks", []), "at": plan.get("at"),
+    tasks = [dict(task) for task in plan.get("tasks", [])]
+    plan_key = _plan_key(plan)
+    if plan_key:
+        receipts = {row["task_id"]: row["job_id"] for row in db.query(
+            "SELECT task_id,job_id FROM project_task_dispatches "
+            "WHERE project_id=? AND plan_key=?", (project_id, plan_key))}
+        for task in tasks:
+            task_id = str(task.get("id") or "")
+            if task_id in receipts:
+                task["job_id"] = receipts[task_id]
+                task["origin"] = task.get("origin") or "runner"
+    return {"tasks": tasks, "at": plan.get("at"),
             "by": plan.get("by", ""), "confirmed": bool(plan.get("confirmed")),
-            "source": plan.get("source") or {}}
+            "source": plan.get("source") or {}, "plan_key": plan_key}
+
+
+def _plan_key(plan: dict[str, Any]) -> str:
+    """Stable execution identity for one frozen plan snapshot."""
+    source = plan.get("source") or {}
+    return str(source.get("planning_round_id") or source.get("round_id")
+               or plan.get("at") or "")
 
 
 def _task_id(value: str, index: int, used: set[str]) -> str:

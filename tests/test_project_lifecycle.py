@@ -15,6 +15,7 @@ from bastet_agent_os import project_lifecycle as lifecycle
 from bastet_agent_os import project_runner as runner_mod
 from bastet_agent_os.db import Db, now
 from bastet_agent_os.executors.base import RunResult
+from bastet_agent_os.orchestrator import DispatchRequest
 
 
 @pytest.fixture
@@ -234,6 +235,55 @@ async def test_runner_dispatches_ready_dag_nodes_and_persists_edges(runner):
     assert (jobs["ui"], jobs["contract"]) in edges
     assert (jobs["core"], jobs["contract"]) in edges
     assert {(jobs["join"], jobs["ui"]), (jobs["join"], jobs["core"])} <= edges
+    assert lifecycle.status_of(db, "proj1") == lifecycle.MAINTENANCE
+
+
+async def test_task_dispatch_receipt_closes_restart_window(runner):
+    """Replaying the same frozen node returns its job instead of cloning work."""
+    _, orch, db = runner
+    lifecycle.save_task_plan(
+        db, "proj1", [{"id": "api", "title": "API", "spec": "build it", "needs": []}],
+        by="pm", confirmed=True)
+    plan = lifecycle.task_plan(db, "proj1")
+    SCRIPT.append(RunResult(status="succeeded", summary="ok"))
+    request = DispatchRequest(
+        project_id="proj1", prompt="build it", title="API", agent_id="fakebot",
+        origin="runner", plan_key=plan["plan_key"], task_id="api")
+
+    first = orch.dispatch(request, actor="runner-a")
+    second = orch.dispatch(request, actor="runner-b")
+    assert second == first
+    assert lifecycle.task_plan(db, "proj1")["tasks"][0]["job_id"] == first
+    assert db.one("SELECT COUNT(*) AS n FROM jobs WHERE title='API'")["n"] == 1
+    assert db.one("SELECT COUNT(*) AS n FROM project_task_dispatches")["n"] == 1
+
+    await orch.wait_idle()
+    assert db.one("SELECT COUNT(*) AS n FROM runs WHERE job_id=?", (first,))["n"] == 1
+    assert db.query("SELECT * FROM audit_log WHERE action='job.dispatch_reused'")
+
+
+async def test_maintenance_fence_keeps_runner_parked_then_resumes(runner):
+    from bastet_agent_os import maintenance_mode
+
+    r, _, db = runner
+    lifecycle.save_task_plan(db, "proj1", [{"title": "T1", "spec": "one"}],
+                             by="pm", confirmed=True)
+    lifecycle.apply(db, "proj1", "confirm_plan")
+    lifecycle.apply(db, "proj1", "start")
+    maintenance_mode.enter(db, "admin", "release")
+    SCRIPT.append(RunResult(status="succeeded", summary="ok"))
+
+    assert r.ensure_running("proj1") is True
+    await asyncio.sleep(0.05)
+    assert db.one("SELECT COUNT(*) AS n FROM jobs")["n"] == 0
+    assert r.is_active("proj1") is True
+
+    maintenance_mode.leave(db, "admin")
+    for _ in range(200):
+        if lifecycle.status_of(db, "proj1") == lifecycle.MAINTENANCE:
+            break
+        await asyncio.sleep(0.02)
+    assert db.one("SELECT COUNT(*) AS n FROM jobs")["n"] == 1
     assert lifecycle.status_of(db, "proj1") == lifecycle.MAINTENANCE
 
 

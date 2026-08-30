@@ -7,6 +7,7 @@ import pytest
 from bastet_agent_os import maintenance_mode
 from bastet_agent_os.db import now
 from bastet_agent_os.orchestrator import DispatchRequest
+from bastet_agent_os.workflow import parse_stages, seed_stage_nodes
 
 
 @pytest.mark.asyncio
@@ -109,6 +110,33 @@ async def test_supervisor_does_not_duplicate_a_driver_while_gate_runs(orch, seed
     await orch.supervise_once()
 
     assert spawned == []
+
+
+@pytest.mark.asyncio
+async def test_competing_graph_driver_does_not_block_an_owned_node(orch, seeded):
+    stages = parse_stages([
+        {"name": "root", "needs": [], "read_only": True},
+        {"name": "left", "needs": ["root"], "workspace": "isolated"},
+        {"name": "right", "needs": ["root"], "workspace": "isolated"},
+        {"name": "join", "needs": ["left", "right"]},
+    ])
+    seeded.write("UPDATE jobs SET stages_snapshot_json=?,stage='left',"
+                 "status='in_progress' WHERE id='job1'",
+                 (json.dumps([{"name": stage.name, "needs": stage.needs,
+                               "workspace": stage.workspace,
+                               "read_only": stage.read_only} for stage in stages]),))
+    seed_stage_nodes(seeded, "job1", stages)
+    seeded.write("UPDATE job_stage_nodes SET status='passed' WHERE job_id='job1' "
+                 "AND stage IN ('root','right')")
+    seeded.write("UPDATE job_stage_nodes SET status='running' WHERE job_id='job1' "
+                 "AND stage='left'")
+
+    await orch._advance_graph_until_blocked(
+        "job1", DispatchRequest(project_id="proj1", prompt="x", title="t",
+                                agent_id="fakebot"), stages)
+
+    assert seeded.one("SELECT status FROM jobs WHERE id='job1'")["status"] == "in_progress"
+    assert not seeded.query("SELECT * FROM audit_log WHERE action='job.blocked'")
 
 
 @pytest.mark.asyncio

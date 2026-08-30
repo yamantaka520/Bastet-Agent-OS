@@ -116,6 +116,22 @@ CREATE TABLE IF NOT EXISTS jobs (
   updated_at TEXT NOT NULL
 );
 
+-- Immutable receipt for one project-plan node becoming one job.  The project
+-- plan itself is a JSON snapshot for presentation, so it cannot provide an
+-- atomic claim across two runner processes.  This ledger is the execution
+-- authority: its primary key makes dispatch idempotent and the job FK makes the
+-- claim auditable after a restart.
+CREATE TABLE IF NOT EXISTS project_task_dispatches (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  plan_key TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  job_id TEXT NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
+  dispatched_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, plan_key, task_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_task_dispatches_job
+  ON project_task_dispatches(job_id);
+
 -- Runtime state is per graph node, not inferred from the legacy jobs.stage
 -- cursor.  The cursor remains during the v1/v2 transition; graph scheduling
 -- reads these rows once a job has been admitted by the v2 scheduler.

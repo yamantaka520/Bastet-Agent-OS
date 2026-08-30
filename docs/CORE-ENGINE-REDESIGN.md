@@ -232,7 +232,15 @@ tenth makes managed Skills installable, digest/health verified and resolvable as
 `skill:<id>` stage admission contracts; missing supply blocks without consuming
 Agent time or rework. The eleventh centralizes whole-graph admission across chat,
 plan confirmation, project start/restart and direct dispatch, and removes the
-runner's silent fallback when a task explicitly names an unassigned role.
+runner's silent fallback when a task explicitly names an unassigned role. The
+twelfth makes dispatch and stage ownership database invariants: a frozen plan node
+has one durable `(project, plan, task) -> job` receipt committed atomically with
+its job and stage graph, while every stage crosses `ready -> running` through a
+compare-and-set before workspace or executor side effects. Duplicate runners reuse
+the receipt, competing drivers lose the node CAS cleanly, restart recovery reclaims
+only orphaned nodes, and a maintenance fence keeps project runners parked but alive
+until release. Strict claiming also invalidates the complete downstream subgraph
+when a linear ruling restarts at its writable rework target.
 
 No phase is shipped solely from unit tests. It needs migration, restart and race
 tests, a real multi-branch rehearsal, and an end-to-end receipt proving the target

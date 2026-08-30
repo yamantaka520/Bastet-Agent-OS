@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -71,6 +72,8 @@ class DispatchRequest:
     use_worktree: bool = True
     origin: str = "dispatch"          # chat|runner|dispatch — shown on the plan
     delivery: dict | None = None       # none|branch|integration|production contract
+    plan_key: str | None = None        # frozen project-plan execution identity
+    task_id: str | None = None         # node claimed atomically by a project runner
 
 
 def _failure_reason(result: RunResult, workdir: str) -> str:
@@ -200,7 +203,7 @@ class Orchestrator:
 
         job_id = new_id("job")
         ts = now()
-        self.db.write(
+        job_insert = (
             "INSERT INTO jobs(id, project_id, template_id, stages_snapshot_json, title, "
             "spec_md, stage, status, default_agent_id, resource_id, delivery_json, "
             "delivery_status, created_at, updated_at) "
@@ -212,7 +215,43 @@ class Orchestrator:
              "pending" if delivery_contract["mode"] != "none"
              else "not_required", ts, ts),
         )
-        seed_stage_nodes(self.db, job_id, stages)
+        if bool(req.plan_key) != bool(req.task_id):
+            raise ValueError("runner dispatch requires both plan_key and task_id")
+        if req.plan_key and req.task_id:
+            # Job, DAG nodes, and the task claim are one commit. A restart can
+            # therefore observe either no dispatch or the complete dispatch,
+            # never the former crash window (job exists but plan still says
+            # pending). The PK is also the cross-process compare-and-set.
+            statements = [job_insert]
+            statements.extend([
+                ("INSERT INTO job_stage_nodes(job_id,stage,status,needs_json,"
+                 "workspace,updated_at) VALUES(?,?,?,?,?,?)",
+                 (job_id, stage.name, "ready" if not stage.needs else "pending",
+                  json.dumps(stage.needs, ensure_ascii=False), stage.workspace, ts))
+                for stage in stages
+            ])
+            statements.append(
+                ("INSERT INTO project_task_dispatches(project_id,plan_key,task_id,"
+                 "job_id,dispatched_at) VALUES(?,?,?,?,?)",
+                 (req.project_id, req.plan_key, req.task_id, job_id, ts)))
+            try:
+                self.db.write_many(statements)
+            except sqlite3.IntegrityError:
+                receipt = self.db.one(
+                    "SELECT job_id FROM project_task_dispatches WHERE project_id=? "
+                    "AND plan_key=? AND task_id=?",
+                    (req.project_id, req.plan_key, req.task_id))
+                if receipt is None:
+                    raise
+                existing_job_id = receipt["job_id"]
+                self.db.audit(actor, "job.dispatch_reused", "job", existing_job_id,
+                              {"project": req.project_id, "plan_key": req.plan_key,
+                               "task_id": req.task_id})
+                self._spawn(self._drive_job(existing_job_id, req))
+                return existing_job_id
+        else:
+            self.db.write(*job_insert)
+            seed_stage_nodes(self.db, job_id, stages)
         self.db.audit(actor, "job.dispatch", "job", job_id,
                       {"project": req.project_id, "agent": req.agent_id,
                        "resource": req.resource_id, "template": req.template_id,
@@ -507,6 +546,11 @@ class Orchestrator:
                             stage=job["stage"])
                 parked.append(job["id"])
                 continue
+            from .stage_runtime import recover_orphaned_nodes
+            recovered = recover_orphaned_nodes(self.db, job["id"])
+            if recovered:
+                self.db.audit(actor, "stage.graph_nodes_recovered", "job", job["id"],
+                              {"stages": recovered, "reason": "process restart"})
             self.db.audit(actor, "job.resumed", "job", job["id"],
                           {"stage": job["stage"], "reason": "driver lost on restart"})
             self._emit("job.resumed", job["project_id"], job_id=job["id"],
@@ -979,6 +1023,7 @@ class Orchestrator:
         try:
             job = self.db.one("SELECT stages_snapshot_json FROM jobs WHERE id=?", (job_id,))
             stages = parse_stages(json.loads(job["stages_snapshot_json"]))
+            seed_stage_nodes(self.db, job_id, stages)
             if is_linear_stage_graph(stages):
                 await self._advance_until_blocked(job_id, req)
             else:
@@ -1040,7 +1085,14 @@ class Orchestrator:
                               req: DispatchRequest, workdir: str) -> None:
         """Execute and gate one claimed graph node without moving jobs.stage."""
         from . import collaboration
+        from .maintenance_mode import enabled as maintenance_enabled
         from .stage_runtime import finish_node
+        if maintenance_enabled(self.db):
+            self.db.write("UPDATE job_stage_nodes SET status='ready',updated_at=? "
+                          "WHERE job_id=? AND stage=? AND status='running'",
+                          (now(), job["id"], stage.name))
+            self._park_for_maintenance(job, stage.name)
+            raise _MaintenanceParked
 
         result, run_id = await self._run_stage_with_retries(
             job, stage, req, workdir_override=workdir)
@@ -1111,15 +1163,14 @@ class Orchestrator:
     async def _advance_graph_until_blocked(self, job_id: str, req: DispatchRequest,
                                            stages: list[StageDef]) -> None:
         """Run every ready DAG node, bounded by the project's stage capacity."""
-        from .stage_runtime import recover_orphaned_nodes
-        recovered = recover_orphaned_nodes(self.db, job_id)
-        if recovered:
-            self.db.audit("orchestrator", "stage.graph_nodes_recovered", "job", job_id,
-                          {"stages": recovered})
         while True:
             job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
             if job is None or job["status"] != "in_progress":
                 return
+            from .maintenance_mode import enabled as maintenance_enabled
+            if maintenance_enabled(self.db):
+                self._park_for_maintenance(job, job["stage"])
+                raise _MaintenanceParked
             refresh_ready_nodes(self.db, job_id, stages)
             rows = {row["stage"]: dict(row) for row in self.db.query(
                 "SELECT * FROM job_stage_nodes WHERE job_id=?", (job_id,))}
@@ -1136,10 +1187,22 @@ class Orchestrator:
             ready = [stage for stage in stages
                      if rows.get(stage.name, {}).get("status") == "ready"]
             if not ready:
+                if any(row["status"] in ("running", "blocked", "failed")
+                       for row in rows.values()):
+                    # A competing driver owns a running node, or another node
+                    # has already recorded the reason execution stopped.
+                    return
                 self._block(job_id, "workflow stage graph has no ready node",
                             detail="durable node states cannot make progress")
                 return
             selected = ready[:self._stage_parallelism(job["project_id"])]
+            from .stage_runtime import claim_ready_node
+            selected = [stage for stage in selected
+                        if claim_ready_node(self.db, job_id, stage.name)]
+            if not selected:
+                # Another process won every CAS. It owns forward progress; this
+                # driver must not classify its running nodes as a dead graph.
+                return
             review_restart = False
             for stage in selected:
                 if not stage.needs or not stage.challenge:
@@ -1187,11 +1250,6 @@ class Orchestrator:
             try:
                 for stage in selected:
                     workdir = self._prepare_graph_workdir(job, stage)
-                    self.db.write(
-                        "UPDATE job_stage_nodes SET status='running',"
-                        "started_at=COALESCE(started_at,?),updated_at=? "
-                        "WHERE job_id=? AND stage=? AND status='ready'",
-                        (now(), now(), job_id, stage.name))
                     prepared.append((stage, workdir))
                     self._emit("stage.node_started", job["project_id"], job_id=job_id,
                                stage=stage.name, workdir=workdir)
@@ -1199,6 +1257,13 @@ class Orchestrator:
                 failed = selected[len(prepared)] if len(prepared) < len(selected) else selected[-1]
                 from .stage_runtime import finish_node
                 finish_node(self.db, job_id, failed.name, status="blocked")
+                for claimed in selected:
+                    if claimed.name == failed.name:
+                        continue
+                    self.db.write(
+                        "UPDATE job_stage_nodes SET status='ready',updated_at=? "
+                        "WHERE job_id=? AND stage=? AND status='running'",
+                        (now(), job_id, claimed.name))
                 self._block(job_id, f"stage {failed.name}: workspace preparation failed",
                             stage=failed.name, detail=str(exc)[:1500])
                 self._emit("stage.node_blocked", job["project_id"], job_id=job_id,
@@ -1218,13 +1283,16 @@ class Orchestrator:
             names = [s.name for s in stages]
             idx = names.index(job["stage"])
             stage = stages[idx]
-            self.db.write(
-                "UPDATE job_stage_nodes SET status='running',started_at=COALESCE(started_at,?),"
-                "updated_at=? WHERE job_id=? AND stage=? AND status IN ('ready','pending')",
-                (now(), now(), job_id, stage.name))
+            refresh_ready_nodes(self.db, job_id, stages)
+            from .stage_runtime import claim_ready_node
+            if not claim_ready_node(self.db, job_id, stage.name):
+                return
 
             from .maintenance_mode import enabled as maintenance_enabled
             if maintenance_enabled(self.db):
+                self.db.write("UPDATE job_stage_nodes SET status='ready',updated_at=? "
+                              "WHERE job_id=? AND stage=? AND status='running'",
+                              (now(), job_id, stage.name))
                 self._park_for_maintenance(job, stage.name)
                 raise _MaintenanceParked
 
@@ -2069,6 +2137,8 @@ class Orchestrator:
                     "UPDATE jobs SET stage=?, rework_note=?, agent_override=NULL, "
                     "updated_at=? WHERE id=?",
                     (target.name, repair_note, now(), job_id))
+                from .stage_runtime import reset_failed_subgraph
+                reset_failed_subgraph(self.db, job_id, stages, target.name)
                 job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         # Retrying and renewing the bounded recovery lease are separate human
         # decisions.  The old implicit refill let a ruling on a stale workflow

@@ -389,6 +389,13 @@ class ProjectRunner:
 
     async def _loop(self, project_id: str, agent_id: str, actor: str) -> None:
         while lifecycle.status_of(self.db, project_id) == lifecycle.RUNNING:
+            from .maintenance_mode import enabled as maintenance_enabled
+            if maintenance_enabled(self.db):
+                # A running project is durable intent, not permission to cross
+                # the release fence. Keep its runner alive so leaving
+                # maintenance resumes automatically without another UI action.
+                await asyncio.sleep(POLL_S)
+                continue
             plan = lifecycle.task_plan(self.db, project_id)
             tasks = lifecycle.normalize_task_graph(plan["tasks"])
             states = self._task_states(tasks)
@@ -400,7 +407,7 @@ class ProjectRunner:
             active = sum(state in ("open", "in_progress") for state in states.values())
             capacity = max(0, max_parallel - active)
             dispatched = 0
-            for index, task in enumerate(tasks):
+            for task in tasks:
                 if capacity <= 0:
                     break
                 if task.get("job_id"):
@@ -415,11 +422,19 @@ class ProjectRunner:
                                                "task_id": task["id"],
                                                "reason": "no agent available"})
                     continue
-                job_id = self.orch.dispatch(actor=actor or "runner", req=DispatchRequest(
-                    project_id=project_id, prompt=task.get("spec") or task["title"],
-                    title=task["title"], agent_id=agent, origin="runner",
-                    delivery=task.get("delivery")))
-                self._remember_job(project_id, index, job_id)
+                try:
+                    job_id = self.orch.dispatch(
+                        actor=actor or "runner", req=DispatchRequest(
+                            project_id=project_id,
+                            prompt=task.get("spec") or task["title"],
+                            title=task["title"], agent_id=agent, origin="runner",
+                            delivery=task.get("delivery"),
+                            plan_key=plan["plan_key"], task_id=task["id"]))
+                except Exception as exc:
+                    from .maintenance_mode import MaintenanceModeError
+                    if isinstance(exc, MaintenanceModeError):
+                        break
+                    raise
                 for dependency in task["needs"]:
                     dependency_job = next((candidate.get("job_id") for candidate in tasks
                                            if candidate["id"] == dependency), None)
@@ -525,14 +540,6 @@ class ProjectRunner:
             "AND a.depleted_at IS NULL "
             "ORDER BY par.preference DESC LIMIT 1", (project_id,))
         return row["agent_id"] if row is not None else None
-
-    def _remember_job(self, project_id: str, index: int, job_id: str) -> None:
-        plan = lifecycle.task_plan(self.db, project_id)
-        tasks = plan["tasks"]
-        if index < len(tasks):
-            tasks[index] = {**tasks[index], "job_id": job_id}
-            lifecycle.save_task_plan(self.db, project_id, tasks, by=plan["by"],
-                                     confirmed=True)
 
     async def _await_job(self, project_id: str, job_id: str) -> str | None:
         """Wait for a job to settle. Returns None when the project was paused or
