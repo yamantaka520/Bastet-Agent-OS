@@ -2067,8 +2067,9 @@ def create_app(home: Home) -> FastAPI:
     def workflow_catalog():
         """Built-in presets plus the role/gate vocabulary the builder offers."""
         from .execution_capabilities import catalog as capability_catalog
-        from .workflow_presets import GATES, PRESETS, ROLES
+        from .workflow_presets import EVIDENCE_TYPES, GATES, PRESETS, ROLES
         return {"presets": PRESETS, "roles": ROLES, "gates": GATES,
+                "evidence_types": EVIDENCE_TYPES,
                 "capabilities": capability_catalog()}
 
     @app.get("/api/execution-capabilities",
@@ -2207,6 +2208,30 @@ def create_app(home: Home) -> FastAPI:
             "SELECT stage,status,needs_json,workspace,worktree_path,head_commit,"
             "started_at,finished_at,updated_at FROM job_stage_nodes "
             "WHERE job_id=? ORDER BY rowid", (job_id,))]
+        runs_by_stage = {}
+        for run in job["runs"]:
+            previous = runs_by_stage.get(run["stage"])
+            if previous is None or run["attempt"] >= previous["attempt"]:
+                runs_by_stage[run["stage"]] = run
+        gates_by_run = {gate["run_id"]: gate for gate in job["gates"]}
+        nodes_by_stage = {node["stage"]: node for node in job["stage_nodes"]}
+        try:
+            frozen_stages = json.loads(job["stages_snapshot_json"] or "[]")
+        except (json.JSONDecodeError, TypeError):
+            frozen_stages = []
+        job["evidence_matrix"] = []
+        for stage in frozen_stages:
+            run = runs_by_stage.get(stage.get("name"))
+            gate = gates_by_run.get(run["id"]) if run else None
+            node = nodes_by_stage.get(stage.get("name"), {})
+            for kind in stage.get("evidence") or []:
+                job["evidence_matrix"].append({
+                    "kind": kind, "stage": stage.get("name"),
+                    "gate": stage.get("gate", "auto"),
+                    "verdict": gate["verdict"] if gate else "pending",
+                    "run_id": run["id"] if run else None,
+                    "head_commit": node.get("head_commit"),
+                })
         # what the PM did about this card, and above all what it is ASKING.
         # An escalation that lives only in the audit log is an escalation to
         # nobody: the operator saw "blocked" and a retry button, with no sign

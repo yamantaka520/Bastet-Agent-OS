@@ -1025,15 +1025,26 @@ class Orchestrator:
                        "detail": outcome.detail[:300], "graph": True})
         self._emit(f"gate.{outcome.verdict}", job["project_id"], job_id=job["id"],
                    stage=stage.name, gate=stage.gate, detail=outcome.detail[:200])
-        if outcome.verdict != "passed":
-            finish_node(self.db, job["id"], stage.name,
-                        status="blocked" if outcome.verdict == "pending" else "failed",
+        if outcome.verdict == "pending":
+            finish_node(self.db, job["id"], stage.name, status="blocked",
                         head_commit=self._worktree_head(workdir))
-            self._block(job["id"], f"stage {stage.name}: gate {outcome.verdict}",
-                        stage=stage.name, gate=stage.gate,
-                        config_error=outcome.config_error, detail=outcome.detail)
+            self._block(job["id"], f"stage {stage.name}: gate pending",
+                        stage=stage.name, gate=stage.gate, detail=outcome.detail)
             self._emit("stage.node_blocked", job["project_id"], job_id=job["id"],
                        stage=stage.name, detail=outcome.detail[:1000])
+            return
+        if outcome.verdict == "failed":
+            if outcome.failure_kind:
+                finish_node(self.db, job["id"], stage.name, status="blocked",
+                            head_commit=self._worktree_head(workdir))
+                self._capability_block(job, stage, outcome.detail, outcome.failure_kind)
+                return
+            fresh = self.db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
+            if self._rework(fresh, stages, [item.name for item in stages].index(stage.name),
+                            outcome):
+                return
+            finish_node(self.db, job["id"], stage.name, status="blocked",
+                        head_commit=self._worktree_head(workdir))
             return
 
         head = self._worktree_head(workdir)
@@ -1047,7 +1058,9 @@ class Orchestrator:
                 self.db, project_id=job["project_id"], job_id=job["id"],
                 run_id=run_id, from_stage=stage.name, to_stage=target,
                 agent_id=self._run_agent(run_id), summary=result.summary[:3000],
-                paths=paths, verification=[f"{stage.gate}: {outcome.verdict}"],
+                paths=paths,
+                verification=[f"{stage.gate}: {outcome.verdict}",
+                              *[f"evidence:{kind}" for kind in stage.evidence]],
                 risks=risks)
         finish_node(self.db, job["id"], stage.name, status="passed", head_commit=head)
         refresh_ready_nodes(self.db, job["id"], stages)

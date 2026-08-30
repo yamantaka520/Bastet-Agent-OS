@@ -95,6 +95,8 @@ class StageDef:
     needs: list[str] = field(default_factory=list)
     produces: list[str] = field(default_factory=list)
     consumes: list[str] = field(default_factory=list)
+    # Frozen acceptance dimensions this stage's gate is responsible for.
+    evidence: list[str] = field(default_factory=list)
     challenge: bool = True
     max_challenge_exchanges: int = 5
     # Parallel writable siblings must not share one checkout. ``isolated`` is
@@ -110,7 +112,8 @@ class StageDef:
             "max_cycles": self.max_cycles, "timeout_s": self.timeout_s,
             "requires": self.requires,
             "needs": self.needs, "produces": self.produces,
-            "consumes": self.consumes, "challenge": self.challenge,
+            "consumes": self.consumes, "evidence": self.evidence,
+            "challenge": self.challenge,
             "max_challenge_exchanges": self.max_challenge_exchanges,
             "workspace": self.workspace,
         }
@@ -153,7 +156,9 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
             raise ValueError(f"stage {name!r}: max_challenge_exchanges must be 0..5")
         produces = item.get("produces") or []
         consumes = item.get("consumes") or []
-        for field_name, values in (("produces", produces), ("consumes", consumes)):
+        evidence = item.get("evidence") or []
+        for field_name, values in (("produces", produces), ("consumes", consumes),
+                                   ("evidence", evidence)):
             if not isinstance(values, list) or any(
                     not isinstance(value, str) or not value.strip() for value in values):
                 raise ValueError(f"stage {name!r}: {field_name} must be artifact ids")
@@ -173,6 +178,7 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
             needs=list(dict.fromkeys(dep.strip() for dep in needs if dep.strip())),
             produces=list(dict.fromkeys(value.strip() for value in produces)),
             consumes=list(dict.fromkeys(value.strip() for value in consumes)),
+            evidence=list(dict.fromkeys(value.strip() for value in evidence)),
             challenge=bool(item.get("challenge", True)),
             max_challenge_exchanges=challenge_exchanges,
             workspace=workspace,
@@ -237,6 +243,8 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
         for right in stages[left_index + 1:]:
             if left.name in ancestry[right.name] or \
                     right.name in ancestry[left.name]:
+                continue
+            if left.read_only and right.read_only:
                 continue
             if left.workspace != "isolated" or right.workspace != "isolated":
                 raise ValueError(

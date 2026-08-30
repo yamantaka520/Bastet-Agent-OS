@@ -68,9 +68,15 @@ export type JobDetail = Job & {
   worktree_path: string | null;
   runs: Run[];
   gates: Gate[];
+  evidence_matrix?: EvidenceMatrixRow[];
   deliveries: DeliveryReceipt[];
   // what the PM did — and, on an escalation, the question it needs answered
   pm_decision?: PmDecision | null;
+};
+
+export type EvidenceMatrixRow = {
+  kind: string; stage: string; gate: string; verdict: string;
+  run_id: string | null; head_commit: string | null;
 };
 
 export type DeliveryReceipt = {

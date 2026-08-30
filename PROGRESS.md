@@ -21,6 +21,11 @@ Last updated: 2026-08-30
   downstream join. A receiving Agent now reviews the latest dependency handoffs
   before its stage starts; challenges alternate with the source for at most five
   durable exchanges and resolve to acceptance, predecessor rework, or human ruling.
+  All eight built-in workflow families now use explicit DAGs rather than serial
+  lists. Development presets separate system analysis, UX, UI, visual art,
+  implementation, integration, security and release roles. Every preset declares
+  required typed evidence; the Jobs API and board expose its live evidence matrix.
+  A failed graph gate automatically reworks only its writable source subgraph.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month
   (2026-07-28 → 2026-08-30), ~132 commits. See [CHANGELOG.md](CHANGELOG.md) for
@@ -79,7 +84,7 @@ Last updated: 2026-08-30
   6. **Interrupt the dead, not the merely quiet** (0.30.0): liveness decides
      interruption, so a 20-minute test is no longer executed at the 15-minute
      silence mark.
-- Test suite: **598 passing**, `ruff` clean; CI green on Linux/macOS and
+- Test suite: **601 passing**, `ruff` clean; CI green on Linux/macOS and
   inside the shipped Docker base image (Windows legs are declarative).
 - Releases are automated: a `v*` tag publishes to PyPI (Trusted Publishing) and
   pushes the multi-arch image to Docker Hub.

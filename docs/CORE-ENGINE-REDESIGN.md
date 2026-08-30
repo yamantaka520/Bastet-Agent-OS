@@ -135,8 +135,11 @@ integration delivery.
    node starts, its receiver reviews the latest handoff from every dependency;
    source and receiver then alternate for at most five durable exchanges,
    resulting in acceptance, predecessor rework, or human ruling.
-5. **Evidence/delivery:** evidence matrix and mandatory merge/integration receipt
-   for development work.
+5. **Evidence/delivery (typed matrix implemented, delivery hardening pending):**
+   every built-in family declares required evidence dimensions and assigns each
+   dimension to a non-auto gate. Job detail exposes the frozen stage, gate,
+   verdict, run and commit for every evidence row. Mandatory target-main and
+   remote receipts still require the next delivery-contract hardening slice.
 6. **Experience:** graph UI, frozen/intake conversations, Telegram progress and
    grounded questions, Skill install/supply wizard.
 
@@ -157,8 +160,12 @@ runs isolated writable siblings concurrently, joins them into the job branch,
 exposes node state in the Jobs API and board, and emits live node lifecycle events.
 The fifth and sixth slices add graph-node human approval and automatic, restart-
 durable receiver/source challenge turns before execution. Rework resets the source
-subgraph; an unresolved fifth exchange blocks for human ruling. Built-in template
-migration and broader evidence/delivery coverage remain pending.
+subgraph; an unresolved fifth exchange blocks for human ruling. The seventh slice
+migrates all eight built-in families to explicit DAGs, separates system-analysis,
+UX, UI, visual-art, implementation, integration, security and release roles in
+development work, and adds typed evidence contracts plus the live job evidence
+matrix. Graph gate rejection now performs bounded source-subgraph rework while
+preserving passed siblings. Mandatory main/remote delivery receipts remain pending.
 
 No phase is shipped solely from unit tests. It needs migration, restart and race
 tests, a real multi-branch rehearsal, and an end-to-end receipt proving the target

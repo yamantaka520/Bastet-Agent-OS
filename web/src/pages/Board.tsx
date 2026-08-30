@@ -464,6 +464,21 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
         </>
       )}
 
+      {!!job.evidence_matrix?.length && (
+        <>
+          <h3>Evidence matrix</h3>
+          <table>
+            <thead><tr><th>evidence</th><th>stage</th><th>gate</th><th>verdict</th></tr></thead>
+            <tbody>{job.evidence_matrix.map((row, index) => (
+              <tr key={`${row.kind}:${row.stage}:${index}`}>
+                <td>{row.kind}</td><td>{row.stage}</td><td>{row.gate}</td>
+                <td>{row.verdict}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </>
+      )}
+
       {canOperate && job.status === "blocked"
         && job.pm_decision?.action === "escalate" && (
         <div className="approval pm-ask">

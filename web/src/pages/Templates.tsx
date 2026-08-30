@@ -8,7 +8,7 @@ type Stage = {
   name: string; role?: string | null; gate: string;
   gate_config?: { command?: string; precheck_command?: string }; read_only?: boolean;
   requires?: string[];
-  needs?: string[]; produces?: string[]; consumes?: string[];
+  needs?: string[]; produces?: string[]; consumes?: string[]; evidence?: string[];
   challenge?: boolean; max_challenge_exchanges?: number;
   workspace?: "shared" | "isolated";
   max_retries?: number; desc?: string;
@@ -17,8 +17,9 @@ type Preset = { id: string; name: string; description: string; stages: Stage[] }
 type Role = { id: string; label: string; hint: string };
 type Gate = { id: string; label: string; icon: string; hint: string };
 type Capability = { id: string; label: string; description: string };
+type EvidenceType = { id: string; label: string };
 type Catalog = { presets: Preset[]; roles: Role[]; gates: Gate[];
-                 capabilities: Capability[] };
+                 evidence_types: EvidenceType[]; capabilities: Capability[] };
 type Template = { id: string; version: number; stages_json: string;
                   assigned_projects: string[] };
 type Project = { id: string; team_id: string; default_template_id: string | null;
@@ -92,6 +93,7 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
         ...(s.needs !== undefined ? { needs: s.needs } : {}),
         ...(s.produces?.length ? { produces: s.produces } : {}),
         ...(s.consumes?.length ? { consumes: s.consumes } : {}),
+        ...(s.evidence?.length ? { evidence: s.evidence } : {}),
         ...(s.challenge === false ? { challenge: false } : {}),
         ...(s.max_challenge_exchanges !== undefined
           ? { max_challenge_exchanges: Number(s.max_challenge_exchanges) } : {}),
@@ -276,6 +278,8 @@ function Flow({ stages, roleLabel, gateInfo, t }: {
             {s.workspace === "isolated" && <span className="flow-tag">⑂ isolated</span>}
             {s.requires?.map((cap) =>
               <span className="flow-tag" key={cap}>⚙ {cap}</span>)}
+            {s.evidence?.map((kind) =>
+              <span className="flow-tag" key={`evidence:${kind}`}>✓ {kind}</span>)}
           </div>
           {i < stages.length - 1 && <span className="flow-arrow">→</span>}
         </div>
@@ -305,6 +309,7 @@ function StageTable({ stages, roleLabel, gateInfo, t }: {
                   ? <code className="detail"> {s.gate_config.command}</code> : null}</td>
               <td className="card-meta">
                 {s.needs?.length ? `needs: ${s.needs.join(", ")} · ` : ""}
+                {s.evidence?.length ? `evidence: ${s.evidence.join(", ")} · ` : ""}
                 {s.desc ?? ""}
               </td>
               <td>{s.max_retries ?? 0}</td>
@@ -464,6 +469,10 @@ function Builder({ builder, catalog, setBuilder, onSave, onCancel, roleLabel,
                      .map((x) => x.trim()).filter(Boolean) })} />
             <input placeholder="consumes: artifact ids" value={(s.consumes ?? []).join(", ")}
                    onChange={(e) => update(i, { consumes: e.target.value.split(",")
+                     .map((x) => x.trim()).filter(Boolean) })} />
+            <input placeholder="evidence: functional, security, git"
+                   value={(s.evidence ?? []).join(", ")}
+                   onChange={(e) => update(i, { evidence: e.target.value.split(",")
                      .map((x) => x.trim()).filter(Boolean) })} />
             <select value={s.workspace ?? "shared"}
                     onChange={(e) => update(i, {

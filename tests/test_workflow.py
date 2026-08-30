@@ -158,6 +158,43 @@ async def test_graph_retry_preserves_passed_sibling_and_resumes_failed_branch(or
     assert core_runs == 1
 
 
+async def test_graph_gate_reworks_its_writable_branch_without_replaying_sibling(
+        orch, seeded):
+    add_template(seeded, "gate-rework-graph", [
+        {"name": "plan", "needs": [], "read_only": True},
+        {"name": "writer", "needs": ["plan"], "workspace": "isolated",
+         "challenge": False},
+        {"name": "sibling", "needs": ["plan"], "workspace": "isolated",
+         "challenge": False},
+        {"name": "review", "needs": ["writer"], "workspace": "isolated",
+         "read_only": True, "gate": "agent-review", "challenge": False,
+         "rework_target": "writer", "max_cycles": 2},
+        {"name": "join", "needs": ["review", "sibling"], "challenge": False},
+    ])
+    SCRIPT.extend([
+        RunResult(status="succeeded", summary="plan"),
+        RunResult(status="succeeded", summary="first draft"),
+        RunResult(status="succeeded", summary="sibling done"),
+        RunResult(status="succeeded", summary="missing case",
+                  structured_verdict={"verdict": "reject", "reasons": ["missing"]}),
+        RunResult(status="succeeded", summary="repaired draft"),
+        RunResult(status="succeeded", summary="accepted",
+                  structured_verdict={"verdict": "approve"}),
+        RunResult(status="succeeded", summary="joined"),
+    ])
+    job_id = orch.dispatch(req(template_id="gate-rework-graph"))
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+    counts = {row["stage"]: row["n"] for row in seeded.query(
+        "SELECT stage,COUNT(*) n FROM runs WHERE job_id=? GROUP BY stage", (job_id,))}
+    assert counts["writer"] == counts["review"] == 2
+    assert counts["sibling"] == 1
+    handback = seeded.one(
+        "SELECT detail_json FROM audit_log WHERE target_id=? AND action='job.rework'",
+        (job_id,))
+    assert json.loads(handback["detail_json"])["back_to"] == "writer"
+
+
 async def test_parallel_human_gates_are_approved_by_explicit_stage(orch, seeded):
     add_template(seeded, "approval-graph", [
         {"name": "plan", "needs": [], "read_only": True},
@@ -400,22 +437,49 @@ async def test_role_routing_picks_role_agent(orch, seeded):
 # ---- built-in presets (workflow_presets) ------------------------------------------
 
 def test_all_presets_parse_and_are_well_formed():
-    from bastet_agent_os.workflow_presets import GATES, PRESETS, ROLES
+    from bastet_agent_os.workflow_presets import EVIDENCE_TYPES, GATES, PRESETS, ROLES
 
     role_ids = {r["id"] for r in ROLES}
     gate_ids = {g["id"] for g in GATES}
+    evidence_ids = {item["id"] for item in EVIDENCE_TYPES}
     assert len(PRESETS) >= 6
     for preset in PRESETS:
         stages = parse_stages(preset["stages"])   # engine must accept every preset
         assert stages, preset["id"]
+        assert not is_linear_stage_graph(stages), f"{preset['id']}: still serial"
+        covered = {kind for stage in stages for kind in stage.evidence}
+        assert set(preset["required_evidence"]) <= covered, preset["id"]
+        assert covered <= evidence_ids, preset["id"]
         for raw, stage in zip(preset["stages"], stages, strict=True):
             assert stage.gate in gate_ids
             if raw.get("role"):
                 assert raw["role"] in role_ids, f"{preset['id']}: unknown role"
             if stage.gate == "tests-pass":
                 assert stage.gate_config.get("command")
+            assert not (stage.gate == "auto" and stage.evidence), (
+                f"{preset['id']}:{stage.name} claims evidence behind an auto gate")
         # side-effecting last stage should ask a human
         assert stages[-1].gate in ("human-approve", "agent-review"), preset["id"]
+
+    development_roles = {"system-analyst", "ux-researcher", "ui-designer",
+                         "visual-artist",
+                         "security-reviewer", "integrator", "release-manager"}
+    fullstack = next(item for item in PRESETS if item["id"] == "fullstack-dev")
+    assert development_roles <= {stage.get("role") for stage in fullstack["stages"]}
+
+
+def test_parallel_read_only_reviewers_can_share_a_workspace():
+    stages = parse_stages([
+        {"name": "build", "needs": [], "workspace": "isolated"},
+        {"name": "quality", "needs": ["build"], "read_only": True,
+         "gate": "agent-review", "evidence": ["architecture"]},
+        {"name": "security", "needs": ["build"], "read_only": True,
+         "gate": "agent-review", "evidence": ["security"]},
+        {"name": "release", "needs": ["quality", "security"],
+         "gate": "human-approve"},
+    ])
+    assert stages[1].evidence == ["architecture"]
+    assert stages[2].workspace == "shared"
 
 
 # ---- role prompts & project secrets in runs -----------------------------------------
