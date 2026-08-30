@@ -10,8 +10,11 @@ Last updated: 2026-08-30
   ready nodes concurrently under `max_parallel` and persists `job_deps`; direct
   whole-chat single-card dispatch and project-page decomposition removed; chat
   decomposition gated on a proposed solution; expanded product/system-analysis/
-  architecture/UX/UI/visual/integration/release roles. Workflow-stage DAGs and
-  automated visible PM↔system-analysis negotiation remain pending.
+  architecture/UX/UI/visual/integration/release roles. The assigned PM and system
+  analyst now negotiate visibly in the customer session: each exchange persists,
+  emits a live UI event, survives retries without resetting its lifetime maximum
+  of five, and only an explicit system-analysis `accept` unlocks task decomposition.
+  Workflow-stage DAGs and handoff challenges remain pending.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month
   (2026-07-28 → 2026-08-30), ~132 commits. See [CHANGELOG.md](CHANGELOG.md) for

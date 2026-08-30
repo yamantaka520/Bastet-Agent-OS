@@ -19,7 +19,8 @@ type Message = { id: string; role: string; author: string; content: string;
 type Pending = { id: string; title: string; stage: string };
 type ProjectRow = { id: string; team_id: string };
 type Planning = { round: null | { id: string; state: string; ordinal: number;
-                                  solution_md: string };
+                                  solution_md: string;
+                                  negotiation: { number: number; verdict: string }[] };
                   intake: { id: string; kind: string; content: string }[] };
 
 export default function ChatPage(props: { canOperate: boolean; refreshKey: number }) {
@@ -350,6 +351,26 @@ function Conversation({ sessionId, responders, canOperate, refreshKey,
                   load();
                 } catch (e) { setError(String((e as Error).message)); }
               }}>{t("chat.startRound")}</button>
+            </div>
+          )}
+
+          {session.scope_type === "project" && planning?.round
+            && ["discovery", "analysis"].includes(planning.round.state) && (
+            <div className="chat-dispatch">
+              <b>{t("chat.analysisTitle")}</b>
+              <p className="muted">{t("chat.analysisHint")}</p>
+              <button disabled={busy} onClick={async () => {
+                setBusy(true); setError("");
+                try {
+                  await post(`/api/planning-rounds/${planning.round!.id}/negotiate`, {});
+                  load();
+                } catch (e) { setError(String((e as Error).message)); load(); }
+                finally { setBusy(false); }
+              }}>{busy ? t("chat.analysisRunning") : t("chat.analysisStart")}</button>
+              {!!planning.round.negotiation?.length && (
+                <span className="card-meta"> {t("chat.analysisRounds",
+                  { n: planning.round.negotiation.length })}</span>
+              )}
             </div>
           )}
 

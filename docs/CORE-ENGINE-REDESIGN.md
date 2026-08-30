@@ -117,8 +117,10 @@ integration delivery.
 2. **Scheduler (project task DAG implemented, stage DAG pending):** concurrent
    ready-node claiming, dependency persistence, failure propagation, restart
    recovery, per-project and per-resource limits.
-3. **Planning:** visible PM/system-analysis negotiation, solution readiness and
-   role/capability coverage; remove redundant dispatch/decomposition paths.
+3. **Planning (negotiation implemented, coverage lint pending):** visible,
+   persisted PM/system-analysis negotiation with a lifetime five-exchange cap;
+   solution readiness and server-side decomposition gate; role/capability
+   coverage lint remains pending.
 4. **Workflow graph:** stage dependencies, artifact contracts, challenge records
    and joins; migrate built-in templates and role prompts.
 5. **Evidence/delivery:** evidence matrix and mandatory merge/integration receipt
@@ -130,8 +132,11 @@ The first slice also removes the whole-chat single-card dispatch API (HTTP 410),
 removes project-page PM decomposition, gates chat decomposition on a `proposed`
 round, exposes frozen/intake UI, and expands the role catalog with product
 planning, system analysis, architecture, UX, UI, visual art, integration and
-release management. PM↔system-analysis automation and workflow-stage DAGs remain
-the next core slice; they are not implied by the foundation work.
+release management. The second slice runs the assigned PM and system analyst as
+separate read-only agents, persists and displays each proposal/challenge, emits
+live exchange events, resumes without resetting the five-exchange lifetime cap,
+and unlocks decomposition only after an `accept` verdict. Workflow-stage DAGs
+and handoff challenges remain the next core slice.
 
 No phase is shipped solely from unit tests. It needs migration, restart and race
 tests, a real multi-branch rehearsal, and an end-to-end receipt proving the target

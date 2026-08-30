@@ -1476,6 +1476,23 @@ def create_app(home: Home) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"id": round_id, "state": "proposed"}
 
+    @app.post("/api/planning-rounds/{round_id}/negotiate")
+    async def negotiate_planning_round(
+            round_id: str, auth: Auth = Depends(require_role("operator"))):
+        row = db.one("SELECT project_id FROM planning_rounds WHERE id=?", (round_id,))
+        if row is None:
+            raise HTTPException(status_code=404, detail="planning round not found")
+        try:
+            result = await planning_rounds_mod.negotiate(
+                db, home.root, round_id, actor=auth.actor,
+                on_exchange=lambda exchange, verdict: bus.emit(
+                    "planning.exchange", row["project_id"], round_id=round_id,
+                    exchange=exchange, verdict=verdict))
+        except planning_rounds_mod.PlanningRoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        bus.emit("planning.proposed", row["project_id"], round_id=round_id)
+        return result
+
     @app.post("/api/projects/{project_id}/planning-intake")
     def add_planning_intake(project_id: str, body: PlanningIntakeIn,
                             auth: Auth = Depends(require_role("operator"))):
@@ -1622,6 +1639,12 @@ def create_app(home: Home) -> FastAPI:
         if session["scope_type"] != "project":
             raise HTTPException(status_code=400,
                                 detail="只有專案範圍的對話可以產生任務拆分")
+        round_row = planning_rounds_mod.current(db, session["scope_id"])
+        if round_row is None or round_row["id"] != session["planning_round_id"] or \
+                round_row["state"] != "proposed":
+            raise HTTPException(
+                status_code=400,
+                detail="PM 與系統分析完成具體方案並接受後才能產生任務圖")
         try:
             tasks = await runner_mod.decompose(db, home.root, session["scope_id"],
                                               body.agent_id, actor=auth.actor)

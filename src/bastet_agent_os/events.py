@@ -35,6 +35,7 @@ EVENT_TYPES = {
     "gate.pending", "gate.passed", "gate.failed",
     # projects
     "project.status", "project.deleted", "room.message",
+    "planning.exchange", "planning.proposed",
     # everything else
     "chat.message",
     "budget.warning", "budget.exceeded",

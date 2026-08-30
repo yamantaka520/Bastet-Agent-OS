@@ -1,6 +1,9 @@
 import pytest
+from fake_executor import SCRIPT
 
 from bastet_agent_os import chat, planning_rounds, project_lifecycle
+from bastet_agent_os.db import now
+from bastet_agent_os.executors.base import RunResult
 
 
 def _session(db):
@@ -62,3 +65,43 @@ def test_project_start_and_acceptance_advance_the_round(seeded):
     project_lifecycle.apply(seeded, "proj1", "stop")
     project_lifecycle.apply(seeded, "proj1", "close")
     assert planning_rounds.current(seeded, "proj1")["state"] == "accepted"
+
+
+async def test_pm_and_system_analyst_negotiate_visibly_within_five_rounds(
+        orch, seeded, tmp_path):
+    del orch
+    ts = now()
+    seeded.write("INSERT INTO agents(id, amos_agent_id, name, executor_type, "
+                 "created_at, updated_at) VALUES('sabot','sabot','System Analyst',"
+                 "'fake',?,?)", (ts, ts))
+    seeded.write_many([
+        ("INSERT INTO project_agent_roles(project_id, agent_id, role, preference) "
+         "VALUES('proj1','fakebot','pm',10)", ()),
+        ("INSERT INTO project_agent_roles(project_id, agent_id, role, preference) "
+         "VALUES('proj1','sabot','system-analyst',10)", ()),
+    ])
+    session = chat.create_session(seeded, scope_type="project", scope_id="proj1",
+                                  responder_kind="agent", responder_id="fakebot")
+    chat.add_message(seeded, session, role="user", content="Build a booking system")
+    round_id = planning_rounds.start(seeded, "proj1", session)
+    SCRIPT.extend([
+        RunResult(status="succeeded", summary=(
+            '{"solution":"v1 without rollback","response":"initial"}')),
+        RunResult(status="succeeded", summary=(
+            '{"verdict":"challenge","response":"missing rollback",'
+            '"issues":["define rollback"]}')),
+        RunResult(status="succeeded", summary=(
+            '{"solution":"v2 with rollback and evidence","response":"added rollback"}')),
+        RunResult(status="succeeded", summary=(
+            '{"verdict":"accept","response":"contracts are testable","issues":[]}')),
+    ])
+
+    result = await planning_rounds.negotiate(seeded, tmp_path, round_id, actor="u")
+    assert result["state"] == "proposed" and len(result["negotiation"]) == 2
+    assert planning_rounds.current(seeded, "proj1")["state"] == "proposed"
+    visible = chat.messages(seeded, session)
+    planning_messages = [item for item in visible if item["meta"].get("planning_role")]
+    assert [item["meta"]["planning_role"] for item in planning_messages] == [
+        "pm", "system-analyst", "pm", "system-analyst"]
+    assert len(seeded.query("SELECT * FROM audit_log WHERE "
+                            "action='planning.negotiation.exchange'")) == 2
