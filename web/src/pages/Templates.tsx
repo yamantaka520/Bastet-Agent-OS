@@ -11,6 +11,7 @@ type Stage = {
   needs?: string[]; produces?: string[]; consumes?: string[]; evidence?: string[];
   challenge?: boolean; max_challenge_exchanges?: number;
   workspace?: "shared" | "isolated";
+  delivery_modes?: ("branch" | "integration" | "production")[];
   max_retries?: number; desc?: string;
 };
 type Preset = { id: string; name: string; description: string; stages: Stage[] };
@@ -98,6 +99,7 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
         ...(s.max_challenge_exchanges !== undefined
           ? { max_challenge_exchanges: Number(s.max_challenge_exchanges) } : {}),
         ...(s.workspace === "isolated" ? { workspace: "isolated" } : {}),
+        ...(s.delivery_modes?.length ? { delivery_modes: s.delivery_modes } : {}),
         ...(s.max_retries ? { max_retries: Number(s.max_retries) } : {}),
         ...(s.desc ? { desc: s.desc } : {}),
       }));
@@ -280,6 +282,8 @@ function Flow({ stages, roleLabel, gateInfo, t }: {
               <span className="flow-tag" key={cap}>⚙ {cap}</span>)}
             {s.evidence?.map((kind) =>
               <span className="flow-tag" key={`evidence:${kind}`}>✓ {kind}</span>)}
+            {s.delivery_modes?.map((mode) =>
+              <span className="flow-tag" key={`delivery:${mode}`}>🚚 {mode}</span>)}
           </div>
           {i < stages.length - 1 && <span className="flow-arrow">→</span>}
         </div>
@@ -310,6 +314,8 @@ function StageTable({ stages, roleLabel, gateInfo, t }: {
               <td className="card-meta">
                 {s.needs?.length ? `needs: ${s.needs.join(", ")} · ` : ""}
                 {s.evidence?.length ? `evidence: ${s.evidence.join(", ")} · ` : ""}
+                {s.delivery_modes?.length
+                  ? `delivery: ${s.delivery_modes.join(" | ")} · ` : ""}
                 {s.desc ?? ""}
               </td>
               <td>{s.max_retries ?? 0}</td>
@@ -474,6 +480,10 @@ function Builder({ builder, catalog, setBuilder, onSave, onCancel, roleLabel,
                    value={(s.evidence ?? []).join(", ")}
                    onChange={(e) => update(i, { evidence: e.target.value.split(",")
                      .map((x) => x.trim()).filter(Boolean) })} />
+            <input placeholder="delivery: integration, production (sink only)"
+                   value={(s.delivery_modes ?? []).join(", ")}
+                   onChange={(e) => update(i, { delivery_modes: e.target.value.split(",")
+                     .map((x) => x.trim()).filter(Boolean) as Stage["delivery_modes"] })} />
             <select value={s.workspace ?? "shared"}
                     onChange={(e) => update(i, {
                       workspace: e.target.value as "shared" | "isolated",

@@ -40,8 +40,9 @@ DECOMPOSE_INSTRUCTIONS = """\
 - 沒有相依關係的任務 needs 為 []，讓它們可以並行；不要用陣列順序假裝依賴
 - 任務數量控制在 3～12 個之間，不要拆到無法驗收的碎片
 - spec 要寫得讓執行者不必回頭問人：範圍、驗收條件、要動到哪些部分
-- 每個任務必須宣告 delivery：純分析用 none、一般程式工作用 branch、真正上線用
-  production；production 必須填一個不同於目前正式版的新 version
+- 每個任務必須宣告 delivery：純分析用 none、非開發交付可用 branch、一般程式工作
+  用 integration 合併並核驗遠端目標分支、真正上線用 production；production 必須填
+  一個不同於目前正式版的新 version
 - 只有最後一張整合/發布卡可以用 production，不要讓每張功能卡各自部署
 - 不要發明專案沒提到的需求；資訊不足就在 spec 裡寫明「需確認：…」
 
@@ -49,7 +50,7 @@ DECOMPOSE_INSTRUCTIONS = """\
 不要執行指令）。headless 模式無法詢問權限，工具呼叫會被拒絕而讓這次拆分失敗。
 
 只輸出 JSON，格式如下，不要有其他文字：
-{"tasks":[{"id":"stable-id","title":"任務標題","needs":[],"spec":"完整任務說明與驗收條件","role":"（可留空）建議角色 id","delivery":{"mode":"none|branch|production","version":"production 時必填"}}]}
+{"tasks":[{"id":"stable-id","title":"任務標題","needs":[],"spec":"完整任務說明與驗收條件","role":"（可留空）建議角色 id","delivery":{"mode":"none|branch|integration|production","version":"production 時必填"}}]}
 """
 
 
@@ -142,7 +143,7 @@ def parse_tasks(text: str) -> list[dict[str, Any]]:
         spec = str(item.get("spec") or item.get("description") or "").strip()
         if not title:
             continue
-        delivery_value = item.get("delivery") or {"mode": "branch"}
+        delivery_value = item.get("delivery") or {"mode": "integration"}
         if isinstance(delivery_value, str):
             delivery_value = {"mode": delivery_value}
         try:

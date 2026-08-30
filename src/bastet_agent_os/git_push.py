@@ -124,7 +124,7 @@ def push_job_branch(db: Db, job, *, emit=None) -> dict[str, Any] | None:
 
     This primitive reports and audits failure. The caller decides terminal
     semantics: optional legacy delivery remains non-fatal, while an explicit
-    branch/production contract blocks the job."""
+    branch/integration/production contract blocks the job."""
     project = db.one("SELECT * FROM projects WHERE id=?", (job["project_id"],))
     if project is None:
         return None
@@ -195,8 +195,8 @@ def integrate_job_branch(db: Db, job, *, workdir: str,
                          ) -> dict[str, Any]:
     """Merge the fresh remote target and atomically push HEAD and its tag.
 
-    This is used only by an explicit production delivery contract.  It never
-    force-pushes: a concurrently advanced target or conflicting release tag
+    This is used only by an explicit integration or production delivery
+    contract. It never force-pushes: a concurrently advanced target or release tag
     makes the atomic push fail and leaves the card blocked with its worktree
     intact.  A production release therefore cannot silently update ``main``
     without also publishing its immutable version tag.
@@ -286,6 +286,15 @@ def integrate_job_branch(db: Db, job, *, workdir: str,
                      {"target_branch": target_branch, "release_tag": release_tag,
                       "remote": detected, "detail": detail[:800]})
             return {"pushed": False, "detail": detail}
+        verified = subprocess.run(
+            ["git", "ls-remote", "--heads", url, f"refs/heads/{target_branch}"],
+            capture_output=True, text=True, timeout=PUSH_TIMEOUT_S, env=env)
+        remote_sha = verified.stdout.split()[0] if verified.returncode == 0 \
+            and verified.stdout.split() else ""
+        if remote_sha != commit_sha:
+            return {"pushed": False,
+                    "detail": "remote target verification failed: "
+                              f"expected {commit_sha}, got {remote_sha or 'missing'}"}
     detail = "\n".join(output)[-1200:]
     db.audit("orchestrator", "job.integrated", "job", job["id"],
              {"target_branch": target_branch, "remote": detected,
@@ -293,4 +302,5 @@ def integrate_job_branch(db: Db, job, *, workdir: str,
               "detail": detail[:800]})
     return {"pushed": True, "target_branch": target_branch, "remote": detected,
             "release_tag": release_tag, "commit_sha": commit_sha,
+            "remote_commit_sha": remote_sha,
             "gate_output": gate_output, "detail": detail}

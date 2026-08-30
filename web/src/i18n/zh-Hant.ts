@@ -507,6 +507,7 @@ const zhHant = {
   "proj.deliveryMode": "交付模式",
   "proj.deliveryNone": "不需交付",
   "proj.deliveryBranch": "工作分支",
+  "proj.deliveryIntegration": "整合並核驗主線",
   "proj.deliveryProduction": "正式發布",
   "proj.deliveryVersionPh": "新版本",
   "proj.deliveryStatus": "交付",

@@ -508,6 +508,7 @@ const zhHans: Dict = {
   "proj.deliveryMode": "交付模式",
   "proj.deliveryNone": "无需交付",
   "proj.deliveryBranch": "工作分支",
+  "proj.deliveryIntegration": "整合并核验主线",
   "proj.deliveryProduction": "正式发布",
   "proj.deliveryVersionPh": "新版本",
   "proj.deliveryStatus": "交付",

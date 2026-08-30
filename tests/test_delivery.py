@@ -48,6 +48,59 @@ async def test_required_branch_is_delivered_before_done(orch, seeded, origin):
     assert "job.done" in actions
 
 
+async def test_integration_merges_and_verifies_remote_target_before_done(
+        orch, seeded, origin):
+    profile = {
+        "target_branch": "main",
+        "target": "origin/main",
+        "predeploy_command": "test -f feature.txt",
+    }
+    seeded.write("UPDATE projects SET config_json=? WHERE id='proj1'",
+                 (json.dumps({"delivery_profile": profile}),))
+    add_template(seeded, "dev", [{"name": "implement", "gate": "auto",
+                                   "delivery_modes": ["integration", "production"]}])
+    SCRIPT.append(writes_release)
+
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True,
+                               delivery={"mode": "integration"}))
+    await orch.wait_idle()
+
+    receipt = seeded.one("SELECT * FROM deliveries WHERE job_id=?", (job_id,))
+    remote_main = subprocess.run(
+        ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+        capture_output=True, text=True, check=True).stdout.strip()
+    evidence = json.loads(receipt["evidence_json"])
+    assert receipt["status"] == "succeeded"
+    assert receipt["target"] == "origin/main"
+    assert receipt["version"] == ""
+    assert remote_main == receipt["commit_sha"]
+    assert evidence["integration"]["remote_commit_sha"] == remote_main
+    assert evidence["predeploy"] == ""
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+
+
+async def test_delivery_policy_rejects_parked_development_branch(orch, seeded):
+    add_template(seeded, "dev", [{"name": "release", "gate": "human-approve",
+                                   "delivery_modes": ["integration", "production"]}])
+    with pytest.raises(ValueError, match="workflow requires delivery.mode"):
+        orch.dispatch(req(template_id="dev", delivery={"mode": "branch"}))
+
+
+async def test_delivery_repair_cannot_bypass_frozen_workflow_policy(
+        orch, seeded, origin):
+    add_template(seeded, "dev", [{"name": "release", "gate": "auto",
+                                   "delivery_modes": ["integration", "production"]}])
+    SCRIPT.append(writes_release)
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True,
+                               delivery={"mode": "integration", "profile": {
+                                   "target_branch": "main",
+                                   "predeploy_command": "true",
+                               }}))
+    await orch.wait_idle()
+    with pytest.raises(ValueError, match="workflow requires delivery.mode"):
+        orch.configure_delivery(job_id, {"mode": "branch"}, user="repair")
+
+
 async def test_failed_required_delivery_blocks_instead_of_lying_done(
         orch, seeded, repo, tmp_path):
     subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",

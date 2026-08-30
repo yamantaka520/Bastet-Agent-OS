@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 GATE_TYPES = {"auto", "tests-pass", "agent-review", "human-approve"}
+DELIVERY_MODES = {"branch", "integration", "production"}
 
 # How much of a failing command's output is kept. It has two readers: the agent
 # that has to fix it, and the person reading the notification.
@@ -102,6 +103,10 @@ class StageDef:
     # Parallel writable siblings must not share one checkout. ``isolated`` is
     # an admission promise; the stage scheduler must provision and later join it.
     workspace: str = "shared"              # shared|isolated
+    # When non-empty, the workflow cannot be dispatched unless its explicit
+    # delivery contract selects one of these modes. This lives in the frozen
+    # stage snapshot so built-ins and copied templates keep the same promise.
+    delivery_modes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -116,6 +121,7 @@ class StageDef:
             "challenge": self.challenge,
             "max_challenge_exchanges": self.max_challenge_exchanges,
             "workspace": self.workspace,
+            "delivery_modes": self.delivery_modes,
         }
 
 
@@ -157,11 +163,17 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
         produces = item.get("produces") or []
         consumes = item.get("consumes") or []
         evidence = item.get("evidence") or []
+        delivery_modes = item.get("delivery_modes") or []
         for field_name, values in (("produces", produces), ("consumes", consumes),
                                    ("evidence", evidence)):
             if not isinstance(values, list) or any(
                     not isinstance(value, str) or not value.strip() for value in values):
                 raise ValueError(f"stage {name!r}: {field_name} must be artifact ids")
+        if not isinstance(delivery_modes, list) or any(
+                not isinstance(value, str) or value not in DELIVERY_MODES
+                for value in delivery_modes):
+            raise ValueError(
+                f"stage {name!r}: delivery_modes must use {sorted(DELIVERY_MODES)}")
         stages.append(StageDef(
             name=name,
             role=item.get("role"),
@@ -182,6 +194,7 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
             challenge=bool(item.get("challenge", True)),
             max_challenge_exchanges=challenge_exchanges,
             workspace=workspace,
+            delivery_modes=list(dict.fromkeys(delivery_modes)),
         ))
     names = {s.name for s in stages}
     for stage in stages:
@@ -193,6 +206,12 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
             raise ValueError(f"stage {stage.name!r}: unknown dependencies {unknown}")
         if stage.name in stage.needs:
             raise ValueError(f"stage {stage.name!r}: cannot depend on itself")
+
+    depended_on = {dependency for stage in stages for dependency in stage.needs}
+    for stage in stages:
+        if stage.delivery_modes and stage.name in depended_on:
+            raise ValueError(
+                f"stage {stage.name!r}: delivery_modes may only be declared on a sink")
 
     by_name = {stage.name: stage for stage in stages}
     visiting: set[str] = set()

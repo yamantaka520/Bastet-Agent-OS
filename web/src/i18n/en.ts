@@ -488,6 +488,7 @@ const en: Dict = {
   "proj.deliveryMode": "delivery mode",
   "proj.deliveryNone": "no delivery",
   "proj.deliveryBranch": "work branch",
+  "proj.deliveryIntegration": "integrate and verify target",
   "proj.deliveryProduction": "production release",
   "proj.deliveryVersionPh": "new version",
   "proj.deliveryStatus": "delivery",

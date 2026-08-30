@@ -460,12 +460,31 @@ def test_all_presets_parse_and_are_well_formed():
                 f"{preset['id']}:{stage.name} claims evidence behind an auto gate")
         # side-effecting last stage should ask a human
         assert stages[-1].gate in ("human-approve", "agent-review"), preset["id"]
+        if preset["family"] == "development":
+            assert set(stages[-1].delivery_modes) == {"integration", "production"}
 
     development_roles = {"system-analyst", "ux-researcher", "ui-designer",
                          "visual-artist",
                          "security-reviewer", "integrator", "release-manager"}
     fullstack = next(item for item in PRESETS if item["id"] == "fullstack-dev")
     assert development_roles <= {stage.get("role") for stage in fullstack["stages"]}
+
+
+def test_delivery_policy_is_valid_and_only_allowed_on_graph_sink():
+    stages = parse_stages([
+        {"name": "build", "needs": []},
+        {"name": "release", "needs": ["build"],
+         "delivery_modes": ["integration", "production"]},
+    ])
+    assert stages[-1].delivery_modes == ["integration", "production"]
+    with pytest.raises(ValueError, match="only be declared on a sink"):
+        parse_stages([
+            {"name": "build", "needs": [], "delivery_modes": ["integration"]},
+            {"name": "release", "needs": ["build"]},
+        ])
+    with pytest.raises(ValueError, match="delivery_modes"):
+        parse_stages([{"name": "release", "needs": [],
+                       "delivery_modes": ["none"]}])
 
 
 def test_parallel_read_only_reviewers_can_share_a_workspace():

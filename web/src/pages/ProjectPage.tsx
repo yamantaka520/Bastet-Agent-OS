@@ -22,7 +22,8 @@ type Agent = { id: string; name: string; executor_type: string; enabled: number 
 type Role = { id: string; label: string };
 type Template = { id: string };
 type PoolResource = { id: string; name: string; kind: string };
-type Delivery = { mode: "none" | "branch" | "production"; version?: string };
+type Delivery = { mode: "none" | "branch" | "integration" | "production";
+                  version?: string };
 type Task = { id?: string; title: string; needs?: string[]; spec: string;
                role?: string; delivery?: Delivery;
                job_id?: string; origin?: string; job_status?: string;
@@ -452,7 +453,7 @@ function TaskPlan({ projectId, project, canOperate, refreshKey, onChanged,
     setTasks(tasks.map((task, idx) => (idx === i ? { ...task, [key]: value } : task)));
   const patchDelivery = (i: number, value: Partial<Delivery>) =>
     setTasks(tasks.map((task, idx) => idx === i
-      ? { ...task, delivery: { mode: task.delivery?.mode ?? "branch",
+      ? { ...task, delivery: { mode: task.delivery?.mode ?? "integration",
                                ...task.delivery, ...value } }
       : task));
 
@@ -502,13 +503,14 @@ function TaskPlan({ projectId, project, canOperate, refreshKey, onChanged,
                  onChange={(e) => setTasks(tasks.map((item, idx) => idx === i
                    ? { ...item, needs: e.target.value.split(",").map((x) => x.trim())
                        .filter(Boolean) } : item))} />
-          <select value={task.delivery?.mode ?? "branch"}
+          <select value={task.delivery?.mode ?? "integration"}
                   disabled={!canOperate || !!task.job_id}
                   title={t("proj.deliveryMode")}
                   onChange={(e) => patchDelivery(i, {
                     mode: e.target.value as Delivery["mode"] })}>
             <option value="none">{t("proj.deliveryNone")}</option>
             <option value="branch">{t("proj.deliveryBranch")}</option>
+            <option value="integration">{t("proj.deliveryIntegration")}</option>
             <option value="production">{t("proj.deliveryProduction")}</option>
           </select>
           {(task.delivery?.mode === "production") && (
@@ -545,7 +547,7 @@ function TaskPlan({ projectId, project, canOperate, refreshKey, onChanged,
         <div className="row">
           <button className="ghost"
                   onClick={() => setTasks([...tasks, { title: "", spec: "",
-                    delivery: { mode: "branch" } }])}>
+                    delivery: { mode: "integration" } }])}>
             {t("proj.addTask")}</button>
           {!!tasks.filter((x) => !x.job_id).length && (
             <button className="ghost danger-text" onClick={async () => {

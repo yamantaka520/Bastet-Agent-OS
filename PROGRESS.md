@@ -1,6 +1,6 @@
 # Bastet Agent OS Progress
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 ## Current project status
 
@@ -26,6 +26,11 @@ Last updated: 2026-08-30
   implementation, integration, security and release roles. Every preset declares
   required typed evidence; the Jobs API and board expose its live evidence matrix.
   A failed graph gate automatically reworks only its writable source subgraph.
+  Development workflow sinks now reject `none` and branch-only delivery: the new
+  `integration` mode fetches the current remote target, merges, runs its trusted
+  candidate gate, pushes without force, and verifies the remote receipt SHA;
+  `production` retains version tagging, deployment, and online verification.
+  Validation: 605 Python tests, ruff clean, and Web production build successful.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month
   (2026-07-28 → 2026-08-30), ~132 commits. See [CHANGELOG.md](CHANGELOG.md) for

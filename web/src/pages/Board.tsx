@@ -272,7 +272,7 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   const [rulingError, setRulingError] = useState("");
   const [supplyNote, setSupplyNote] = useState("");
   const [repairDeliveryMode, setRepairDeliveryMode] =
-    useState<"branch" | "production">("branch");
+    useState<"branch" | "integration" | "production">("integration");
   const [repairDeliveryVersion, setRepairDeliveryVersion] = useState("");
   const [repairDeliveryError, setRepairDeliveryError] = useState("");
 
@@ -425,8 +425,9 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
           <div className="row">
             <select value={repairDeliveryMode}
                     onChange={(e) => setRepairDeliveryMode(
-                      e.target.value as "branch" | "production") }>
+                      e.target.value as "branch" | "integration" | "production") }>
               <option value="branch">{t("proj.deliveryBranch")}</option>
+              <option value="integration">{t("proj.deliveryIntegration")}</option>
               <option value="production">{t("proj.deliveryProduction")}</option>
             </select>
             {repairDeliveryMode === "production" && (

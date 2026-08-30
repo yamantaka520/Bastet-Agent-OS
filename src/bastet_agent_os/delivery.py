@@ -1,8 +1,8 @@
 """Durable, deterministic job delivery.
 
 An Agent finishing its prose/code stage is not proof that anything reached a
-remote branch or production.  Delivery contracts are executed by Bastet's
-trusted host process and leave an immutable receipt.  A required delivery that
+remote branch, target branch, or production. Delivery contracts are executed by
+Bastet's trusted host process and leave an immutable receipt. A required delivery that
 fails keeps the card blocked and preserves its worktree for repair/retry.
 """
 
@@ -17,7 +17,7 @@ from typing import Any
 
 from .db import Db
 
-MODES = {"none", "branch", "production"}
+MODES = {"none", "branch", "integration", "production"}
 COMMAND_TIMEOUT_S = 1800
 OUTPUT_LIMIT = 8000
 
@@ -107,13 +107,6 @@ def execute(db: Db, job, workdir: str, contract: dict,
     if mode == "branch":
         return DeliveryResult(mode, parked["branch"], "", commit_sha, evidence)
 
-    expected = contract["version"]
-    source = str(contract.get("version_source") or "package.json")
-    actual = _package_version(workdir, source)
-    if actual != expected:
-        raise DeliveryError(
-            f"release version mismatch: contract v{expected}, {source} says v{actual}")
-
     profile = contract.get("profile") or {}
     if not isinstance(profile, dict):
         raise DeliveryError("delivery.profile must be an object")
@@ -122,10 +115,18 @@ def execute(db: Db, job, workdir: str, contract: dict,
     if not predeploy:
         raise DeliveryError("missing pre-deploy gate command")
 
+    expected = str(contract.get("version") or "")
+    if mode == "production":
+        source = str(contract.get("version_source") or "package.json")
+        actual = _package_version(workdir, source)
+        if actual != expected:
+            raise DeliveryError(
+                f"release version mismatch: contract v{expected}, {source} says v{actual}")
+
     base_env = {
         **(env or {}),
         "BASTET_DELIVERY_VERSION": expected,
-        "BASTET_DELIVERY_TAG": f"v{expected}",
+        "BASTET_DELIVERY_TAG": f"v{expected}" if expected else "",
         "BASTET_DELIVERY_TARGET": str(profile.get("target") or target_branch),
     }
 
@@ -136,12 +137,16 @@ def execute(db: Db, job, workdir: str, contract: dict,
 
     integration = git_push.integrate_job_branch(
         db, job, workdir=workdir, target_branch=target_branch,
-        release_tag=f"v{expected}", prepush_gate=prepush_gate)
+        release_tag=f"v{expected}" if expected else "", prepush_gate=prepush_gate)
     if not integration.get("pushed"):
         raise DeliveryError(str(integration.get("detail") or "main integration failed"))
     evidence["integration"] = integration
     commit_sha = integration.get("commit_sha") or commit_sha
     evidence["predeploy"] = integration.pop("gate_output", "")
+
+    target = str(profile.get("target") or target_branch)
+    if mode == "integration":
+        return DeliveryResult(mode, target, "", commit_sha, evidence)
 
     # Commands run on the trusted host, but they still need an unambiguous
     # identity for the exact release being deployed.  This also lets an online
@@ -156,5 +161,4 @@ def execute(db: Db, job, workdir: str, contract: dict,
     evidence["verify"] = _run(
         str(profile.get("verify_command") or ""), workdir, delivery_env,
         "online verification")
-    target = str(profile.get("target") or target_branch)
     return DeliveryResult(mode, target, expected, commit_sha, evidence)

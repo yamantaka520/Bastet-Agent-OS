@@ -488,6 +488,7 @@ const ko: Dict = {
   "proj.deliveryMode": "배포 모드",
   "proj.deliveryNone": "배포 없음",
   "proj.deliveryBranch": "작업 브랜치",
+  "proj.deliveryIntegration": "대상 브랜치 통합 및 검증",
   "proj.deliveryProduction": "프로덕션 릴리스",
   "proj.deliveryVersionPh": "새 버전",
   "proj.deliveryStatus": "배포",

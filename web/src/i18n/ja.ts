@@ -488,6 +488,7 @@ const ja: Dict = {
   "proj.deliveryMode": "デリバリーモード",
   "proj.deliveryNone": "デリバリー不要",
   "proj.deliveryBranch": "作業ブランチ",
+  "proj.deliveryIntegration": "ターゲットへ統合・検証",
   "proj.deliveryProduction": "本番リリース",
   "proj.deliveryVersionPh": "新バージョン",
   "proj.deliveryStatus": "デリバリー",

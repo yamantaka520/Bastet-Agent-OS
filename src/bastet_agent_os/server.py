@@ -1470,7 +1470,7 @@ def create_app(home: Home) -> FastAPI:
                     "spec": str(t.get("spec", "")).strip(),
                     "role": str(t.get("role", "")).strip(),
                     "delivery": normalize_delivery(
-                        t.get("delivery") or {"mode": "branch"}),
+                        t.get("delivery") or {"mode": "integration"}),
                     **({"job_id": t["job_id"]} if t.get("job_id") else {}),
                     **({"origin": t["origin"]} if t.get("origin") else {}),
                 }

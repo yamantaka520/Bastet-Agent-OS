@@ -1,15 +1,15 @@
 # Core Engine Redesign
 
 Status: implementation in progress; foundation slice landed  
-Date: 2026-08-30
+Date: 2026-08-31
 
 ## Why this is a redesign
 
 The validation project has repeatedly exposed a structural mismatch between what
 Bastet promises and what its data model can express. Project execution is still a
-linear task loop; workflow stages are a linear array; planning chat has no round
-lifecycle; role coverage is generic; delivery records that a branch was pushed but
-does not make integration into the target branch a normal completion invariant.
+legacy task/workflow lists cannot express all desired graph semantics; role and
+evidence coverage are still being migrated; delivery previously recorded only a
+parked branch rather than making target integration a normal completion invariant.
 Fixing individual retry paths does not close those gaps.
 
 This document replaces patch-led evolution with explicit engine invariants. New
@@ -62,6 +62,17 @@ work should be rejected when it weakens one of them.
 12. **No automatic recovery may manufacture authority or infinite work.** Human
     approval remains required for material side effects, while retry, challenge
     and PM/SA exchanges are bounded and auditable.
+
+## Implemented delivery invariant
+
+Development preset sinks now freeze `delivery_modes: [integration, production]`
+into the job workflow snapshot. Dispatch rejects `none` and branch-only contracts
+for those workflows. `integration` uses the same trusted merge-candidate path as a
+production release without deploying: fetch the current remote target, merge,
+run the configured pre-deploy gate, push without force, then read the remote ref
+back and require its SHA to equal the immutable delivery receipt. Production adds
+version-source validation, an atomic version tag, deployment, and online commit
+verification.
 
 ## Target model
 

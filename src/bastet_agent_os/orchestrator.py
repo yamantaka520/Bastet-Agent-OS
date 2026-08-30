@@ -70,7 +70,7 @@ class DispatchRequest:
     allowed_tools: list[str] | None = None
     use_worktree: bool = True
     origin: str = "dispatch"          # chat|runner|dispatch — shown on the plan
-    delivery: dict | None = None       # none|branch|production contract
+    delivery: dict | None = None       # none|branch|integration|production contract
 
 
 def _failure_reason(result: RunResult, workdir: str) -> str:
@@ -165,12 +165,20 @@ class Orchestrator:
                     "branching stage graph needs exactly one shared terminal join stage")
         from . import delivery
         delivery_contract = delivery.normalize(req.delivery)
-        if delivery_contract["mode"] == "production":
+        required_modes = sorted({mode for stage in stages
+                                 for mode in stage.delivery_modes})
+        if required_modes and delivery_contract["mode"] not in required_modes:
+            raise ValueError(
+                f"workflow requires delivery.mode to be one of {required_modes}")
+        if delivery_contract["mode"] in ("integration", "production"):
             project_config = json.loads(project["config_json"] or "{}")
             if not delivery_contract.get("profile") and \
                     not project_config.get("delivery_profile"):
                 raise ValueError(
-                    "production delivery requires the project's delivery profile")
+                    f"{delivery_contract['mode']} delivery requires the project's "
+                    "delivery profile")
+        if delivery_contract["mode"] == "production":
+            project_config = json.loads(project["config_json"] or "{}")
             previous = project_config.get("last_delivery") or {}
             if str(previous.get("version") or "").removeprefix("v") == \
                     delivery_contract.get("version"):
@@ -218,7 +226,8 @@ class Orchestrator:
         except (json.JSONDecodeError, TypeError):
             contract = {}
         contract = delivery.normalize(contract)
-        if contract["mode"] == "production" and not contract.get("profile"):
+        if contract["mode"] in ("integration", "production") \
+                and not contract.get("profile"):
             project = self.db.one("SELECT config_json FROM projects WHERE id=?",
                                   (job["project_id"],))
             config = json.loads(project["config_json"] or "{}") if project else {}
@@ -290,7 +299,7 @@ class Orchestrator:
         access = None
         env: dict[str, str] = {}
         try:
-            if contract["mode"] == "production":
+            if contract["mode"] in ("integration", "production"):
                 env.update(self._project_secrets(job, run_id))
                 access = resource_access.build(
                     self.db, self.home.root, job["project_id"],
@@ -515,7 +524,24 @@ class Orchestrator:
             raise ValueError("cannot change delivery while an Agent run is active")
         normalized = delivery.normalize(contract)
         if normalized["mode"] == "none":
-            raise ValueError("use an explicit branch or production delivery mode")
+            raise ValueError(
+                "use an explicit branch, integration, or production delivery mode")
+        stages = parse_stages(json.loads(job["stages_snapshot_json"] or "[]"))
+        required_modes = sorted({mode for stage in stages
+                                 for mode in stage.delivery_modes})
+        if required_modes and normalized["mode"] not in required_modes:
+            raise ValueError(
+                f"workflow requires delivery.mode to be one of {required_modes}")
+        if normalized["mode"] in ("integration", "production"):
+            project = self.db.one("SELECT config_json FROM projects WHERE id=?",
+                                  (job["project_id"],))
+            project_config = json.loads(project["config_json"] or "{}") \
+                if project else {}
+            if not normalized.get("profile") and \
+                    not project_config.get("delivery_profile"):
+                raise ValueError(
+                    f"{normalized['mode']} delivery requires the project's "
+                    "delivery profile")
         if not job["worktree_path"]:
             workdir = self._ensure_workdir(job, True)
             self.db.write("UPDATE jobs SET worktree_path=? WHERE id=?",
