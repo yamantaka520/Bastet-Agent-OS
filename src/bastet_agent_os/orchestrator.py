@@ -38,6 +38,7 @@ from .workflow import (
     StageDef,
     clear_verdict,
     evaluate_gate,
+    is_linear_stage_graph,
     parse_stages,
     rework_brief,
     rework_target_for,
@@ -153,6 +154,15 @@ class Orchestrator:
         else:
             stages_raw = SINGLE_STAGE
         stages = parse_stages(stages_raw)  # validates; job snapshots the raw form
+        # The v1 driver has one jobs.stage cursor. Accepting a branching graph
+        # here would silently execute list order and misrepresent it as a DAG.
+        # Templates may be authored and linted now, but dispatch stays fenced
+        # until the durable node scheduler provisions isolated worktrees + join.
+        if not is_linear_stage_graph(stages):
+            raise ValueError(
+                "workflow stage DAG runtime is not enabled yet; this template "
+                "can be saved and validated, but cannot be dispatched until "
+                "isolated stage worktrees and join execution are available")
         from . import delivery
         delivery_contract = delivery.normalize(req.delivery)
         if delivery_contract["mode"] == "production":

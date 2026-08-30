@@ -9,6 +9,7 @@ from fake_executor import SCRIPT, add_template, req
 from bastet_agent_os.executors.base import RunResult
 from bastet_agent_os.workflow import (
     evaluate_gate,
+    is_linear_stage_graph,
     parse_stages,
     ready_stages,
     refresh_ready_nodes,
@@ -49,6 +50,28 @@ def test_graph_stages_expose_parallel_roots_and_join_contract():
     assert [s.name for s in ready_stages(stages, {"architecture", "ux"})] == ["core"]
     assert [s.name for s in ready_stages(stages, {"architecture", "ux", "core"})] == [
         "integration"]
+    assert is_linear_stage_graph(stages) is False
+
+
+def test_explicit_linear_graph_remains_compatible_with_the_v1_driver():
+    stages = parse_stages([
+        {"name": "plan", "needs": []},
+        {"name": "build", "needs": ["plan"]},
+        {"name": "verify", "needs": ["build"]},
+    ])
+    assert is_linear_stage_graph(stages) is True
+
+
+def test_branching_stage_graph_is_not_silently_dispatched_by_linear_driver(orch, seeded):
+    add_template(seeded, "branching", [
+        {"name": "plan", "needs": [], "read_only": True},
+        {"name": "ui", "needs": ["plan"], "workspace": "isolated"},
+        {"name": "core", "needs": ["plan"], "workspace": "isolated"},
+        {"name": "join", "needs": ["ui", "core"]},
+    ])
+    with pytest.raises(ValueError, match="DAG runtime is not enabled"):
+        orch.dispatch(req(template_id="branching"))
+    assert seeded.one("SELECT COUNT(*) n FROM jobs WHERE template_id='branching'")["n"] == 0
 
 
 @pytest.mark.parametrize("raw,match", [

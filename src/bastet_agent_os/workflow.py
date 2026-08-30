@@ -256,6 +256,12 @@ def ready_stages(stages: list[StageDef], passed: set[str],
             and all(dependency in passed for dependency in stage.needs)]
 
 
+def is_linear_stage_graph(stages: list[StageDef]) -> bool:
+    """Whether the v1 single-cursor driver preserves this graph's semantics."""
+    return all(stage.needs == ([] if index == 0 else [stages[index - 1].name])
+               for index, stage in enumerate(stages))
+
+
 def seed_stage_nodes(db, job_id: str, stages: list[StageDef]) -> list[dict]:
     """Persist a frozen DAG's node state without disturbing resumed jobs."""
     from .db import now

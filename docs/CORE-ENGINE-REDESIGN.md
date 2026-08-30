@@ -125,7 +125,9 @@ integration delivery.
    artifact, workspace-isolation and challenge contracts now validate and persist;
    legacy lists normalize to linear dependencies. The runtime still needs to
    schedule isolated stage worktrees and join their outputs before built-in
-   templates can safely become parallel graphs.
+   templates can safely become parallel graphs. Until then, dispatch admission
+   explicitly rejects non-linear stage graphs instead of silently running list
+   order through the legacy single-cursor driver.
 5. **Evidence/delivery:** evidence matrix and mandatory merge/integration receipt
    for development work.
 6. **Experience:** graph UI, frozen/intake conversations, Telegram progress and
