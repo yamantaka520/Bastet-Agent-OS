@@ -269,11 +269,21 @@ checks, stale provider commits, wrong versions, and wrong targets block the card
 cannot produce `job.deployed`. Incomplete production profiles are rejected before a
 job is created, so Agent work is not spent on an impossible delivery contract.
 
+The sixteenth makes that provider boundary executable rather than documentary.
+`bastet production-rehearsal` builds two real release cards against temporary Git
+and a local HTTP provider. The first atomically publishes main plus `v1.4.0`, runs
+the deployment command, fetches the provider's live JSON over HTTP, and binds the
+successful delivery receipt to that response. The second publishes `v1.4.1` but
+deliberately leaves the provider on `v1.4.0`; the online receipt mismatch must keep
+the card blocked and produce no `job.deployed` audit. The command touches no configured
+project, remote, Bastet home, or external production service.
+
 No phase is shipped solely from unit tests. Multiprocess dispatch/restart/race now
 has an executable acceptance receipt, and the multi-branch DAG-to-remote release path
 now has an end-to-end Git receipt. The production provider boundary is now
 machine-checkable, while each real provider still requires an environment-specific
-verifier and canary rehearsal.
+verifier. The provider-neutral success/stale canary is executable locally; each real
+provider still needs its own environment canary before release.
 
 ## Requirement traceability
 

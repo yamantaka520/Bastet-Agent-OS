@@ -56,6 +56,9 @@ and PM-supervisor leases. It creates only a temporary Bastet home and Git reposi
 `bastet delivery-rehearsal` then proves the complete release path with two parallel
 isolated stage worktrees, their reviewed terminal join, a concurrent remote-main
 advance, and an exact remote SHA receipt. It likewise uses temporary repositories only.
+`bastet production-rehearsal` adds a temporary HTTP provider: one canary must deploy
+and read back its exact live receipt, while a second stale-provider canary must block
+without `job.deployed`. No configured project, remote, or production service is touched.
 
 ## Why
 

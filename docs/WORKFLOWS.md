@@ -257,6 +257,11 @@ In chat, an agent's generated files return to the conversation via
 Both completion paths deliver identically — the driver loop and a final-stage
 human approval.
 
+Before enabling a real production profile, run `bastet production-rehearsal` to
+exercise the provider-neutral contract in isolation. It proves one exact HTTP
+readback succeeds and one stale readback blocks. Then run the equivalent canary
+against the actual provider using that project's trusted deploy and verify commands.
+
 ## 10. Liveness: telling working from stuck
 
 An in-progress card shows a stage progress bar and a **heartbeat** — which is

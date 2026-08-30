@@ -428,6 +428,23 @@ def delivery_rehearsal():
             raise typer.Exit(1) from exc
 
 
+@app.command("production-rehearsal")
+def production_rehearsal():
+    """Prove production tagging, deployment and HTTP provider receipts."""
+    import asyncio
+    import tempfile
+
+    from .production_rehearsal import run
+
+    with tempfile.TemporaryDirectory(prefix="bastet-production-") as directory:
+        try:
+            _print(asyncio.run(run(directory)))
+        except Exception as exc:
+            typer.echo(f"production rehearsal failed: {type(exc).__name__}: {exc}",
+                       err=True)
+            raise typer.Exit(1) from exc
+
+
 @app.command("pricing-update")
 def pricing_update():
     """Refresh the local model price table from the public LiteLLM JSON."""

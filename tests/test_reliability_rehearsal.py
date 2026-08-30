@@ -23,3 +23,4 @@ def test_rehearsal_is_exposed_by_the_cli():
     assert result.exit_code == 0
     assert "reliability-rehearsal" in result.stdout
     assert "delivery-rehearsal" in result.stdout
+    assert "production-rehearsal" in result.stdout

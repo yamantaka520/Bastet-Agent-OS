@@ -64,7 +64,10 @@ Last updated: 2026-08-31
   concurrent isolated worktrees, reviewed handoffs, terminal join and integration
   delivery. It advances remote main during execution, then proves the integration
   preserved that change and that the delivery receipt equals the remote target SHA.
-  Validation: 636 Python tests,
+  `bastet production-rehearsal` publishes an immutable tag, deploys to a temporary
+  HTTP provider and reads back the exact live receipt. It then proves a second release
+  is blocked when that provider remains stale, without emitting `job.deployed`.
+  Validation: 637 Python tests,
   ruff clean, Web production build clean.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month

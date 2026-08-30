@@ -267,6 +267,7 @@ bastet grant add <resource_id> project:<id> --budget-usd 5 --max-concurrency 2
 bastet doctor                     # health, executors, gate tools
 bastet reliability-rehearsal      # isolated multiprocess dispatch/restart acceptance
 bastet delivery-rehearsal         # parallel DAG/join/remote-main delivery acceptance
+bastet production-rehearsal       # tag/deploy/HTTP receipt + stale-provider canary
 bastet usage                      # cost by project / agent / precision
 bastet audit                      # the trail
 bastet channel list
