@@ -277,4 +277,6 @@ def overview(db, project_id: str) -> dict[str, Any]:
     if result:
         result["negotiation"] = json.loads(result.pop("negotiation_json") or "[]")
         result["task_graph"] = json.loads(result.pop("task_graph_json") or "[]")
-    return {"round": result, "intake": intake}
+    from .admission import project_workflow_report
+    return {"round": result, "intake": intake,
+            "admission": project_workflow_report(db, project_id)}

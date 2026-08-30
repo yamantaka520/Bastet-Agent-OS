@@ -163,6 +163,18 @@ class Orchestrator:
             if len(sinks) != 1 or sinks[0].workspace != "shared":
                 raise ValueError(
                     "branching stage graph needs exactly one shared terminal join stage")
+        # Admit the complete frozen workflow before creating a job. Runtime
+        # checks remain, but a later-stage role/route/Skill gap must not produce
+        # a half-executed card.
+        from . import admission
+        admission_report = admission.workflow_report(
+            self.db, req.project_id, stages, default_agent_id=req.agent_id,
+            resource_id=req.resource_id, strict_roles=False)
+        if not admission_report["ok"]:
+            self.db.audit(actor, "job.admission.blocked", "project", req.project_id,
+                          {"title": req.title,
+                           "errors": admission_report["errors"][:20]})
+        admission.require(admission_report)
         from . import delivery
         delivery_contract = delivery.normalize(req.delivery)
         required_modes = sorted({mode for stage in stages

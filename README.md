@@ -327,6 +327,13 @@ SHA-256, executor compatibility and health command. A stage can declare
 matching digest and passing health receipt, otherwise it creates an explicit
 supply block before any Agent runs or rework is charged.
 
+Planning and dispatch use one **whole-graph admission report**. Before a plan is
+confirmed or started—and before a direct job row is created—Bastet checks every
+task and workflow stage for an assigned role, a route-compatible executor, a
+known host-capability delivery path, and executor-compatible managed Skills.
+The Chat and Project screens show the exact task/stage blocker; an explicitly
+declared role never silently degrades to an unrelated stand-in.
+
 MCP servers keep the vendor's install command; you run it from the WebUI and get
 the full output back, so a failed install can be fixed in place and retried.
 Nothing installs implicitly.

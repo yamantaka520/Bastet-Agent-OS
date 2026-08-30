@@ -58,7 +58,8 @@ def test_trusted_gate_marks_browser_launch_failure(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_missing_preflight_blocks_before_agent_without_spending_rework(
         orch, seeded, monkeypatch):
-    add_template(seeded, "browser", [{"name": "e2e", "gate": "auto",
+    add_template(seeded, "browser", [{"name": "e2e", "gate": "tests-pass",
+                                      "gate_config": {"command": "true"},
                                       "max_retries": 2,
                                       "requires": ["browser.playwright"]}])
     monkeypatch.setattr(caps, "probe_required", lambda required: [
@@ -79,18 +80,16 @@ async def test_missing_preflight_blocks_before_agent_without_spending_rework(
 
 
 @pytest.mark.asyncio
-async def test_missing_managed_skill_creates_explicit_supply_block(orch, seeded):
+async def test_missing_managed_skill_is_rejected_before_job_creation(orch, seeded):
     add_template(seeded, "skill-needed", [{"name": "build", "gate": "auto",
                                             "max_retries": 2,
                                             "requires": ["skill:slides"]}])
-    job_id = orch.dispatch(req(template_id="skill-needed"))
-    await orch.wait_idle()
-
-    job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
-    assert (job["status"], job["rework_count"]) == ("blocked", 0)
+    with pytest.raises(ValueError, match="skill:slides"):
+        orch.dispatch(req(template_id="skill-needed"))
+    assert seeded.one("SELECT COUNT(*) n FROM jobs")["n"] == 1  # seeded fixture only
     assert not SCRIPT
-    assert seeded.one("SELECT id FROM audit_log WHERE action='skill.supply_required' "
-                      "AND target_id=?", (job_id,))
+    assert seeded.one("SELECT id FROM audit_log WHERE action='job.admission.blocked' "
+                      "AND target_id='proj1'")
 
 
 @pytest.mark.asyncio

@@ -251,6 +251,41 @@ def test_planning_round_api_gates_confirmation_and_freezes_chat(client):
     assert denied.status_code == 400 and "等待區" in denied.json()["detail"]
 
 
+def test_task_confirmation_rejects_an_unassigned_declared_role(client):
+    c, _ = client
+    session = c.post("/api/chat/sessions", json={
+        "scope_type": "project", "scope_id": "proj1",
+        "responder_kind": "agent", "responder_id": "ag1"}).json()["id"]
+    round_id = c.post(f"/api/chat/sessions/{session}/planning-round").json()["id"]
+    c.put(f"/api/planning-rounds/{round_id}/proposal", json={
+        "solution": "UX first", "negotiation": [{"result": "accept"}]})
+    tasks = [{"id": "ux", "title": "UX", "spec": "flow", "needs": [],
+              "role": "ux-designer", "delivery": {"mode": "none"}}]
+
+    blocked = c.put("/api/projects/proj1/tasks", json={"tasks": tasks})
+    assert blocked.status_code == 400 and "ux-designer" in blocked.json()["detail"]
+    c.post("/api/roles", json={"project_id": "proj1", "agent_id": "ag1",
+                               "role": "ux-designer", "preference": 10})
+    assert c.put("/api/projects/proj1/tasks", json={"tasks": tasks}).status_code == 200
+
+
+def test_start_admission_failure_does_not_move_project_to_running(client):
+    c, _ = client
+    session = c.post("/api/chat/sessions", json={
+        "scope_type": "project", "scope_id": "proj1",
+        "responder_kind": "agent", "responder_id": "ag1"}).json()["id"]
+    round_id = c.post(f"/api/chat/sessions/{session}/planning-round").json()["id"]
+    c.put(f"/api/planning-rounds/{round_id}/proposal", json={
+        "solution": "one task", "negotiation": [{"result": "accept"}]})
+    tasks = [{"id": "work", "title": "Work", "spec": "do it", "needs": [],
+              "delivery": {"mode": "none"}}]
+    assert c.put("/api/projects/proj1/tasks", json={"tasks": tasks}).status_code == 200
+
+    blocked = c.post("/api/projects/proj1/lifecycle/start", json={})
+    assert blocked.status_code == 400 and "fallback agent" in blocked.json()["detail"]
+    assert c.get("/api/projects/proj1/lifecycle").json()["status"] == "ready"
+
+
 def test_blocked_gates_surface_in_the_session(client, tmp_path):
     """The chat is where authorisation is asked for, so it must show what is
     waiting on the human."""

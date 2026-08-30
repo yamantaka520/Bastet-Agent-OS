@@ -1218,6 +1218,12 @@ def create_app(home: Home) -> FastAPI:
                 needed.append({"stage": stage.get("name"), "role": role,
                                "agents": by_role.get(role, [])})
 
+        from . import admission as admission_mod
+        plan_tasks = lifecycle_mod.task_plan(db, project_id)["tasks"]
+        admission_report = (admission_mod.project_plan_report(
+            db, project_id, plan_tasks, require_default=False)
+            if plan_tasks else admission_mod.project_workflow_report(db, project_id))
+
         # project / team / global grants all make a resource callable in this
         # project; only the project-scoped ones can be detached from here
         resources = [dict(r) for r in db.query(
@@ -1237,6 +1243,7 @@ def create_app(home: Home) -> FastAPI:
                         "template_id": project["default_template_id"]},
             "stages": stages,
             "role_coverage": needed,
+            "admission": admission_report,
             "assignments": assignments,
             "resources": resources,
             "secrets": _secret_rows(("project", project_id))
@@ -1412,6 +1419,10 @@ def create_app(home: Home) -> FastAPI:
                 return {"status": status,
                         "note": "目前任務會跑完，之後不再派下一個"}
             if transition in ("start", "resume"):
+                # Admission happens before the state transition. A rejected
+                # start must leave READY/PAUSED truthful and resumable.
+                runner.admit(project_id, (body.agent_id if body else ""),
+                             actor=auth.actor)
                 status = lifecycle_mod.apply(db, project_id, transition, auth.actor)
                 started = runner.start(project_id, (body.agent_id if body else ""),
                                        actor=auth.actor)
@@ -1425,10 +1436,11 @@ def create_app(home: Home) -> FastAPI:
         except lifecycle_mod.LifecycleError as exc:
             raise _lifecycle_error(exc) from exc
         except runner_mod.PlanError as exc:
-            # the transition happened but there is nothing to run: say so and
-            # put the project back where it was
-            lifecycle_mod.apply(db, project_id, "stop", auth.actor,
-                                {"reason": "nothing to run"})
+            # A pre-admission failure happens before the transition and must
+            # leave READY/PAUSED untouched. Only unwind if start already moved.
+            if lifecycle_mod.status_of(db, project_id) == lifecycle_mod.RUNNING:
+                lifecycle_mod.apply(db, project_id, "stop", auth.actor,
+                                    {"reason": "nothing to run"})
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/projects/{project_id}/decompose")
@@ -1483,19 +1495,24 @@ def create_app(home: Home) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not tasks:
             raise HTTPException(status_code=400, detail="至少需要一個任務")
+        from . import admission as admission_mod
         from . import planning_rounds
         try:
             round_row = planning_rounds.current(db, project_id)
             if round_row is not None and round_row["state"] != "proposed":
                 raise planning_rounds.PlanningRoundError(
                     "方案與系統分析結論完成後才能確認任務圖")
+            tasks = lifecycle_mod.normalize_task_graph(tasks)
+            admission_report = admission_mod.project_plan_report(
+                db, project_id, tasks, require_default=False)
+            admission_mod.require(admission_report)
             lifecycle_mod.save_task_plan(db, project_id, tasks, by=auth.actor,
                                          confirmed=True)
             if round_row is not None:
                 planning_rounds.approve(db, project_id,
                                         lifecycle_mod.task_plan(db, project_id)["tasks"],
                                         actor=auth.actor)
-        except (lifecycle_mod.LifecycleError,
+        except (lifecycle_mod.LifecycleError, admission_mod.AdmissionError,
                 planning_rounds.PlanningRoundError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         db.audit(auth.actor, "project.tasks.confirm", "project", project_id,
@@ -1712,6 +1729,12 @@ def create_app(home: Home) -> FastAPI:
             raise HTTPException(
                 status_code=400,
                 detail="PM 與系統分析完成具體方案並接受後才能產生任務圖")
+        from . import admission as admission_mod
+        try:
+            admission_mod.require(admission_mod.project_workflow_report(
+                db, session["scope_id"]))
+        except admission_mod.AdmissionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
             tasks = await runner_mod.decompose(db, home.root, session["scope_id"],
                                               body.agent_id, actor=auth.actor)

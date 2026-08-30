@@ -39,7 +39,13 @@ Last updated: 2026-08-31
   health receipts; `skill:<id>` stage admission accepts only enabled, project-granted,
   installed, healthy and executor-compatible resources. Missing supply blocks before
   Agent execution without spending rework and is reported through Telegram.
-  Validation: 616 Python tests, ruff clean, Web production build clean.
+  A shared whole-graph admission report now validates task/stage role assignments,
+  exact executor route compatibility, known host-capability delivery paths and
+  managed Skills before task confirmation, project start/restart or direct job
+  creation. Chat disables breakdown after PM/SA agreement until workflow coverage
+  is ready; Project UI shows the same actionable blockers. Explicit task roles no
+  longer silently fall back to unrelated agents. Validation: 623 Python tests,
+  ruff clean, Web production build clean.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month
   (2026-07-28 → 2026-08-30), ~132 commits. See [CHANGELOG.md](CHANGELOG.md) for

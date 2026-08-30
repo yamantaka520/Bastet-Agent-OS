@@ -18,10 +18,12 @@ type Message = { id: string; role: string; author: string; content: string;
                  at: string };
 type Pending = { id: string; title: string; stage: string };
 type ProjectRow = { id: string; team_id: string };
+type Admission = { ok: boolean; errors: { code: string; detail: string }[] };
 type Planning = { round: null | { id: string; state: string; ordinal: number;
                                   solution_md: string;
                                   negotiation: { number: number; verdict: string }[] };
-                  intake: { id: string; kind: string; content: string }[] };
+                  intake: { id: string; kind: string; content: string }[];
+                  admission: Admission };
 
 export default function ChatPage(props: { canOperate: boolean; refreshKey: number }) {
   const t = useT();
@@ -390,11 +392,24 @@ function Conversation({ sessionId, responders, canOperate, refreshKey,
                     window.alert(t("chat.decomposed", { n: out.tasks.length }));
                   } catch (e) { setError(String((e as Error).message)); }
                   finally { setBusy(false); }
-                }} disabled={busy || planning?.round?.state !== "proposed"}>
+                }} disabled={busy || planning?.round?.state !== "proposed"
+                             || !planning?.admission?.ok}>
                   {busy ? t("proj.decomposing") : t("chat.decompose")}</button>
               </div>
-              <p className="muted">{planning?.round?.state === "proposed"
-                ? t("chat.decomposeHint") : t("chat.decomposeLocked")}</p>
+              <p className={planning?.round?.state === "proposed"
+                              && !planning?.admission?.ok ? "danger-text" : "muted"}>
+                {planning?.round?.state !== "proposed"
+                  ? t("chat.decomposeLocked")
+                  : planning?.admission?.ok
+                    ? t("chat.decomposeHint")
+                    : t("chat.decomposeAdmission")}</p>
+              {planning?.round?.state === "proposed"
+                && !planning?.admission?.ok && (
+                <ul className="danger-text">
+                  {planning.admission.errors.map((item, i) =>
+                    <li key={`${item.code}-${i}`}>{item.detail}</li>)}
+                </ul>
+              )}
             </div>
           )}
         </>

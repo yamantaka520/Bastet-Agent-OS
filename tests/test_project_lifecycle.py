@@ -325,14 +325,10 @@ async def test_a_project_with_no_agents_does_not_sit_in_running_forever(runner):
     lifecycle.apply(db, "proj1", "confirm_plan")
     lifecycle.apply(db, "proj1", "start")
 
-    r.start("proj1", "")                 # no fallback agent either
-    for _ in range(200):
-        if lifecycle.status_of(db, "proj1") != lifecycle.RUNNING:
-            break
-        await asyncio.sleep(0.02)
+    with pytest.raises(runner_mod.PlanError, match="admission blocked"):
+        r.start("proj1", "")             # no fallback agent either
     assert lifecycle.status_of(db, "proj1") == lifecycle.READY   # honestly parked
-    assert db.query("SELECT * FROM audit_log WHERE action='project.runner.idle'")
-    assert db.query("SELECT * FROM audit_log WHERE action='project.task.skipped'")
+    assert db.query("SELECT * FROM audit_log WHERE action='project.admission.blocked'")
 
 
 # ---- the plan must be traceable to the conversation it came from --------------------

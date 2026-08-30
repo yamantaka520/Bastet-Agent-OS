@@ -276,6 +276,10 @@ class ProjectRunner:
             return False
         if not self._work_left(plan["tasks"]):
             return False
+        try:
+            self.admit(project_id, "", actor=actor)
+        except PlanError:
+            return False
         loop = asyncio.get_running_loop()
         task = loop.create_task(self._loop(project_id, "", actor))
         self._tasks[project_id] = task
@@ -323,6 +327,15 @@ class ProjectRunner:
             raise PlanError("還沒有任務拆分 — 先請專案經理 agent 拆分並確認")
         if not plan["confirmed"]:
             raise PlanError("任務拆分尚未經人工確認")
+        try:
+            self.admit(project_id, agent_id, actor=actor)
+        except PlanError:
+            # Direct callers historically moved the lifecycle before start().
+            # Keep that path truthful too; the HTTP path admits before moving.
+            if lifecycle.status_of(self.db, project_id) == lifecycle.RUNNING:
+                lifecycle.apply(self.db, project_id, "stop", actor or "runner",
+                                {"reason": "project admission blocked"})
+            raise
         if self.is_active(project_id):
             return {"already_running": True}
         loop = asyncio.get_running_loop()
@@ -330,6 +343,24 @@ class ProjectRunner:
         self._tasks[project_id] = task
         task.add_done_callback(lambda t: self._finished(project_id, t))
         return {"started": True, "tasks": len(plan["tasks"])}
+
+    def admit(self, project_id: str, agent_id: str = "", actor: str = "") -> dict[str, Any]:
+        """Require one viable route for every task and every workflow stage."""
+        from . import admission
+        plan = lifecycle.task_plan(self.db, project_id)
+        report = admission.project_plan_report(
+            self.db, project_id, lifecycle.normalize_task_graph(plan["tasks"]),
+            fallback_agent_id=agent_id, require_default=True)
+        action = ("project.admission.passed" if report["ok"]
+                  else "project.admission.blocked")
+        self.db.audit(actor or "runner", action, "project", project_id,
+                      {"errors": report["errors"][:20],
+                       "warnings": report["warnings"][:20]})
+        try:
+            admission.require(report)
+        except admission.AdmissionError as exc:
+            raise PlanError(str(exc)) from exc
+        return report
 
     def _finished(self, project_id: str, task: asyncio.Task) -> None:
         if task.cancelled():
@@ -478,15 +509,20 @@ class ProjectRunner:
             row = self.db.one(
                 "SELECT agent_id FROM project_agent_roles par "
                 "JOIN agents a ON a.id = par.agent_id WHERE par.project_id=? AND "
-                "par.role=? AND a.enabled=1 ORDER BY par.preference DESC LIMIT 1",
+                "par.role=? AND a.enabled=1 AND a.depleted_at IS NULL "
+                "ORDER BY par.preference DESC LIMIT 1",
                 (project_id, role))
             if row is not None:
                 return row["agent_id"]
+            return None                    # declared roles never silently degrade
         if fallback:
-            return fallback
+            row = self.db.one("SELECT id FROM agents WHERE id=? AND enabled=1 "
+                              "AND depleted_at IS NULL", (fallback,))
+            return row["id"] if row is not None else None
         row = self.db.one(
             "SELECT agent_id FROM project_agent_roles par JOIN agents a "
             "ON a.id = par.agent_id WHERE par.project_id=? AND a.enabled=1 "
+            "AND a.depleted_at IS NULL "
             "ORDER BY par.preference DESC LIMIT 1", (project_id,))
         return row["agent_id"] if row is not None else None
 

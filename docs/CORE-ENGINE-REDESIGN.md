@@ -102,6 +102,25 @@ running the Agent or consuming rework. Only verified managed Skills are exposed 
 an executor. Legacy source-only Skill resources remain compatible as prompt assets,
 but cannot satisfy a workflow capability contract.
 
+## Implemented whole-graph admission
+
+One structured admission report now evaluates the complete project task graph and
+every stage in its selected workflow before confirmation, project start/restart,
+or direct job creation. Declared task and stage roles must have enabled, funded
+assignments; every stage needs at least one executor whose direct/Gateway route is
+compatible; host capabilities must be known and have a trusted delivery path; and
+managed Skills must resolve for the exact candidate executor. The report identifies
+the task, stage, role, requirement and rejected candidates rather than returning a
+generic routing failure.
+
+The conversation's task-breakdown action remains disabled after PM/SA agreement if
+workflow admission is not ready, and shows the concrete blockers. The project page
+uses the same report. Confirmation rejects invented/unassigned task roles; start is
+admitted before the lifecycle moves to `running`; restart recovery refuses an
+inadmissible graph; direct dispatch scans later stages before inserting a job.
+Runtime checks remain as drift protection when a resource or agent changes after
+admission.
+
 ## Target model
 
 ### Planning round
@@ -156,10 +175,11 @@ integration delivery.
 2. **Scheduler (project and stage DAG foundations implemented):** concurrent
    ready-node claiming, dependency persistence, failure propagation, restart
    recovery, per-project and per-resource limits.
-3. **Planning (negotiation implemented, coverage lint pending):** visible,
+3. **Planning (implemented foundation):** visible,
    persisted PM/system-analysis negotiation with a lifetime five-exchange cap;
    solution readiness and server-side decomposition gate; role/capability
-   coverage lint remains pending.
+   coverage lint blocks task breakdown/confirmation until declared roles,
+   executor routes and Skill requirements are satisfiable.
 4. **Workflow graph (runtime foundation implemented):** stage dependency,
    artifact, workspace-isolation and challenge contracts validate and persist;
    legacy lists normalize to linear dependencies. A branching job now claims all
@@ -210,7 +230,9 @@ delivery with trusted candidate gates and remote target receipts. The ninth adds
 Telegram graph progress, grounded `/job` and `/ask`, and run-bound approvals. The
 tenth makes managed Skills installable, digest/health verified and resolvable as
 `skill:<id>` stage admission contracts; missing supply blocks without consuming
-Agent time or rework.
+Agent time or rework. The eleventh centralizes whole-graph admission across chat,
+plan confirmation, project start/restart and direct dispatch, and removes the
+runner's silent fallback when a task explicitly names an unassigned role.
 
 No phase is shipped solely from unit tests. It needs migration, restart and race
 tests, a real multi-branch rehearsal, and an end-to-end receipt proving the target

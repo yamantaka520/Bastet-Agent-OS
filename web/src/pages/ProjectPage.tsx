@@ -33,6 +33,8 @@ type Plan = { tasks: Task[]; confirmed: boolean; by: string; at?: string;
               source?: { kind?: string; at?: string; messages?: number;
                          chat_at?: string };
               chat?: { messages: number; last_at: string | null } };
+type Admission = { ok: boolean; errors: { code: string; detail: string }[];
+                   warnings: { code: string; detail: string }[] };
 type Overview = {
   project: { id: string; team_id: string; repo_path: string | null;
              description: string; template_id: string | null;
@@ -41,6 +43,7 @@ type Overview = {
   role_coverage: { stage: string; role: string;
                    agents: { agent_id: string; agent_name: string;
                              executor_type: string; preference: number }[] }[];
+  admission: Admission;
   resources: { id: string; name: string; kind: string; grant_id: string;
                scope_type: string; budget_usd: number | null;
                max_concurrency: number | null; on_exceed: string }[];
@@ -308,6 +311,17 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
               ) : null,
             ];
           })} />
+      )}
+      {!ov.admission.ok && (
+        <div className="notice">
+          <b>{t("project.admissionBlocked")}</b>
+          <ul>{ov.admission.errors.map((item, i) =>
+            <li key={`${item.code}-${i}`}>{item.detail}</li>)}</ul>
+        </div>
+      )}
+      {ov.admission.ok && !!ov.admission.warnings.length && (
+        <p className="muted">{t("project.admissionWarnings", {
+          list: ov.admission.warnings.map((item) => item.detail).join("；") })}</p>
       )}
       <p className="muted">{t("project.assignHint")}</p>
 
