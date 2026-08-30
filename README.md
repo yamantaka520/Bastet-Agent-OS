@@ -53,6 +53,9 @@ disabled until the fence reports `drained`; release it with
 Before a release, `bastet reliability-rehearsal` runs an isolated two-process
 acceptance check for duplicate dispatch, stage ownership, kill/restart recovery,
 and PM-supervisor leases. It creates only a temporary Bastet home and Git repository.
+`bastet delivery-rehearsal` then proves the complete release path with two parallel
+isolated stage worktrees, their reviewed terminal join, a concurrent remote-main
+advance, and an exact remote SHA receipt. It likewise uses temporary repositories only.
 
 ## Why
 

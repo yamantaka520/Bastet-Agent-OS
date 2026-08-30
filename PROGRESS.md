@@ -58,7 +58,11 @@ Last updated: 2026-08-31
   `bastet reliability-rehearsal` command starts independent OS processes and proves
   one dispatch receipt, one stage claimant, kill-before-run startup recovery, one
   PM diagnosis owner and expired-lease reclamation against a temporary Git repo/DB.
-  Validation: 632 Python tests,
+  `bastet delivery-rehearsal` exercises a real nonlinear workflow through two
+  concurrent isolated worktrees, reviewed handoffs, terminal join and integration
+  delivery. It advances remote main during execution, then proves the integration
+  preserved that change and that the delivery receipt equals the remote target SHA.
+  Validation: 633 Python tests,
   ruff clean, Web production build clean.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month

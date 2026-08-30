@@ -251,10 +251,18 @@ one stage CAS winner, recovery after terminating a stage owner before run creati
 one PM-diagnosis winner, and expired-lease reclamation. It operates only on a
 temporary Bastet home and temporary Git repository.
 
+The fourteenth closes the release-path acceptance gap. `bastet delivery-rehearsal`
+creates a real bare remote and a nonlinear workflow whose UI and core roots execute
+concurrently in separate Git worktrees. Their commits pass reviewed handoffs into a
+terminal join. A separate clone advances remote main before delivery, forcing the
+integration path to merge the current remote target rather than a stale local main.
+The receipt is accepted only when the remote target SHA exactly matches it and its
+tree contains both parallel results, the join result, and the concurrent remote change.
+
 No phase is shipped solely from unit tests. Multiprocess dispatch/restart/race now
-has an executable acceptance receipt; release still needs a live multi-branch
-rehearsal and an end-to-end remote receipt proving the target branch contains the
-result.
+has an executable acceptance receipt, and the multi-branch DAG-to-remote release path
+now has an end-to-end Git receipt. Provider-specific production deployment remains a
+separate environment acceptance concern.
 
 ## Requirement traceability
 

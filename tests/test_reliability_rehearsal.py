@@ -22,3 +22,4 @@ def test_rehearsal_is_exposed_by_the_cli():
     result = CliRunner().invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "reliability-rehearsal" in result.stdout
+    assert "delivery-rehearsal" in result.stdout
