@@ -121,13 +121,17 @@ integration delivery.
    persisted PM/system-analysis negotiation with a lifetime five-exchange cap;
    solution readiness and server-side decomposition gate; role/capability
    coverage lint remains pending.
-4. **Workflow graph (contract implemented, runtime pending):** stage dependency,
-   artifact, workspace-isolation and challenge contracts now validate and persist;
-   legacy lists normalize to linear dependencies. The runtime still needs to
-   schedule isolated stage worktrees and join their outputs before built-in
-   templates can safely become parallel graphs. Until then, dispatch admission
-   explicitly rejects non-linear stage graphs instead of silently running list
-   order through the legacy single-cursor driver.
+4. **Workflow graph (runtime foundation implemented):** stage dependency,
+   artifact, workspace-isolation and challenge contracts validate and persist;
+   legacy lists normalize to linear dependencies. A branching job now claims all
+   ready nodes up to `stage_max_parallel`, provisions separate Git branches and
+   worktrees for unordered nodes, applies per-agent and resource concurrency
+   limits, commits each passed output, and merges dependency heads at one shared
+   terminal join. Conflicts block without leaving a half-merged tree. Restart
+   recovery returns orphaned nodes to ready; retry invalidates only the failed
+   branch and its descendants; completed checkouts are removed while branches
+   and commit receipts remain. Branching graphs with `human-approve` remain
+   admission-blocked until approval is attributable per node.
 5. **Evidence/delivery:** evidence matrix and mandatory merge/integration receipt
    for development work.
 6. **Experience:** graph UI, frozen/intake conversations, Telegram progress and
@@ -145,8 +149,11 @@ cycle/dependency/artifact/parallel-write linting, durable per-stage node state,
 template-editor graph fields, and structured handoff challenges. Only a receiving
 agent can open or accept a challenge; source and receiver responses are recorded
 in the project room, bounded at five exchanges, and unresolved discussions become
-`human_ruling`. This is the admission and persistence layer, not yet a claim that
-the stage runtime executes parallel writable branches.
+`human_ruling`. The fourth slice connects durable stage nodes to the orchestrator,
+runs isolated writable siblings concurrently, joins them into the job branch,
+exposes node state in the Jobs API and board, and emits live node lifecycle events.
+Automatic receiver-agent challenge turns, graph-node human approval, graph rework
+policy beyond explicit retry, and built-in template migration remain pending.
 
 No phase is shipped solely from unit tests. It needs migration, restart and race
 tests, a real multi-branch rehearsal, and an end-to-end receipt proving the target

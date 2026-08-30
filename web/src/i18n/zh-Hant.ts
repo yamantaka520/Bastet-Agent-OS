@@ -102,6 +102,7 @@ const zhHant = {
   "board.deny": "拒絕",
   "board.needsYou": "需要你決定",
   "board.runs": "執行紀錄",
+  "board.stageGraph": "階段任務圖",
   "board.gates": "關卡",
   "board.diff": "變更內容",
   "board.by": "審查者",

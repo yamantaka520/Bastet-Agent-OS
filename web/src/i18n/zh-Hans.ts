@@ -103,6 +103,7 @@ const zhHans: Dict = {
   "board.deny": "拒绝",
   "board.needsYou": "需要你决定",
   "board.runs": "运行记录",
+  "board.stageGraph": "阶段任务图",
   "board.gates": "关卡",
   "board.diff": "变更内容",
   "board.by": "审查者",

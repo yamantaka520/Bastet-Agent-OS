@@ -40,8 +40,10 @@ from .workflow import (
     evaluate_gate,
     is_linear_stage_graph,
     parse_stages,
+    refresh_ready_nodes,
     rework_brief,
     rework_target_for,
+    seed_stage_nodes,
 )
 
 log = logging.getLogger("bastet.orchestrator")
@@ -90,6 +92,7 @@ class Orchestrator:
         self.gateway_url = gateway_url
         self.bus = bus  # events.EventBus | None
         self._grant_slots: dict[str, asyncio.Semaphore] = {}
+        self._agent_slots: dict[str, asyncio.Semaphore] = {}
         self._tasks: set[asyncio.Task] = set()
         self._live: dict[str, tuple] = {}  # run_id -> (executor, handle) while streaming
         self._driving_jobs: set[str] = set()
@@ -154,15 +157,15 @@ class Orchestrator:
         else:
             stages_raw = SINGLE_STAGE
         stages = parse_stages(stages_raw)  # validates; job snapshots the raw form
-        # The v1 driver has one jobs.stage cursor. Accepting a branching graph
-        # here would silently execute list order and misrepresent it as a DAG.
-        # Templates may be authored and linted now, but dispatch stays fenced
-        # until the durable node scheduler provisions isolated worktrees + join.
         if not is_linear_stage_graph(stages):
-            raise ValueError(
-                "workflow stage DAG runtime is not enabled yet; this template "
-                "can be saved and validated, but cannot be dispatched until "
-                "isolated stage worktrees and join execution are available")
+            if any(stage.gate == "human-approve" for stage in stages):
+                raise ValueError(
+                    "human-approve is not yet supported in a branching stage graph")
+            sinks = [stage for stage in stages if not any(
+                stage.name in candidate.needs for candidate in stages)]
+            if len(sinks) != 1 or sinks[0].workspace != "shared":
+                raise ValueError(
+                    "branching stage graph needs exactly one shared terminal join stage")
         from . import delivery
         delivery_contract = delivery.normalize(req.delivery)
         if delivery_contract["mode"] == "production":
@@ -192,6 +195,7 @@ class Orchestrator:
              "pending" if delivery_contract["mode"] != "none"
              else "not_required", ts, ts),
         )
+        seed_stage_nodes(self.db, job_id, stages)
         self.db.audit(actor, "job.dispatch", "job", job_id,
                       {"project": req.project_id, "agent": req.agent_id,
                        "resource": req.resource_id, "template": req.template_id,
@@ -938,7 +942,12 @@ class Orchestrator:
             return
         self._driving_jobs.add(job_id)
         try:
-            await self._advance_until_blocked(job_id, req)
+            job = self.db.one("SELECT stages_snapshot_json FROM jobs WHERE id=?", (job_id,))
+            stages = parse_stages(json.loads(job["stages_snapshot_json"]))
+            if is_linear_stage_graph(stages):
+                await self._advance_until_blocked(job_id, req)
+            else:
+                await self._advance_graph_until_blocked(job_id, req, stages)
         except _MaintenanceParked:
             log.info("job %s parked at a maintenance stage boundary", job_id)
         except Exception:
@@ -949,6 +958,168 @@ class Orchestrator:
         finally:
             self._driving_jobs.discard(job_id)
 
+    def _stage_parallelism(self, project_id: str) -> int:
+        row = self.db.one("SELECT config_json FROM projects WHERE id=?", (project_id,))
+        try:
+            config = json.loads(row["config_json"] or "{}") if row else {}
+            return max(1, min(16, int(config.get("stage_max_parallel", 4))))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return 4
+
+    def _prepare_graph_workdir(self, job, stage: StageDef) -> str:
+        """Provision an isolated branch or join passed dependencies into primary."""
+        from .stage_runtime import (
+            create_isolated_workspace,
+            join_stage_heads,
+            persist_node_workspace,
+        )
+
+        primary = self._ensure_workdir(job, True)
+        dependency_rows = {row["stage"]: row for row in self.db.query(
+            "SELECT stage,head_commit FROM job_stage_nodes WHERE job_id=?",
+            (job["id"],))}
+        dependency_heads = [dependency_rows[name]["head_commit"] for name in stage.needs
+                            if dependency_rows.get(name)
+                            and dependency_rows[name]["head_commit"]]
+        if stage.workspace == "isolated":
+            if len(dependency_heads) > 1:
+                joined = join_stage_heads(primary, dependency_heads)
+                if not joined.passed:
+                    raise RuntimeError(f"stage join conflict: {joined.detail}")
+                base = joined.head_commit
+            else:
+                base = dependency_heads[0] if dependency_heads else self._worktree_head(primary)
+            workspace = create_isolated_workspace(
+                repo=self._project_repo(job), worktrees_root=self.home.worktrees_dir,
+                job_id=job["id"], stage=stage.name, base_commit=base)
+            persist_node_workspace(self.db, job["id"], stage.name, workspace)
+            return workspace.path
+
+        if dependency_heads:
+            joined = join_stage_heads(primary, dependency_heads)
+            if not joined.passed:
+                raise RuntimeError(f"stage join conflict: {joined.detail}")
+        return primary
+
+    async def _run_graph_node(self, job, stage: StageDef, stages: list[StageDef],
+                              req: DispatchRequest, workdir: str) -> None:
+        """Execute and gate one claimed graph node without moving jobs.stage."""
+        from . import collaboration
+        from .stage_runtime import finish_node
+
+        result, run_id = await self._run_stage_with_retries(
+            job, stage, req, workdir_override=workdir)
+        if result.status in EXEC_FAILURES:
+            finish_node(self.db, job["id"], stage.name, status="failed",
+                        head_commit=self._worktree_head(workdir))
+            self._block(job["id"], f"stage {stage.name}: execution {result.status}",
+                        stage=stage.name, detail=(result.summary or "")[:1200])
+            self._emit("stage.node_blocked", job["project_id"], job_id=job["id"],
+                       stage=stage.name, detail=(result.summary or "")[:1000])
+            return
+        outcome = await asyncio.to_thread(
+            self._judge, stage, workdir, result, job=job, run_id=run_id)
+        self._record_gate(run_id, stage, outcome, reviewer_kind="agent",
+                          reviewer_id=("workflow-engine" if stage.gate == "tests-pass"
+                                       else self._run_agent(run_id)))
+        self.db.audit("orchestrator", f"gate.{outcome.verdict}", "job", job["id"],
+                      {"stage": stage.name, "gate": stage.gate,
+                       "config_error": outcome.config_error,
+                       "detail": outcome.detail[:300], "graph": True})
+        self._emit(f"gate.{outcome.verdict}", job["project_id"], job_id=job["id"],
+                   stage=stage.name, gate=stage.gate, detail=outcome.detail[:200])
+        if outcome.verdict != "passed":
+            finish_node(self.db, job["id"], stage.name,
+                        status="blocked" if outcome.verdict == "pending" else "failed",
+                        head_commit=self._worktree_head(workdir))
+            self._block(job["id"], f"stage {stage.name}: gate {outcome.verdict}",
+                        stage=stage.name, gate=stage.gate,
+                        config_error=outcome.config_error, detail=outcome.detail)
+            self._emit("stage.node_blocked", job["project_id"], job_id=job["id"],
+                       stage=stage.name, detail=outcome.detail[:1000])
+            return
+
+        head = self._worktree_head(workdir)
+        dependents = [candidate.name for candidate in stages
+                      if stage.name in candidate.needs]
+        paths = collaboration.changed_paths(workdir)
+        risks = ([] if stage.gate != "auto" else
+                 ["本階段沒有權威驗收 gate；Agent 自述不算通過證據"])
+        for target in dependents or [None]:
+            collaboration.record_handoff(
+                self.db, project_id=job["project_id"], job_id=job["id"],
+                run_id=run_id, from_stage=stage.name, to_stage=target,
+                agent_id=self._run_agent(run_id), summary=result.summary[:3000],
+                paths=paths, verification=[f"{stage.gate}: {outcome.verdict}"],
+                risks=risks)
+        finish_node(self.db, job["id"], stage.name, status="passed", head_commit=head)
+        refresh_ready_nodes(self.db, job["id"], stages)
+        self.db.audit("orchestrator", "stage.graph_node_passed", "job", job["id"],
+                      {"stage": stage.name, "head_commit": head,
+                       "dependents": dependents})
+        self._emit("stage.node_passed", job["project_id"], job_id=job["id"],
+                   stage=stage.name, head_commit=head, dependents=dependents)
+
+    async def _advance_graph_until_blocked(self, job_id: str, req: DispatchRequest,
+                                           stages: list[StageDef]) -> None:
+        """Run every ready DAG node, bounded by the project's stage capacity."""
+        from .stage_runtime import recover_orphaned_nodes
+        recovered = recover_orphaned_nodes(self.db, job_id)
+        if recovered:
+            self.db.audit("orchestrator", "stage.graph_nodes_recovered", "job", job_id,
+                          {"stages": recovered})
+        while True:
+            job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+            if job is None or job["status"] != "in_progress":
+                return
+            refresh_ready_nodes(self.db, job_id, stages)
+            rows = {row["stage"]: dict(row) for row in self.db.query(
+                "SELECT * FROM job_stage_nodes WHERE job_id=?", (job_id,))}
+            if rows and all(row["status"] == "passed" for row in rows.values()):
+                project = self.db.one("SELECT repo_path,config_json FROM projects WHERE id=?",
+                                      (job["project_id"],))
+                config = json.loads(project["config_json"] or "{}") if project else {}
+                if project and not config.get("keep_worktrees"):
+                    from .stage_runtime import cleanup_isolated_workspaces
+                    cleanup_isolated_workspaces(
+                        self.db, repo=project["repo_path"], job_id=job_id)
+                self._finish_or_schedule_delivery(job, via="workflow-graph")
+                return
+            ready = [stage for stage in stages
+                     if rows.get(stage.name, {}).get("status") == "ready"]
+            if not ready:
+                self._block(job_id, "workflow stage graph has no ready node",
+                            detail="durable node states cannot make progress")
+                return
+            selected = ready[:self._stage_parallelism(job["project_id"])]
+            prepared: list[tuple[StageDef, str]] = []
+            try:
+                for stage in selected:
+                    workdir = self._prepare_graph_workdir(job, stage)
+                    self.db.write(
+                        "UPDATE job_stage_nodes SET status='running',"
+                        "started_at=COALESCE(started_at,?),updated_at=? "
+                        "WHERE job_id=? AND stage=? AND status='ready'",
+                        (now(), now(), job_id, stage.name))
+                    prepared.append((stage, workdir))
+                    self._emit("stage.node_started", job["project_id"], job_id=job_id,
+                               stage=stage.name, workdir=workdir)
+            except Exception as exc:
+                failed = selected[len(prepared)] if len(prepared) < len(selected) else selected[-1]
+                from .stage_runtime import finish_node
+                finish_node(self.db, job_id, failed.name, status="blocked")
+                self._block(job_id, f"stage {failed.name}: workspace preparation failed",
+                            stage=failed.name, detail=str(exc)[:1500])
+                self._emit("stage.node_blocked", job["project_id"], job_id=job_id,
+                           stage=failed.name, detail=str(exc)[:1000])
+                return
+            self.db.write("UPDATE jobs SET stage=?,updated_at=? WHERE id=?",
+                          (prepared[0][0].name, now(), job_id))
+            await asyncio.gather(*[
+                self._run_graph_node(job, stage, stages, req, workdir)
+                for stage, workdir in prepared
+            ])
+
     async def _advance_until_blocked(self, job_id: str, req: DispatchRequest) -> None:
         while True:
             job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
@@ -956,6 +1127,10 @@ class Orchestrator:
             names = [s.name for s in stages]
             idx = names.index(job["stage"])
             stage = stages[idx]
+            self.db.write(
+                "UPDATE job_stage_nodes SET status='running',started_at=COALESCE(started_at,?),"
+                "updated_at=? WHERE job_id=? AND stage=? AND status IN ('ready','pending')",
+                (now(), now(), job_id, stage.name))
 
             from .maintenance_mode import enabled as maintenance_enabled
             if maintenance_enabled(self.db):
@@ -1232,6 +1407,11 @@ class Orchestrator:
             run_id=run_id, from_stage=stage.name, to_stage=next_stage,
             agent_id=self._run_agent(run_id), summary=summary[:3000], paths=paths,
             verification=[authoritative], risks=risks)
+        head = self._worktree_head(workdir)
+        self.db.write("UPDATE job_stage_nodes SET status='passed',head_commit=?,"
+                      "finished_at=?,updated_at=? WHERE job_id=? AND stage=?",
+                      (head, now(), now(), job["id"], stage.name))
+        refresh_ready_nodes(self.db, job["id"], stages)
         self.db.audit("orchestrator", "stage.handoff", "job", job["id"],
                       {"from": stage.name, "to": next_stage,
                        "changed_paths": paths[:50]})
@@ -1362,6 +1542,8 @@ class Orchestrator:
             "UPDATE jobs SET stage=?, status='in_progress', rework_count=?, "
             "rework_note=?, agent_override=NULL, updated_at=? WHERE id=?",
             (target.name, cycle, note, now(), job_id))
+        from .stage_runtime import reset_failed_subgraph
+        reset_failed_subgraph(self.db, job_id, stages, target.name)
         self.db.audit("orchestrator", "job.rework", "job", job_id,
                       {"failed_stage": stage.name, "gate": stage.gate,
                        "back_to": target.name, "cycle": cycle,
@@ -1575,6 +1757,13 @@ class Orchestrator:
                            "to": next_stage, "changed_paths": paths[:50],
                            "via": "human-approve"})
 
+        workdir = (run["workdir"] if last_run and run else None) or \
+            job["worktree_path"] or self._project_repo(job)
+        self.db.write("UPDATE job_stage_nodes SET status='passed',head_commit=?,"
+                      "finished_at=?,updated_at=? WHERE job_id=? AND stage=?",
+                      (self._worktree_head(workdir), now(), now(), job_id, job["stage"]))
+        refresh_ready_nodes(self.db, job_id, stages)
+
         if idx + 1 >= len(stages):
             self._finish_or_schedule_delivery(job, via="approve")
             fresh = self.db.one("SELECT status,delivery_status FROM jobs WHERE id=?",
@@ -1657,6 +1846,20 @@ class Orchestrator:
             self.db.write("UPDATE jobs SET spec_md=? WHERE id=?",
                           (spec.strip(), job_id))
             job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        graph_retry = not is_linear_stage_graph(stages)
+        if graph_retry:
+            if restart_from_rework_target:
+                raise ValueError("graph retries select the failed node automatically")
+            failed_nodes = self.db.query(
+                "SELECT stage FROM job_stage_nodes WHERE job_id=? "
+                "AND status IN ('failed','blocked') ORDER BY rowid", (job_id,))
+            if not failed_nodes:
+                raise ValueError("branching job has no failed or blocked stage node")
+            retry_stage = failed_nodes[0]["stage"]
+            from .stage_runtime import reset_failed_subgraph
+            reset_failed_subgraph(self.db, job_id, stages, retry_stage)
+            self.db.write("UPDATE jobs SET stage=? WHERE id=?", (retry_stage, job_id))
+            job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if job["stage"] not in [s.name for s in stages]:
             raise ValueError(f"job {job_id} is at unknown stage {job['stage']!r}")
         retried_from = job["stage"]
@@ -1734,6 +1937,10 @@ class Orchestrator:
                 self.clear_depleted(agent_id, user=user)
         self.db.write("UPDATE jobs SET status='in_progress', updated_at=? WHERE id=?",
                       (now(), job_id))
+        if not graph_retry:
+            self.db.write("UPDATE job_stage_nodes SET status='ready',finished_at=NULL,"
+                          "updated_at=? WHERE job_id=? AND stage=?",
+                          (now(), job_id, job["stage"]))
         self.db.audit(f"user:{user}", "job.retry", "job", job_id,
                       {"stage": job["stage"], "agent": agent,
                        "requested_agent": requested_agent,
@@ -1759,12 +1966,15 @@ class Orchestrator:
     # -- stage execution ----------------------------------------------------------
 
     async def _run_stage_with_retries(self, job, stage: StageDef,
-                                      req: DispatchRequest) -> tuple[RunResult, str]:
+                                      req: DispatchRequest,
+                                      workdir_override: str | None = None
+                                      ) -> tuple[RunResult, str]:
         attempt = 1 + (self.db.one(
             "SELECT COALESCE(MAX(attempt),0) AS a FROM runs WHERE job_id=? AND stage=?",
             (job["id"], stage.name))["a"])
         while True:
-            result, run_id = await self._run_stage(job, stage, req, attempt)
+            result, run_id = await self._run_stage(
+                job, stage, req, attempt, workdir_override=workdir_override)
             from .execution_capabilities import classify_failure
             if classify_failure(result.summary or ""):
                 return result, run_id
@@ -1807,7 +2017,8 @@ class Orchestrator:
                     int(parked["i"]) > int((retried and retried["i"]) or 0))
 
     async def _run_stage(self, job, stage: StageDef, req: DispatchRequest,
-                         attempt: int) -> tuple[RunResult, str]:
+                         attempt: int, workdir_override: str | None = None
+                         ) -> tuple[RunResult, str]:
         agent = self._agent_for_stage(job, stage)
         grant: GrantView | None = None
         resource = None
@@ -1871,7 +2082,7 @@ class Orchestrator:
 
         async def _go() -> RunResult:
             run_memory.ensure_org(self.db, job["project_id"], agent["id"])
-            workdir = self._ensure_workdir(job, req.use_worktree)
+            workdir = workdir_override or self._ensure_workdir(job, req.use_worktree)
             clear_verdict(workdir)
             token = run_tokens.issue(
                 self.db, run_id,
@@ -2052,7 +2263,11 @@ class Orchestrator:
             # re-read: the first stage's run is what CREATES the worktree, so
             # the row in hand still says None and the commit would be skipped
             fresh = self.db.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
-            if fresh["worktree_path"]:
+            if workdir_override:
+                from .stage_runtime import commit_stage_output
+                commit_stage_output(workdir, job_id=job["id"], stage=stage.name,
+                                    title=job["title"])
+            elif fresh["worktree_path"]:
                 self._commit_worktree(fresh, fresh["worktree_path"],
                                       label=stage.name)
             # every executor contributes to team memory, not just bastet-lite:
@@ -2063,10 +2278,11 @@ class Orchestrator:
             return result
 
         try:
-            if grant is not None:
-                async with self._slot(grant):
-                    return await _go(), run_id
-            return await _go(), run_id
+            async with self._agent_slot(agent):
+                if grant is not None:
+                    async with self._slot(grant):
+                        return await _go(), run_id
+                return await _go(), run_id
         except Exception as exc:
             log.exception("run %s crashed", run_id)
             self.db.write("UPDATE runs SET status='failed', error=?, finished_at=? WHERE id=?",
@@ -2081,6 +2297,17 @@ class Orchestrator:
         if grant.id not in self._grant_slots:
             self._grant_slots[grant.id] = asyncio.Semaphore(grant.max_concurrency or 1_000)
         return self._grant_slots[grant.id]
+
+    def _agent_slot(self, agent) -> asyncio.Semaphore:
+        """Protect executor/account state; explicit config may allow fan-out."""
+        if agent["id"] not in self._agent_slots:
+            try:
+                config = json.loads(agent["config_json"] or "{}")
+                limit = max(1, min(16, int(config.get("max_concurrency", 1))))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                limit = 1
+            self._agent_slots[agent["id"]] = asyncio.Semaphore(limit)
+        return self._agent_slots[agent["id"]]
 
     # polling interval for queued grants; tests shrink this
     queue_poll_s: float = 5.0
@@ -2556,13 +2783,18 @@ class Orchestrator:
         checkout directory goes. Projects can opt out of removal entirely with
         config_json {"keep_worktrees": true}."""
         job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
-        if job is None or not job["worktree_path"]:
+        if job is None:
             return False
         project = self.db.one("SELECT * FROM projects WHERE id=?", (job["project_id"],))
         if project is None:
             return False
         if json.loads(project["config_json"] or "{}").get("keep_worktrees"):
             return False
+        from .stage_runtime import cleanup_isolated_workspaces
+        stage_removed = cleanup_isolated_workspaces(
+            self.db, repo=project["repo_path"], job_id=job_id)
+        if not job["worktree_path"]:
+            return bool(stage_removed)
         self._commit_worktree(job, job["worktree_path"])
         proc = subprocess.run(
             ["git", "-C", project["repo_path"], "worktree", "remove", "--force",
@@ -2701,9 +2933,14 @@ class Orchestrator:
             run_memory.job_finished(self.db, job, "blocked", reason)
         row = self.db.one("SELECT project_id, stage, title FROM jobs WHERE id=?",
                           (job_id,))
+        blocked_stage = facts.get("stage") or (row["stage"] if row else None)
+        if blocked_stage:
+            self.db.write("UPDATE job_stage_nodes SET status='blocked',finished_at=?,"
+                          "updated_at=? WHERE job_id=? AND stage=? AND status='running'",
+                          (now(), now(), job_id, blocked_stage))
         self._emit("job.blocked", row["project_id"] if row else None, job_id=job_id,
                    title=row["title"] if row else "",
-                   stage=facts.get("stage") or (row["stage"] if row else None),
+                   stage=blocked_stage,
                    reason=reason[:1500],
                    gate=facts.get("gate", ""),
                    config_error=bool(facts.get("config_error")),

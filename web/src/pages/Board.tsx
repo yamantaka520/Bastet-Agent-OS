@@ -106,10 +106,15 @@ function StageProgress({ job }: { job: Job }) {
   let stages: { name: string }[] = [];
   try { stages = JSON.parse(job.stages_snapshot_json || "[]"); } catch { /* keep [] */ }
   if (stages.length < 2) return null;
+  const nodes = job.stage_nodes ?? [];
   const index = Math.max(0, stages.findIndex((s) => s.name === job.stage));
-  const done = job.status === "done" ? stages.length : index;
+  const done = job.status === "done" ? stages.length
+    : nodes.length ? nodes.filter((node) => node.status === "passed").length : index;
+  const active = nodes.filter((node) => node.status === "running")
+    .map((node) => node.stage);
   return (
-    <div className="stage-progress" title={`${job.stage} (${index + 1}/${stages.length})`}>
+    <div className="stage-progress"
+         title={`${active.join(", ") || job.stage} (${done}/${stages.length})`}>
       <div className="stage-progress-fill"
            style={{ width: `${(done / stages.length) * 100}%` }} />
     </div>
@@ -423,6 +428,24 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
         <p className="notice">🔧 {t("board.reworkNote", { n: job.rework_count })}</p>
       )}
       <pre className="spec">{job.spec_md}</pre>
+
+      {!!job.stage_nodes?.length && (
+        <>
+          <h3>{t("board.stageGraph", undefined, "Stage graph")}</h3>
+          <table>
+            <thead><tr><th>stage</th><th>needs</th><th>workspace</th><th>status</th></tr></thead>
+            <tbody>
+              {job.stage_nodes.map((node) => (
+                <tr key={node.stage}>
+                  <td>{node.stage}</td>
+                  <td>{JSON.parse(node.needs_json || "[]").join(", ") || "—"}</td>
+                  <td>{node.workspace}</td><td>{node.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
 
       {canOperate && job.status === "blocked"
         && job.pm_decision?.action === "escalate" && (

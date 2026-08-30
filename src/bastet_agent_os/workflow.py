@@ -234,15 +234,13 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
     # Two unordered writable stages can be ready together. Sharing a checkout
     # would make their edits race and makes either handoff unverifiable.
     for left_index, left in enumerate(stages):
-        if left.read_only:
-            continue
         for right in stages[left_index + 1:]:
-            if right.read_only or left.name in ancestry[right.name] or \
+            if left.name in ancestry[right.name] or \
                     right.name in ancestry[left.name]:
                 continue
             if left.workspace != "isolated" or right.workspace != "isolated":
                 raise ValueError(
-                    f"parallel writable stages {left.name!r} and {right.name!r} "
+                    f"parallel stages {left.name!r} and {right.name!r} "
                     "must both declare workspace='isolated'")
     return stages
 

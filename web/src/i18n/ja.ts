@@ -100,6 +100,7 @@ const ja: Dict = {
   "board.deny": "拒否",
   "board.needsYou": "判断が必要です",
   "board.runs": "実行履歴",
+  "board.stageGraph": "ステージグラフ",
   "board.gates": "ゲート",
   "board.diff": "変更内容",
   "board.by": "レビュアー",

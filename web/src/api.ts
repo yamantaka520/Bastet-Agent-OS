@@ -16,6 +16,13 @@ export type Job = {
   progress_text?: string | null;
   progress_at?: string | null;
   updated_at: string;
+  stage_nodes?: StageNode[];
+};
+
+export type StageNode = {
+  stage: string; status: string; needs_json: string; workspace: string;
+  worktree_path?: string | null; head_commit: string | null;
+  started_at: string | null; finished_at: string | null;
 };
 
 export type Run = {

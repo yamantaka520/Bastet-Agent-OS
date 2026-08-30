@@ -2165,6 +2165,10 @@ def create_app(home: Home) -> FastAPI:
         # in-progress card is working or stuck — updated_at alone cannot,
         # because a long stage legitimately goes minutes between DB writes
         for row in rows:
+            row["stage_nodes"] = [dict(node) for node in db.query(
+                "SELECT stage,status,needs_json,workspace,head_commit,started_at,"
+                "finished_at FROM job_stage_nodes WHERE job_id=? ORDER BY rowid",
+                (row["id"],))]
             if row["status"] != "in_progress":
                 continue
             beat = db.one(
@@ -2198,6 +2202,10 @@ def create_app(home: Home) -> FastAPI:
             "WHERE r.job_id=? ORDER BY g.at", (job_id,))]
         job["deliveries"] = [dict(d) for d in db.query(
             "SELECT * FROM deliveries WHERE job_id=? ORDER BY started_at", (job_id,))]
+        job["stage_nodes"] = [dict(node) for node in db.query(
+            "SELECT stage,status,needs_json,workspace,worktree_path,head_commit,"
+            "started_at,finished_at,updated_at FROM job_stage_nodes "
+            "WHERE job_id=? ORDER BY rowid", (job_id,))]
         # what the PM did about this card, and above all what it is ASKING.
         # An escalation that lives only in the audit log is an escalation to
         # nobody: the operator saw "blocked" and a retry button, with no sign

@@ -2,6 +2,7 @@
 
 import json
 import pathlib
+import subprocess
 
 import pytest
 from fake_executor import SCRIPT, add_template, req
@@ -62,16 +63,97 @@ def test_explicit_linear_graph_remains_compatible_with_the_v1_driver():
     assert is_linear_stage_graph(stages) is True
 
 
-def test_branching_stage_graph_is_not_silently_dispatched_by_linear_driver(orch, seeded):
+async def test_branching_stage_graph_runs_ready_nodes_and_reaches_join(orch, seeded):
+    seeded.write_many([
+        ("INSERT INTO agents(id,amos_agent_id,name,executor_type,created_at,updated_at) "
+         "VALUES('ui-agent','ui-agent','UI','fake',datetime('now'),datetime('now'))", ()),
+        ("INSERT INTO agents(id,amos_agent_id,name,executor_type,created_at,updated_at) "
+         "VALUES('core-agent','core-agent','Core','fake',datetime('now'),datetime('now'))", ()),
+        ("INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+         "VALUES('proj1','ui-agent','ui-designer',10)", ()),
+        ("INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+         "VALUES('proj1','core-agent','backend',10)", ()),
+    ])
     add_template(seeded, "branching", [
+        {"name": "plan", "needs": [], "read_only": True},
+        {"name": "ui", "role": "ui-designer", "needs": ["plan"],
+         "workspace": "isolated"},
+        {"name": "core", "role": "backend", "needs": ["plan"],
+         "workspace": "isolated"},
+        {"name": "join", "needs": ["ui", "core"]},
+    ])
+    def write_output(name):
+        def run(spec):
+            (pathlib.Path(spec.workdir) / f"{name}.txt").write_text(f"{name}\n")
+            return RunResult(status="succeeded", summary=name)
+        return run
+
+    def integrate(spec):
+        root = pathlib.Path(spec.workdir)
+        assert (root / "ui.txt").read_text() == "ui\n"
+        assert (root / "core.txt").read_text() == "core\n"
+        (root / "integrated.txt").write_text("joined\n")
+        return RunResult(status="succeeded", summary="join")
+
+    SCRIPT.extend([RunResult(status="succeeded", summary="plan"),
+                   write_output("ui"), write_output("core"), integrate])
+    job_id = orch.dispatch(req(template_id="branching"))
+    await orch.wait_idle()
+    nodes = {row["stage"]: row["status"] for row in seeded.query(
+        "SELECT stage,status FROM job_stage_nodes WHERE job_id=?", (job_id,))}
+    audit = [dict(row) for row in seeded.query(
+        "SELECT action,detail_json FROM audit_log WHERE target_id=? ORDER BY id", (job_id,))]
+    assert nodes == {"plan": "passed", "ui": "passed",
+                     "core": "passed", "join": "passed"}, audit
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+    branch_runs = seeded.query(
+        "SELECT stage,workdir FROM runs WHERE job_id=? AND stage IN ('ui','core')",
+        (job_id,))
+    assert len(branch_runs) == 2
+    assert len({row["workdir"] for row in branch_runs}) == 2
+    assert {row["stage"] for row in branch_runs} == {"ui", "core"}
+    project = seeded.one("SELECT repo_path FROM projects WHERE id='proj1'")
+    integrated = subprocess.run(
+        ["git", "-C", project["repo_path"], "show",
+         f"bastet/{job_id}:integrated.txt"], capture_output=True, text=True, check=True)
+    assert integrated.stdout == "joined\n"
+
+
+def test_branching_graph_requires_one_shared_terminal_join(orch, seeded):
+    add_template(seeded, "bad-sink", [
+        {"name": "left", "needs": [], "workspace": "isolated"},
+        {"name": "right", "needs": [], "workspace": "isolated"},
+    ])
+    with pytest.raises(ValueError, match="terminal join"):
+        orch.dispatch(req(template_id="bad-sink"))
+
+
+async def test_graph_retry_preserves_passed_sibling_and_resumes_failed_branch(orch, seeded):
+    add_template(seeded, "retry-graph", [
         {"name": "plan", "needs": [], "read_only": True},
         {"name": "ui", "needs": ["plan"], "workspace": "isolated"},
         {"name": "core", "needs": ["plan"], "workspace": "isolated"},
         {"name": "join", "needs": ["ui", "core"]},
     ])
-    with pytest.raises(ValueError, match="DAG runtime is not enabled"):
-        orch.dispatch(req(template_id="branching"))
-    assert seeded.one("SELECT COUNT(*) n FROM jobs WHERE template_id='branching'")["n"] == 0
+    SCRIPT.extend([
+        RunResult(status="succeeded", summary="plan"),
+        RunResult(status="failed", summary="ui failed"),
+        RunResult(status="succeeded", summary="core passed"),
+    ])
+    job_id = orch.dispatch(req(template_id="retry-graph"))
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "blocked"
+    assert seeded.one("SELECT status FROM job_stage_nodes WHERE job_id=? AND stage='core'",
+                      (job_id,))["status"] == "passed"
+
+    SCRIPT.extend([RunResult(status="succeeded", summary="ui repaired"),
+                   RunResult(status="succeeded", summary="joined")])
+    orch.retry(job_id)
+    await orch.wait_idle()
+    assert seeded.one("SELECT status FROM jobs WHERE id=?", (job_id,))["status"] == "done"
+    core_runs = seeded.one("SELECT COUNT(*) n FROM runs WHERE job_id=? AND stage='core'",
+                           (job_id,))["n"]
+    assert core_runs == 1
 
 
 @pytest.mark.parametrize("raw,match", [
@@ -80,7 +162,7 @@ def test_branching_stage_graph_is_not_silently_dispatched_by_linear_driver(orch,
     ([{"name": "a", "needs": [], "produces": ["x"]},
       {"name": "b", "needs": [], "consumes": ["x"]}], "not produced by a dependency"),
     ([{"name": "a", "needs": []}, {"name": "b", "needs": []}],
-     "parallel writable stages"),
+     "parallel stages"),
 ])
 def test_graph_contract_rejects_unsafe_or_unsatisfied_dags(raw, match):
     with pytest.raises(ValueError, match=match):

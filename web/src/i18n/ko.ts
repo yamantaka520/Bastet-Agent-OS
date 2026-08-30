@@ -100,6 +100,7 @@ const ko: Dict = {
   "board.deny": "거부",
   "board.needsYou": "판단이 필요합니다",
   "board.runs": "실행 기록",
+  "board.stageGraph": "단계 그래프",
   "board.gates": "게이트",
   "board.diff": "변경 내용",
   "board.by": "검토자",

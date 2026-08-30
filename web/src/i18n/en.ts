@@ -100,6 +100,7 @@ const en: Dict = {
   "board.deny": "Deny",
   "board.needsYou": "needs your decision",
   "board.runs": "Runs",
+  "board.stageGraph": "Stage graph",
   "board.gates": "Gates",
   "board.diff": "Diff",
   "board.by": "by",
