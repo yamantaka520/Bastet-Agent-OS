@@ -40,6 +40,7 @@ EVENT_TYPES = {
     # projects
     "project.status", "project.deleted", "room.message",
     "planning.exchange", "planning.proposed",
+    "schedule.dispatched", "schedule.skipped", "schedule.failed",
     # everything else
     "chat.message",
     "budget.warning", "budget.exceeded",

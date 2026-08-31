@@ -32,6 +32,13 @@ Last updated: 2026-08-31
   `production` retains version tagging and deployment, then requires an online
   verifier to emit a structured provider receipt. Exit zero alone is rejected;
   status, target, version and commit SHA must exactly match the release.
+  Project-scoped scheduled workflows are also complete: five-field cron is
+  evaluated in an explicit IANA timezone, occurrences are durably claimed before
+  dispatch, restart replays an unfinished claim, and the existing task receipt
+  prevents duplicate jobs across competing servers. Schedules can target a role,
+  exact Agent and workflow template; the project page supports create, pause,
+  resume, run-now and delete. Overlap is skipped while the previous job remains
+  active, and maintenance mode retains the claim for retry after the fence opens.
   Telegram now renders graph-node starts/passes, handoff reviews/challenges,
   delivery transitions and evidence-grounded completion summaries. `/job` reads
   the durable task snapshot; `/ask` gives the configured responder a task-scoped
@@ -205,7 +212,6 @@ feature is confirmed against real vendor CLIs before release:
 
 - **Async media fetcher**: generation that outlives its run has no background
   claimer; the rule today is poll-to-completion inside the run.
-- **Scheduled workflows**: the 持續維護 preset wants a cron-like trigger.
 - **Non-development branch delivery**: analysis/content cards that deliberately
   request branch-only delivery still leave merge authority to a human. Development
   templates instead require the verified `integration` or `production` path.

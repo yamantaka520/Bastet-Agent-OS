@@ -191,6 +191,32 @@ class DispatchIn(BaseModel):
     delivery: dict[str, Any] | None = None
 
 
+class ScheduleIn(BaseModel):
+    name: str
+    cron: str
+    timezone: str = "UTC"
+    prompt: str
+    role: str = ""
+    agent_id: str | None = None
+    template_id: str | None = None
+    delivery: dict[str, Any] = {"mode": "none"}
+    timeout_s: int = 3600
+    enabled: bool = True
+
+
+class ScheduleUpdateIn(BaseModel):
+    name: str | None = None
+    cron: str | None = None
+    timezone: str | None = None
+    prompt: str | None = None
+    role: str | None = None
+    agent_id: str | None = None
+    template_id: str | None = None
+    delivery: dict[str, Any] | None = None
+    timeout_s: int | None = None
+    enabled: bool | None = None
+
+
 class TemplateIn(BaseModel):
     name: str
     stages: list[dict]
@@ -455,6 +481,8 @@ def create_app(home: Home) -> FastAPI:
         tasks.append(asyncio.get_running_loop().create_task(
             orch.external_delivery_loop()))
         tasks.append(asyncio.get_running_loop().create_task(orch.supervision_loop()))
+        tasks.append(asyncio.get_running_loop().create_task(
+            app.state.workflow_scheduler.run()))
         # a job whose driver died with the process is nobody's responsibility
         # otherwise: the runner only resumes projects with undispatched tasks,
         # and retry refuses anything that is not blocked
@@ -1375,6 +1403,8 @@ def create_app(home: Home) -> FastAPI:
     from . import project_runner as runner_mod
 
     app.state.project_runner = runner_mod.ProjectRunner(db, orch, bus)
+    from . import schedules as schedules_mod
+    app.state.workflow_scheduler = schedules_mod.WorkflowScheduler(db, orch, bus)
     # the self-configuration skill: the guide file tracks the code, so it is
     # rewritten on every boot; the pool resource is created once
     from . import self_config as self_config_mod
@@ -1389,6 +1419,57 @@ def create_app(home: Home) -> FastAPI:
 
     def _lifecycle_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=409, detail=str(exc))
+
+    def _schedule_error(exc: Exception) -> HTTPException:
+        status = 404 if "not found" in str(exc) else 409
+        return HTTPException(status_code=status, detail=str(exc))
+
+    @app.get("/api/projects/{project_id}/schedules",
+             dependencies=[Depends(require_role("viewer"))])
+    def project_schedules(project_id: str):
+        if db.one("SELECT id FROM projects WHERE id=?", (project_id,)) is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        return schedules_mod.list_for_project(db, project_id)
+
+    @app.post("/api/projects/{project_id}/schedules")
+    def create_schedule(project_id: str, body: ScheduleIn,
+                        auth: Auth = Depends(require_role("operator"))):
+        try:
+            return schedules_mod.create(db, project_id, body.model_dump(), auth.actor)
+        except (schedules_mod.ScheduleError, ValueError) as exc:
+            raise _schedule_error(exc) from exc
+
+    @app.put("/api/schedules/{schedule_id}")
+    def update_schedule(schedule_id: str, body: ScheduleUpdateIn,
+                        auth: Auth = Depends(require_role("operator"))):
+        try:
+            return schedules_mod.update(
+                db, schedule_id, body.model_dump(exclude_unset=True), auth.actor)
+        except (schedules_mod.ScheduleError, ValueError) as exc:
+            raise _schedule_error(exc) from exc
+
+    @app.delete("/api/schedules/{schedule_id}")
+    def delete_schedule(schedule_id: str,
+                        auth: Auth = Depends(require_role("operator"))):
+        try:
+            schedules_mod.delete(db, schedule_id, auth.actor)
+        except schedules_mod.ScheduleError as exc:
+            raise _schedule_error(exc) from exc
+        return {"deleted": schedule_id}
+
+    @app.post("/api/schedules/{schedule_id}/run-now")
+    async def run_schedule_now(schedule_id: str,
+                               auth: Auth = Depends(require_role("operator"))):
+        try:
+            schedule = schedules_mod.get(db, schedule_id)
+            if not schedule["enabled"]:
+                raise schedules_mod.ScheduleError("schedule is disabled")
+            job_id = app.state.workflow_scheduler.run_now(schedule_id)
+        except schedules_mod.ScheduleError as exc:
+            raise _schedule_error(exc) from exc
+        db.audit(auth.actor, "schedule.run_now", "schedule", schedule_id,
+                 {"job_id": job_id})
+        return {"job_id": job_id}
 
     @app.get("/api/projects/{project_id}/lifecycle",
              dependencies=[Depends(require_role("viewer"))])

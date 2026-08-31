@@ -132,6 +132,42 @@ CREATE TABLE IF NOT EXISTS project_task_dispatches (
 CREATE INDEX IF NOT EXISTS idx_project_task_dispatches_job
   ON project_task_dispatches(job_id);
 
+-- Durable recurring workflow intent. Cron evaluation is timezone-aware; each
+-- occurrence receives a unique run ledger row before dispatch so two servers
+-- cannot create duplicate jobs and restart can resume a claimed occurrence.
+CREATE TABLE IF NOT EXISTS workflow_schedules (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  cron TEXT NOT NULL,
+  timezone TEXT NOT NULL DEFAULT 'UTC',
+  prompt TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT '',
+  agent_id TEXT REFERENCES agents(id),
+  template_id TEXT REFERENCES workflow_templates(id),
+  delivery_json TEXT NOT NULL DEFAULT '{"mode":"none"}',
+  timeout_s INTEGER NOT NULL DEFAULT 3600,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  next_run_at TEXT NOT NULL,
+  last_run_at TEXT,
+  last_job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_schedules_due
+  ON workflow_schedules(enabled, next_run_at);
+
+CREATE TABLE IF NOT EXISTS workflow_schedule_runs (
+  schedule_id TEXT NOT NULL REFERENCES workflow_schedules(id) ON DELETE CASCADE,
+  scheduled_for TEXT NOT NULL,
+  status TEXT NOT NULL, -- claimed|dispatched|skipped|failed
+  job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+  claimed_at TEXT NOT NULL,
+  finished_at TEXT,
+  error TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(schedule_id, scheduled_for)
+);
+
 -- Cross-process ownership for bounded control-plane work that is not itself a
 -- workflow node (for example PM incident diagnosis). Owners renew short leases;
 -- a killed process eventually yields without allowing two servers to spend on
@@ -584,6 +620,13 @@ class Db:
             agent_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(agents)")}
             if "account_id" not in agent_cols:
                 self._conn.execute("ALTER TABLE agents ADD COLUMN account_id TEXT")
+            schedule_cols = {
+                r[1] for r in self._conn.execute("PRAGMA table_info(workflow_schedules)")
+            }
+            if "timeout_s" not in schedule_cols:
+                self._conn.execute(
+                    "ALTER TABLE workflow_schedules ADD COLUMN timeout_s INTEGER "
+                    "NOT NULL DEFAULT 3600")
             if "depleted_at" not in agent_cols:
                 # when this agent's paid balance ran out. Set from a vendor's
                 # own 402, cleared only by a human (topping up is not something
@@ -719,6 +762,8 @@ class Db:
                  "WHERE opened_by_agent_id=?", (new_id, old_id)),
                 ("UPDATE jobs SET default_agent_id=? WHERE default_agent_id=?", (new_id, old_id)),
                 ("UPDATE jobs SET agent_override=? WHERE agent_override=?", (new_id, old_id)),
+                ("UPDATE workflow_schedules SET agent_id=? WHERE agent_id=?",
+                 (new_id, old_id)),
                 ("UPDATE grants SET scope_id=? WHERE scope_type='agent' AND scope_id=?",
                  (new_id, old_id)),
                 ("UPDATE chat_sessions SET responder_id=? "

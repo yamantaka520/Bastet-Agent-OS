@@ -341,6 +341,19 @@ Official provider references: [Apple app and submission statuses](https://develo
 [Google Play track release states](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks),
 and [Google Play managed publishing](https://support.google.com/googleplay/android-developer/answer/9859654).
 
+### Scheduled runs
+
+A project can attach recurring workflow intent without creating a separate kind
+of execution. The scheduler evaluates standard five-field cron in the schedule's
+IANA timezone, durably claims the occurrence, and dispatches an ordinary job with
+the selected role/Agent/template. The occurrence timestamp is also the stable
+dispatch identity, so restart or a competing server converges on the same job.
+
+The scheduler deliberately skips an occurrence when its previous job is still
+active. During maintenance it leaves the claim pending and retries after the
+dispatch fence opens. It never bypasses admission, gates, delivery, resource
+governance, or notification paths.
+
 ## 10. Liveness: telling working from stuck
 
 An in-progress card shows a stage progress bar and a **heartbeat** — which is

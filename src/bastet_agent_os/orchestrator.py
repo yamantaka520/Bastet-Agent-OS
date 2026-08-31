@@ -274,11 +274,12 @@ class Orchestrator:
                    stage=stages[0].name)
         # the plan and the board must show the same work, and the light must move
         from . import project_lifecycle as lifecycle
-        try:
-            lifecycle.link_job(self.db, req.project_id, job_id, req.title,
-                               req.prompt, origin=req.origin)
-        except Exception as exc:
-            log.warning("could not link job %s to the plan: %r", job_id, exc)
+        if req.origin != "schedule":
+            try:
+                lifecycle.link_job(self.db, req.project_id, job_id, req.title,
+                                   req.prompt, origin=req.origin)
+            except Exception as exc:
+                log.warning("could not link job %s to the plan: %r", job_id, exc)
         self._sync_project(req.project_id)
         self._spawn(self._drive_job(job_id, req))
         return job_id

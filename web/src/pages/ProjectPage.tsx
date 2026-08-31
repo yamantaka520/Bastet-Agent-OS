@@ -75,6 +75,13 @@ type RoomMember = { id: string; name: string; role: string; executor_type: strin
 type RoomMessage = { id: string; author_type: string; author_id: string;
                      kind: string; content: string; at: string };
 type Room = { project_id: string; members: RoomMember[]; messages: RoomMessage[] };
+type Schedule = {
+  id: string; name: string; cron: string; timezone: string; prompt: string;
+  role: string; agent_id: string | null; template_id: string | null;
+  timeout_s: number; enabled: boolean; next_run_at: string;
+  last_run_at: string | null; last_job_id: string | null;
+  last_occurrence: { status: string; error: string; scheduled_for: string } | null;
+};
 
 const GROUPS = ["planning", "ready", "running", "paused", "maintenance", "closed"];
 const JOB_BADGE: Record<string, string> = {
@@ -389,9 +396,111 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
         rows={ov.jobs.map((j) => [j.title, j.stage, j.status,
                                   fmtTime(j.updated_at)])} />
 
+      <ProjectSchedules projectId={projectId} canOperate={canOperate}
+                        agents={agents} roles={roles} templates={templates}
+                        refreshKey={refreshKey} t={t} />
+
       <ProjectRoom projectId={projectId} canOperate={canOperate}
                    refreshKey={refreshKey} t={t} />
     </div>
+  );
+}
+
+function ProjectSchedules({ projectId, canOperate, agents, roles, templates,
+                            refreshKey, t }: {
+  projectId: string; canOperate: boolean; agents: Agent[]; roles: Role[];
+  templates: Template[]; refreshKey: number; t: T;
+}) {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const empty = { name: "", cron: "0 9 * * 1-5", timezone: zone, prompt: "",
+                  role: "", agent_id: "", template_id: "" };
+  const [items, setItems] = useState<Schedule[]>([]);
+  const [draft, setDraft] = useState(empty);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    api<Schedule[]>(`/api/projects/${projectId}/schedules`)
+      .then(setItems).catch(() => setItems([]));
+  }, [projectId]);
+  useEffect(load, [load, refreshKey]);
+
+  const act = async (fn: () => Promise<unknown>) => {
+    setError("");
+    try { await fn(); load(); }
+    catch (e) { setError(String((e as Error).message)); }
+  };
+  const create = () => act(async () => {
+    await post(`/api/projects/${projectId}/schedules`, {
+      ...draft, agent_id: draft.agent_id || null,
+      template_id: draft.template_id || null,
+    });
+    setDraft(empty);
+  });
+
+  return (
+    <>
+      <h4>{t("project.schedules")}</h4>
+      {error && <p className="error">{error}</p>}
+      {!items.length && <p className="muted">{t("project.scheduleEmpty")}</p>}
+      {!!items.length && <DataTable
+        head={[t("c.name"), t("project.scheduleTiming"), t("project.scheduleTarget"),
+               t("project.scheduleNext"), t("project.scheduleLast"), ""]}
+        rows={items.map((item) => [
+          <span title={item.prompt}>{item.enabled ? "🟢" : "⚪"} {item.name}</span>,
+          <><code>{item.cron}</code><span className="card-meta"> {item.timezone}</span></>,
+          item.agent_id || item.role || t("project.scheduleDefaultAgent"),
+          fmtTime(item.next_run_at), item.last_occurrence
+            ? <span title={item.last_occurrence.error || undefined}>
+                {item.last_occurrence.status} · {fmtTime(item.last_occurrence.scheduled_for)}
+              </span> : "—",
+          canOperate ? <span className="row-ops">
+            <button className="ghost" onClick={() => act(() => put(
+              `/api/schedules/${item.id}`, { enabled: !item.enabled }))}>
+              {item.enabled ? t("project.schedulePause") : t("project.scheduleEnable")}
+            </button>
+            <button className="ghost" disabled={!item.enabled}
+                    onClick={() => act(() => post(
+                      `/api/schedules/${item.id}/run-now`, {}))}>
+              {t("project.scheduleRunNow")}
+            </button>
+            <button className="ghost danger-text" onClick={() => {
+              if (window.confirm(t("project.scheduleDeleteConfirm", { name: item.name })))
+                act(() => del(`/api/schedules/${item.id}`));
+            }}>{t("c.delete")}</button>
+          </span> : null,
+        ])} />}
+      {canOperate && <div className="task-row schedule-form">
+        <input value={draft.name} placeholder={t("project.scheduleNamePh")}
+               onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+        <input value={draft.cron} placeholder="cron: 0 9 * * 1-5"
+               onChange={(e) => setDraft({ ...draft, cron: e.target.value })} />
+        <input value={draft.timezone} placeholder="Asia/Taipei"
+               onChange={(e) => setDraft({ ...draft, timezone: e.target.value })} />
+        <select value={draft.role}
+                onChange={(e) => setDraft({ ...draft, role: e.target.value })}>
+          <option value="">{t("project.scheduleAnyRole")}</option>
+          {roles.map((role) => <option key={role.id} value={role.id}>{role.label}</option>)}
+        </select>
+        <select value={draft.agent_id}
+                onChange={(e) => setDraft({ ...draft, agent_id: e.target.value })}>
+          <option value="">{t("project.scheduleRoleAgent")}</option>
+          {agents.filter((a) => a.enabled).map((agent) =>
+            <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+        </select>
+        <select value={draft.template_id}
+                onChange={(e) => setDraft({ ...draft, template_id: e.target.value })}>
+          <option value="">{t("project.workflowNone")}</option>
+          {templates.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.id}</option>)}
+        </select>
+        <input value={draft.prompt} style={{ flex: 1 }}
+               placeholder={t("project.schedulePromptPh")}
+               onChange={(e) => setDraft({ ...draft, prompt: e.target.value })} />
+        <button disabled={!draft.name.trim() || !draft.cron.trim()
+                          || !draft.prompt.trim()} onClick={create}>
+          {t("project.scheduleAdd")}
+        </button>
+      </div>}
+      <p className="muted">{t("project.scheduleHint")}</p>
+    </>
   );
 }
 

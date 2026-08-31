@@ -273,6 +273,14 @@ from, and a warning if that conversation has moved on since), per-task job statu
 role coverage against the workflow's needs, attached resources, and the
 credentials visible to it.
 
+The expanded card also owns its **scheduled workflows**. A schedule uses standard
+five-field cron plus an explicit IANA timezone such as `Asia/Taipei`; it may select
+an exact Agent, resolve an Agent by project role, and pin a workflow template.
+Create, enable/disable, run-now, and delete are available in place. Each occurrence
+is an ordinary governed job: evidence gates, budgets, Telegram progress, delivery
+contracts, and the maintenance fence still apply. Bastet records a skipped
+occurrence instead of overlapping an active previous job.
+
 **PM decomposition**: the project-manager agent turns the agreed plan into a task
 list. It is read-only — it sees the repo, the stages and the conversation, and
 writes nothing. You edit and confirm; only then does the runner dispatch.

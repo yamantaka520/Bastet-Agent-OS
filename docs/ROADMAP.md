@@ -16,9 +16,6 @@ it is to build.
   and schedulable Skill installation. See
   [CORE-ENGINE-REDESIGN.md](CORE-ENGINE-REDESIGN.md).
 
-- **Scheduled workflows.** The 持續維護 preset is written to be run repeatedly,
-  but something still has to press the button. A schedule per project (cron-like,
-  with the same audit trail) is the missing half.
 - **Prune `~/.bastet/secrets`.** Rotated credential files accumulate; nothing
   removes the superseded ones.
 - **Cost ceilings that stop work.** Budgets are recorded per grant and enforced
@@ -38,7 +35,9 @@ it is to build.
 
 PyPI + Docker Hub distribution (0.19), config-by-conversation and auto-push
 (0.20), the media loop and honest retry semantics (0.21), quota self-wait,
-Playwright tooling and per-stage time budgets (0.22). Details in
+Playwright tooling and per-stage time budgets (0.22), and durable timezone-aware
+scheduled workflows with restart-safe dispatch and overlap suppression (next
+release after 0.35.2). Details in
 [CHANGELOG.md](../CHANGELOG.md).
 
 ## Under consideration
