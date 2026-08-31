@@ -66,6 +66,12 @@ submission recovery: after an interrupted submit command, Bastet looks up the ex
 Apple version/build or Google track/versionCode before deciding whether any command
 may run again.
 
+Google Play internal delivery can opt into `submission_adapter=official_api`. After
+the terminal human approval, Bastet hashes the worktree AAB, opens an edit, reuses or
+uploads the exact versionCode, preserves existing track releases, validates, and
+commits with `ERROR_IF_IN_REVIEW`. This built-in mutating path is intentionally limited
+to `internal`; App Store and public Google tracks still require an explicit submitter.
+
 ## Why
 
 Running one coding agent is easy. Running a *team* of them across several

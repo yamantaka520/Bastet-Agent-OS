@@ -51,7 +51,7 @@ async def test_official_lookup_recovers_receipt_without_rerunning_submitter(
         "deploy_command": command(f"import pathlib;pathlib.Path({str(marker)!r}).touch()"),
     }
 
-    def lookup(actual_profile, release, env):
+    def lookup(actual_profile, release, env, workdir=None):
         return {
             "provider": "google_play",
             "package_name": actual_profile["package_name"],
@@ -89,7 +89,7 @@ async def test_official_lookup_failure_stops_before_submitter(
         "deploy_command": command(f"import pathlib;pathlib.Path({str(marker)!r}).touch()"),
     }
 
-    def lookup(profile, release, env):
+    def lookup(profile, release, env, workdir=None):
         raise StoreAdapterError("provider unavailable")
 
     monkeypatch.setattr(
@@ -104,6 +104,48 @@ async def test_official_lookup_failure_stops_before_submitter(
         "SELECT status,error FROM delivery_actions WHERE job_id='job1'")
     assert action["status"] == "failed"
     assert "provider unavailable" in action["error"]
+
+
+async def test_builtin_submitter_receipt_is_persisted_without_deploy_command(
+        seeded, monkeypatch, tmp_path):
+    artifact = tmp_path / "release.aab"
+    artifact.write_bytes(b"signed")
+    profile = {
+        "provider": "google_play",
+        "package_name": "com.example.canary",
+        "track": "internal",
+        "version_code": "10400",
+        "artifact_path": "release.aab",
+        "submission_recovery": "official_api",
+        "submission_adapter": "official_api",
+    }
+    calls = []
+
+    monkeypatch.setattr(
+        "bastet_agent_os.store_adapters.official_submission_lookup",
+        lambda profile, release, env, workdir=None: None)
+
+    def submit(actual_profile, release, env, workdir):
+        calls.append((actual_profile, release, env, workdir))
+        return {
+            "provider": "google_play",
+            "package_name": actual_profile["package_name"],
+            "track": actual_profile["track"],
+            "version_code": actual_profile["version_code"],
+            **release,
+        }
+
+    monkeypatch.setattr("bastet_agent_os.store_adapters.official_submit", submit)
+    output, receipt = _store_submit_once(
+        seeded, "job1", profile, str(tmp_path), {}, commit_sha="a" * 40,
+        version="1.4.0", target="google-play:com.example.canary:internal")
+
+    assert json.loads(output) == receipt
+    assert len(calls) == 1
+    assert calls[0][3] == str(tmp_path)
+    assert seeded.one(
+        "SELECT status FROM delivery_actions WHERE job_id='job1'")["status"] == \
+        "succeeded"
 
 
 def store_profile(provider: str, live_file: Path) -> tuple[dict, dict]:

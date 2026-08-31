@@ -64,18 +64,25 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
     """Validate trusted host delivery configuration before Agent work begins."""
     if not isinstance(profile, dict):
         raise ValueError("delivery profile must be an object")
+    provider = str(profile.get("provider") or "web").strip()
+    if provider != "web" and provider not in STORE_PROVIDERS:
+        raise ValueError(
+            f"delivery profile provider must be web or one of {sorted(STORE_PROVIDERS)}")
+    submission_adapter = str(profile.get("submission_adapter") or "command").strip()
+    if submission_adapter not in {"command", "official_api"}:
+        raise ValueError(
+            "store submission_adapter must be command or official_api")
+    if submission_adapter == "official_api" and provider != "google_play":
+        raise ValueError(
+            "built-in submission currently supports google_play only")
     required_commands = ["predeploy_command"]
-    if mode == "production":
+    if mode == "production" and submission_adapter == "command":
         required_commands.append("deploy_command")
     missing = [key for key in required_commands
                if not str(profile.get(key) or "").strip()]
     if missing:
         raise ValueError(
             f"{mode} delivery profile is missing: {', '.join(missing)}")
-    provider = str(profile.get("provider") or "web").strip()
-    if provider != "web" and provider not in STORE_PROVIDERS:
-        raise ValueError(
-            f"delivery profile provider must be web or one of {sorted(STORE_PROVIDERS)}")
     if provider in STORE_PROVIDERS:
         status_adapter = str(profile.get("status_adapter") or "command").strip()
         if status_adapter not in {"command", "official_api"}:
@@ -87,6 +94,10 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
         if recovery == "official_api" and status_adapter != "official_api":
             raise ValueError(
                 "official submission recovery requires status_adapter=official_api")
+        if submission_adapter == "official_api" and (
+                status_adapter != "official_api" or recovery != "official_api"):
+            raise ValueError(
+                "built-in submission requires official status and submission recovery")
         if status_adapter == "command" and not str(profile.get("verify_command") or "").strip():
             missing.append("verify_command")
         goal = str(profile.get("release_goal") or "published").strip()
@@ -109,6 +120,31 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
                 raise ValueError(
                     f"{provider} official submission recovery is missing: "
                     + ", ".join(missing_recovery))
+        if submission_adapter == "official_api":
+            if str(profile.get("track") or "") != "internal":
+                raise ValueError(
+                    "built-in Google Play submission is restricted to the internal track")
+            if not str(profile.get("artifact_path") or "").strip():
+                raise ValueError(
+                    "google_play built-in submission is missing: artifact_path")
+            version_code = str(profile.get("version_code") or "")
+            if not version_code.isdigit() or int(version_code) < 1:
+                raise ValueError("google_play version_code must be a positive integer")
+            artifact_digest = str(profile.get("artifact_sha256") or "")
+            if artifact_digest and (
+                    len(artifact_digest) != 64
+                    or any(char not in "0123456789abcdefABCDEF"
+                           for char in artifact_digest)):
+                raise ValueError("artifact_sha256 must be 64 hexadecimal characters")
+            release_status = str(
+                profile.get("google_release_status") or "completed")
+            if release_status not in {"draft", "completed"}:
+                raise ValueError(
+                    "google_release_status must be draft or completed")
+            review_flag = profile.get("google_changes_not_sent_for_review", True)
+            if not isinstance(review_flag, bool):
+                raise ValueError(
+                    "google_changes_not_sent_for_review must be a boolean")
         try:
             interval = int(profile.get("poll_interval_seconds") or 300)
         except (TypeError, ValueError) as exc:
@@ -251,16 +287,18 @@ def _store_submit_once(db: Db, job_id: str, profile: dict[str, Any], workdir: st
             (stamp, job_id))
     try:
         recovered = None
+        release = {
+            "commit_sha": commit_sha,
+            "version": version,
+            "target": target,
+            "idempotency_key": key,
+        }
         if str(profile.get("submission_recovery") or "command") == "official_api":
             from .store_adapters import StoreAdapterError, official_submission_lookup
 
             try:
-                recovered = official_submission_lookup(profile, {
-                    "commit_sha": commit_sha,
-                    "version": version,
-                    "target": target,
-                    "idempotency_key": key,
-                }, {**os.environ, **env})
+                recovered = official_submission_lookup(
+                    profile, release, {**os.environ, **env}, workdir)
             except StoreAdapterError as exc:
                 raise DeliveryError(
                     f"official submission recovery failed closed: {exc}") from exc
@@ -269,6 +307,18 @@ def _store_submit_once(db: Db, job_id: str, profile: dict[str, Any], workdir: st
             receipt = _submission_receipt(
                 json.dumps(recovered), commit_sha=commit_sha, version=version,
                 target=target, profile=profile, idempotency_key=key)
+        elif str(profile.get("submission_adapter") or "command") == "official_api":
+            from .store_adapters import StoreAdapterError, official_submit
+
+            try:
+                receipt = official_submit(
+                    profile, release, {**os.environ, **env}, workdir)
+            except StoreAdapterError as exc:
+                raise DeliveryError(f"built-in store submission failed: {exc}") from exc
+            output = json.dumps(receipt)
+            receipt = _submission_receipt(
+                output, commit_sha=commit_sha, version=version, target=target,
+                profile=profile, idempotency_key=key)
         else:
             output = _run(str(profile.get("deploy_command") or ""), workdir, {
                 **env, "BASTET_DELIVERY_IDEMPOTENCY_KEY": key,

@@ -337,6 +337,20 @@ provider identifiers. This makes retries convergent across the external-success/
 crash boundary while leaving actual upload and review submission under the existing
 human-approved command contract.
 
+The twenty-second adds the first narrowly scoped provider mutation. Google Play
+`internal` profiles may set `submission_adapter=official_api`, eliminating the custom
+upload shell command while retaining the terminal release-manager approval. The
+adapter confines `artifact_path` to the integrated worktree, requires a non-empty AAB,
+computes SHA-256 and rejects a reused versionCode unless Play reports the identical
+digest. It opens one edit, preserves all existing releases, appends only the requested
+`draft` or `completed` internal release, validates, and commits with
+`changesInReviewBehavior=ERROR_IF_IN_REVIEW`; its safer
+`changesNotSentForReview=true` default is explicit and configurable. Any pre-commit
+failure deletes the edit. A crash after commit is recovered by matching track,
+versionCode and the provider bundle SHA-256 back to the same local artifact before the
+durable receipt is reconstructed. The adapter refuses production or any non-internal
+track, and Apple mutation remains outside this slice.
+
 Provider adapters normalize official state into milestones while retaining the raw
 status. Apple distinguishes `WAITING_FOR_REVIEW`, `IN_REVIEW`,
 `PENDING_DEVELOPER_RELEASE`, and `READY_FOR_DISTRIBUTION`; Google Play track releases

@@ -290,6 +290,15 @@ track/versionCode reconstructs the receipt and suppresses the command. Provider 
 multiple matches and conflicting Apple build attachments stop the delivery instead of
 riskily retrying a side effect.
 
+Google Play `internal` may additionally use `submission_adapter=official_api`. This is
+the first built-in mutating adapter and remains behind the same terminal
+release-manager approval. It accepts only a worktree-contained non-empty `.aab`, binds
+the configured versionCode to its computed SHA-256, preserves every existing track
+release, appends only the requested `draft` or `completed` release, validates the edit,
+and commits with `ERROR_IF_IN_REVIEW`. Pre-commit failure deletes the edit; post-commit
+restart converges through the exact versionCode plus AAB digest recovery lookup.
+Production/open/closed tracks and Apple mutation deliberately remain command-owned.
+
 Apple submission and review are separate operations, and approval can still leave a
 version at Pending Developer Release. Google Play edits are not live until committed;
 managed publishing can further hold reviewed changes before publication. Templates

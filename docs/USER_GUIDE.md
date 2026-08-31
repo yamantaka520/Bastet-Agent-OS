@@ -180,6 +180,26 @@ read edit. Status and recovery adapters never upload, submit, commit, release, o
 change rollout; the trusted command remains responsible for creation when no exact
 provider object exists.
 
+For a Google Play internal-track release, `submission_adapter=official_api` replaces
+that external command with Bastet's narrowly scoped submitter. Configure:
+
+- `track: internal`, the exact positive `version_code`, and an `.aab` `artifact_path`
+  relative to the delivery worktree;
+- optional `artifact_sha256` (Bastet always computes and verifies the actual digest);
+- `google_release_status: completed` to make the build available to internal testers,
+  or `draft` to leave it staged;
+- `google_changes_not_sent_for_review` (defaults to `true`).
+
+After the existing terminal human approval, Bastet opens an edit, reuses an existing
+bundle only when its versionCode and SHA-256 both match or uploads the AAB through the
+media endpoint, reads the current track and appends the new release without removing
+older releases, validates the edit, then commits with
+`changesInReviewBehavior=ERROR_IF_IN_REVIEW`. Any failure before commit deletes the
+uncommitted edit. A retry after commit uses official recovery and compares the provider
+bundle digest to the same worktree artifact before reconstructing the receipt. The
+built-in mutating adapter refuses every track except `internal`; Apple submission and
+Google public-track mutation remain explicit trusted commands.
+
 After configuring credentials, run a provider canary before relying on automatic
 polling:
 

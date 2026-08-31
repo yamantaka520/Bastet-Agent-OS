@@ -1,19 +1,20 @@
 """Authenticated status and crash-recovery adapters for mobile stores.
 
-The upload/submission remains an explicit trusted-host command.  Its structured
-receipt supplies the immutable provider object identifier; these adapters then
-observe that exact object through the provider API and normalize its state.  An
-optional lookup path can also recover a receipt after the provider accepted the
-command but the host died before persisting its output.  Lookup never mutates a
-provider object.
+Most upload/submission paths remain explicit trusted-host commands whose structured
+receipt supplies the immutable provider object identifier. These adapters observe
+that exact object and can recover a receipt after provider success but before local
+persistence. A narrowly scoped Google Play internal-track adapter also owns its edit,
+AAB upload, validation, and safe commit. Status and lookup paths never mutate a release.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -29,6 +30,7 @@ class StoreAdapterError(RuntimeError):
 
 APPLE_API_URL = "https://api.appstoreconnect.apple.com"
 GOOGLE_API_URL = "https://androidpublisher.googleapis.com/androidpublisher/v3"
+GOOGLE_UPLOAD_URL = "https://androidpublisher.googleapis.com/upload/androidpublisher/v3"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_SCOPE = "https://www.googleapis.com/auth/androidpublisher"
 
@@ -123,6 +125,25 @@ def _response_json(response: httpx.Response, provider: str) -> dict[str, Any]:
     return payload
 
 
+def _google_artifact(profile: dict[str, Any], workdir: str) -> tuple[Path, int, str]:
+    artifact = (Path(workdir) / str(profile["artifact_path"])).resolve()
+    root = Path(workdir).resolve()
+    if not artifact.is_relative_to(root) or not artifact.is_file():
+        raise StoreAdapterError(
+            f"Google Play artifact not found in delivery worktree: {profile['artifact_path']}")
+    if artifact.suffix.lower() != ".aab":
+        raise StoreAdapterError("Google Play built-in submitter requires an .aab artifact")
+    size = artifact.stat().st_size
+    if size < 1:
+        raise StoreAdapterError("Google Play AAB artifact is empty")
+    with artifact.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    configured_digest = str(profile.get("artifact_sha256") or "").lower()
+    if configured_digest and configured_digest != digest:
+        raise StoreAdapterError("Google Play AAB SHA-256 does not match delivery profile")
+    return artifact, size, digest
+
+
 @dataclass
 class StoreStatusAdapter:
     """Provider client with injectable endpoints/transport for deterministic tests."""
@@ -130,6 +151,7 @@ class StoreStatusAdapter:
     client: httpx.Client
     apple_api_url: str = APPLE_API_URL
     google_api_url: str = GOOGLE_API_URL
+    google_upload_url: str = GOOGLE_UPLOAD_URL
     google_token_url: str = GOOGLE_TOKEN_URL
     now: Any = time.time
 
@@ -292,7 +314,7 @@ class StoreStatusAdapter:
 
     def lookup_google_play_submission(
             self, profile: dict[str, Any], release: dict[str, Any],
-            env: dict[str, str]) -> dict[str, Any] | None:
+            env: dict[str, str], workdir: str | None = None) -> dict[str, Any] | None:
         """Find an exact versionCode on the configured track without committing an edit."""
         headers = self._google_headers(env)
         package = quote(str(profile["package_name"]), safe="")
@@ -303,10 +325,33 @@ class StoreStatusAdapter:
         if not edit_id:
             raise StoreAdapterError("Google Play did not create a submission-lookup edit")
         track = quote(str(profile["track"]), safe="")
+        artifact_digest = ""
         try:
             track_payload = _response_json(self.client.get(
                 f"{self.google_api_url}/applications/{package}/edits/{edit_id}/tracks/{track}",
                 headers=headers), "Google Play")
+            wanted = str(profile["version_code"])
+            matching = [release_row for release_row in (track_payload.get("releases") or [])
+                        if wanted in [str(value)
+                                      for value in release_row.get("versionCodes", [])]]
+            if len(matching) > 1:
+                raise StoreAdapterError(
+                    "Google Play lookup found multiple releases with the exact versionCode")
+            if matching and str(profile.get("submission_adapter") or "command") == \
+                    "official_api":
+                if workdir is None:
+                    raise StoreAdapterError(
+                        "built-in Google Play recovery requires the delivery worktree")
+                _, _, artifact_digest = _google_artifact(profile, workdir)
+                bundle_payload = _response_json(self.client.get(
+                    f"{self.google_api_url}/applications/{package}/edits/"
+                    f"{edit_id}/bundles", headers=headers), "Google Play")
+                bundles = [row for row in (bundle_payload.get("bundles") or [])
+                           if str(row.get("versionCode") or "") == wanted]
+                if len(bundles) != 1 or str(bundles[0].get("sha256") or "").lower() != \
+                        artifact_digest:
+                    raise StoreAdapterError(
+                        "Google Play recovered versionCode does not match local AAB SHA-256")
         finally:
             try:
                 self.client.delete(
@@ -314,16 +359,110 @@ class StoreStatusAdapter:
                     headers=headers)
             except httpx.HTTPError:
                 pass
-        wanted = str(profile["version_code"])
-        matching = [release_row for release_row in (track_payload.get("releases") or [])
-                    if wanted in [str(value)
-                                  for value in release_row.get("versionCodes", [])]]
-        if len(matching) > 1:
-            raise StoreAdapterError(
-                "Google Play lookup found multiple releases with the exact versionCode")
         if not matching:
             return None
-        return _submission_receipt(release, profile, {"version_code": wanted})
+        fields = {"version_code": wanted}
+        if artifact_digest:
+            fields["artifact_sha256"] = artifact_digest
+        return _submission_receipt(release, profile, fields)
+
+    def submit_google_play(
+            self, profile: dict[str, Any], release: dict[str, Any],
+            env: dict[str, str], workdir: str) -> dict[str, Any]:
+        """Upload one AAB and append it to an internal track through a safe edit."""
+        artifact, artifact_size, digest = _google_artifact(profile, workdir)
+
+        headers = self._google_headers(env)
+        package = quote(str(profile["package_name"]), safe="")
+        edit_payload = _response_json(self.client.post(
+            f"{self.google_api_url}/applications/{package}/edits",
+            json={}, headers=headers), "Google Play")
+        edit_id = quote(str(edit_payload.get("id") or ""), safe="")
+        if not edit_id:
+            raise StoreAdapterError("Google Play did not create a release edit")
+        committed = False
+        wanted = str(profile["version_code"])
+        track_name = str(profile["track"])
+        track = quote(track_name, safe="")
+        marker = f"Bastet {release['version']} [{str(release['idempotency_key'])[:12]}]"
+        try:
+            bundles_payload = _response_json(self.client.get(
+                f"{self.google_api_url}/applications/{package}/edits/{edit_id}/bundles",
+                headers=headers), "Google Play")
+            bundles = bundles_payload.get("bundles") or []
+            matching_bundles = [row for row in bundles
+                                if str(row.get("versionCode") or "") == wanted]
+            if len(matching_bundles) > 1:
+                raise StoreAdapterError(
+                    "Google Play edit contains multiple bundles for versionCode")
+            if matching_bundles:
+                remote_digest = str(matching_bundles[0].get("sha256") or "").lower()
+                if not remote_digest or remote_digest != digest:
+                    raise StoreAdapterError(
+                        "Google Play versionCode exists with a different AAB SHA-256")
+            else:
+                upload_headers = {
+                    **headers,
+                    "Content-Type": "application/octet-stream",
+                    "Content-Length": str(artifact_size),
+                }
+                with artifact.open("rb") as stream:
+                    uploaded = _response_json(self.client.post(
+                        f"{self.google_upload_url}/applications/{package}/edits/"
+                        f"{edit_id}/bundles",
+                        params={"uploadType": "media"}, content=stream,
+                        headers=upload_headers), "Google Play")
+                if str(uploaded.get("versionCode") or "") != wanted:
+                    raise StoreAdapterError(
+                        "uploaded Google Play AAB versionCode does not match profile")
+                remote_digest = str(uploaded.get("sha256") or "").lower()
+                if not remote_digest or remote_digest != digest:
+                    raise StoreAdapterError(
+                        "uploaded Google Play AAB SHA-256 does not match local artifact")
+
+            track_payload = _response_json(self.client.get(
+                f"{self.google_api_url}/applications/{package}/edits/{edit_id}/"
+                f"tracks/{track}", headers=headers), "Google Play")
+            releases = list(track_payload.get("releases") or [])
+            matching_releases = [row for row in releases
+                                 if wanted in [str(value)
+                                               for value in row.get("versionCodes", [])]]
+            if len(matching_releases) > 1:
+                raise StoreAdapterError(
+                    "Google Play track contains versionCode in multiple releases")
+            if not matching_releases:
+                releases.append({
+                    "name": marker,
+                    "versionCodes": [wanted],
+                    "status": str(profile.get("google_release_status") or "completed"),
+                })
+                _response_json(self.client.put(
+                    f"{self.google_api_url}/applications/{package}/edits/{edit_id}/"
+                    f"tracks/{track}",
+                    json={"track": track_name, "releases": releases}, headers=headers),
+                    "Google Play")
+                _response_json(self.client.post(
+                    f"{self.google_api_url}/applications/{package}/edits/"
+                    f"{edit_id}:validate", content=b"", headers=headers), "Google Play")
+                _response_json(self.client.post(
+                    f"{self.google_api_url}/applications/{package}/edits/"
+                    f"{edit_id}:commit",
+                    params={
+                        "changesInReviewBehavior": "ERROR_IF_IN_REVIEW",
+                        "changesNotSentForReview": str(bool(profile.get(
+                            "google_changes_not_sent_for_review", True))).lower(),
+                    }, content=b"", headers=headers), "Google Play")
+                committed = True
+            return _submission_receipt(
+                release, profile, {"version_code": wanted, "artifact_sha256": digest})
+        finally:
+            if not committed:
+                try:
+                    self.client.delete(
+                        f"{self.google_api_url}/applications/{package}/edits/{edit_id}",
+                        headers=headers)
+                except httpx.HTTPError:
+                    pass
 
 
 def _receipt(submission: dict[str, Any], profile: dict[str, Any], milestone: str,
@@ -366,7 +505,8 @@ def _submission_receipt(release: dict[str, Any], profile: dict[str, Any],
 
 def official_submission_lookup(
         profile: dict[str, Any], release: dict[str, Any], env: dict[str, str],
-        *, adapter: StoreStatusAdapter | None = None) -> dict[str, Any] | None:
+        workdir: str | None = None, *, adapter: StoreStatusAdapter | None = None,
+        ) -> dict[str, Any] | None:
     """Recover an exact provider receipt without creating or changing anything."""
     provider = str(profile.get("provider") or "")
 
@@ -374,13 +514,31 @@ def official_submission_lookup(
         if provider == "app_store_connect":
             return client_adapter.lookup_app_store_submission(profile, release, env)
         if provider == "google_play":
-            return client_adapter.lookup_google_play_submission(profile, release, env)
+            return client_adapter.lookup_google_play_submission(
+                profile, release, env, workdir)
         raise StoreAdapterError(f"no official submission lookup for provider: {provider}")
 
     if adapter is not None:
         return lookup(adapter)
     with httpx.Client(timeout=30) as client:
         return lookup(StoreStatusAdapter(client))
+
+
+def official_submit(
+        profile: dict[str, Any], release: dict[str, Any], env: dict[str, str],
+        workdir: str, *, adapter: StoreStatusAdapter | None = None) -> dict[str, Any]:
+    """Run a narrowly scoped, human-approved provider mutation."""
+    provider = str(profile.get("provider") or "")
+
+    def submit(client_adapter: StoreStatusAdapter) -> dict[str, Any]:
+        if provider == "google_play":
+            return client_adapter.submit_google_play(profile, release, env, workdir)
+        raise StoreAdapterError(f"no built-in submitter for provider: {provider}")
+
+    if adapter is not None:
+        return submit(adapter)
+    with httpx.Client(timeout=180) as client:
+        return submit(StoreStatusAdapter(client))
 
 
 def official_status(profile: dict[str, Any], submission: dict[str, Any],

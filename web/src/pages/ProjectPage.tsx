@@ -56,9 +56,13 @@ type DeliveryProfile = { target_branch?: string; target?: string;
   provider?: "web" | "app_store_connect" | "google_play";
   status_adapter?: "command" | "official_api";
   submission_recovery?: "command" | "official_api";
+  submission_adapter?: "command" | "official_api";
   release_goal?: "uploaded" | "submitted" | "approved" | "published";
   app_id?: string; platform?: string; build_number?: string;
   package_name?: string; track?: string; version_code?: string;
+  artifact_path?: string; artifact_sha256?: string;
+  google_release_status?: "draft" | "completed";
+  google_changes_not_sent_for_review?: boolean;
   poll_interval_seconds?: string };
 type RoomMember = { id: string; name: string; role: string; executor_type: string };
 type RoomMessage = { id: string; author_type: string; author_id: string;
@@ -683,7 +687,7 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
                 <option value="google_play">Google Play</option>
               </select>
             </label>
-            {(["target_branch", "target", "predeploy_command", "deploy_command"] as (keyof DeliveryProfile)[])
+            {(["target_branch", "target", "predeploy_command"] as const)
               .map((key) => (
               <label className="res-field" key={key}>
                 <span>{t(`project.delivery.${key}`)}</span>
@@ -693,6 +697,15 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
                          ...draft.deliveryProfile, [key]: e.target.value } })} />
               </label>
             ))}
+            {(draft.deliveryProfile.submission_adapter ?? "command") === "command" && (
+              <label className="res-field">
+                <span>{t("project.delivery.deploy_command")}</span>
+                <input value={draft.deliveryProfile.deploy_command ?? ""}
+                       disabled={!canOperate}
+                       onChange={(e) => patch({ deliveryProfile: {
+                         ...draft.deliveryProfile, deploy_command: e.target.value } })} />
+              </label>
+            )}
             {(draft.deliveryProfile.provider === "app_store_connect"
               || draft.deliveryProfile.provider === "google_play") && (<>
               <label className="res-field">
@@ -775,6 +788,64 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
                          onChange={(e) => patch({ deliveryProfile: {
                            ...draft.deliveryProfile, version_code: e.target.value } })} />
                 </label>
+                {(draft.deliveryProfile.status_adapter ?? "command") === "official_api" && (<>
+                  <label className="res-field">
+                    <span>{t("project.delivery.submission_adapter")}</span>
+                    <select value={draft.deliveryProfile.submission_adapter ?? "command"}
+                            disabled={!canOperate}
+                            onChange={(e) => patch({ deliveryProfile: {
+                              ...draft.deliveryProfile,
+                              submission_adapter:
+                                e.target.value as DeliveryProfile["submission_adapter"],
+                              ...(e.target.value === "official_api"
+                                ? { submission_recovery: "official_api" as const }
+                                : {}),
+                            } })}>
+                      <option value="command">
+                        {t("project.delivery.submit.command")}
+                      </option>
+                      <option value="official_api">
+                        {t("project.delivery.submit.official_api")}
+                      </option>
+                    </select>
+                  </label>
+                  {(draft.deliveryProfile.submission_adapter ?? "command")
+                    === "official_api" && (<>
+                    {(["artifact_path", "artifact_sha256"] as const).map((key) => (
+                      <label className="res-field" key={key}>
+                        <span>{t(`project.delivery.${key}`)}</span>
+                        <input value={draft.deliveryProfile[key] ?? ""}
+                               disabled={!canOperate}
+                               onChange={(e) => patch({ deliveryProfile: {
+                                 ...draft.deliveryProfile, [key]: e.target.value } })} />
+                      </label>
+                    ))}
+                    <label className="res-field">
+                      <span>{t("project.delivery.google_release_status")}</span>
+                      <select value={draft.deliveryProfile.google_release_status ?? "completed"}
+                              disabled={!canOperate}
+                              onChange={(e) => patch({ deliveryProfile: {
+                                ...draft.deliveryProfile,
+                                google_release_status:
+                                  e.target.value as DeliveryProfile["google_release_status"],
+                              } })}>
+                        <option value="draft">draft</option>
+                        <option value="completed">completed</option>
+                      </select>
+                    </label>
+                    <label className="res-field checkbox-field">
+                      <span>{t("project.delivery.google_changes_not_sent_for_review")}</span>
+                      <input type="checkbox"
+                             checked={draft.deliveryProfile
+                               .google_changes_not_sent_for_review ?? true}
+                             disabled={!canOperate}
+                             onChange={(e) => patch({ deliveryProfile: {
+                               ...draft.deliveryProfile,
+                               google_changes_not_sent_for_review: e.target.checked,
+                             } })} />
+                    </label>
+                  </>)}
+                </>)}
               </>)}
               <label className="res-field">
                 <span>{t("project.delivery.poll_interval_seconds")}</span>

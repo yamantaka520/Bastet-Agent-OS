@@ -1,6 +1,7 @@
 """Authenticated provider adapters bind official state to one submission receipt."""
 
 import base64
+import hashlib
 import json
 from urllib.parse import parse_qs
 
@@ -292,6 +293,167 @@ def test_google_play_lookup_recovers_exact_track_version_without_committing():
     }
 
 
+def test_builtin_google_recovery_binds_version_code_to_local_aab_hash(tmp_path):
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    artifact = tmp_path / "release.aab"
+    artifact.write_bytes(b"signed-aab-payload")
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    methods = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.url.path == "/token":
+            return httpx.Response(200, json={"access_token": "oauth-token"})
+        if request.url.path.endswith("/edits") and request.method == "POST":
+            return httpx.Response(200, json={"id": "lookup-edit"})
+        if request.url.path.endswith("/tracks/internal"):
+            return httpx.Response(200, json={
+                "releases": [{"versionCodes": ["10400"], "status": "completed"}],
+            })
+        if request.url.path.endswith("/bundles"):
+            return httpx.Response(200, json={
+                "bundles": [{"versionCode": 10400, "sha256": digest}],
+            })
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(404)
+
+    adapter = StoreStatusAdapter(
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        google_token_url="https://google.test/token")
+    receipt = adapter.lookup_google_play_submission({
+        "provider": "google_play", "package_name": "com.example.canary",
+        "track": "internal", "version_code": "10400",
+        "submission_adapter": "official_api", "artifact_path": "release.aab",
+    }, {
+        "commit_sha": "a" * 40, "version": "1.4.0",
+        "target": "mobile-production", "idempotency_key": "stable-key",
+    }, {"GOOGLE_PLAY_SERVICE_ACCOUNT_JSON": json.dumps({
+        "client_email": "publisher@example.test",
+        "private_key_id": "rsa-1", "private_key": _pem(private_key),
+    })}, str(tmp_path))
+
+    assert methods == ["POST", "POST", "GET", "GET", "DELETE"]
+    assert receipt["artifact_sha256"] == digest
+
+
+def test_google_play_builtin_submitter_uploads_validates_and_commits_internal_track(
+        tmp_path):
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    artifact = tmp_path / "release.aab"
+    artifact.write_bytes(b"signed-aab-payload")
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        if path == "/token":
+            return httpx.Response(200, json={"access_token": "oauth-token"})
+        if path.endswith("/edits") and request.method == "POST":
+            return httpx.Response(200, json={"id": "release-edit"})
+        if path.endswith("/bundles") and request.method == "GET":
+            return httpx.Response(200, json={"bundles": []})
+        if path.startswith("/upload/"):
+            assert request.url.params["uploadType"] == "media"
+            assert request.headers["Content-Type"] == "application/octet-stream"
+            assert request.content == b"signed-aab-payload"
+            return httpx.Response(200, json={
+                "versionCode": 10400, "sha256": digest,
+            })
+        if path.endswith("/tracks/internal") and request.method == "GET":
+            return httpx.Response(200, json={
+                "track": "internal",
+                "releases": [{
+                    "name": "existing", "versionCodes": ["10300"],
+                    "status": "completed",
+                }],
+            })
+        if path.endswith("/tracks/internal") and request.method == "PUT":
+            payload = json.loads(request.content)
+            assert payload["releases"][0]["versionCodes"] == ["10300"]
+            assert payload["releases"][1] == {
+                "name": "Bastet 1.4.0 [stable-key]",
+                "versionCodes": ["10400"],
+                "status": "completed",
+            }
+            return httpx.Response(200, json=payload)
+        if path.endswith("/edits/release-edit:validate"):
+            return httpx.Response(200, json={"id": "release-edit"})
+        if path.endswith("/edits/release-edit:commit"):
+            assert request.url.params["changesInReviewBehavior"] == "ERROR_IF_IN_REVIEW"
+            assert request.url.params["changesNotSentForReview"] == "true"
+            return httpx.Response(200, json={"id": "release-edit"})
+        return httpx.Response(404)
+
+    adapter = StoreStatusAdapter(
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        google_api_url="https://google.test/androidpublisher/v3",
+        google_upload_url="https://google.test/upload/androidpublisher/v3",
+        google_token_url="https://google.test/token")
+    receipt = adapter.submit_google_play({
+        "provider": "google_play",
+        "package_name": "com.example.canary",
+        "track": "internal",
+        "version_code": "10400",
+        "artifact_path": "release.aab",
+    }, {
+        "commit_sha": "a" * 40,
+        "version": "1.4.0",
+        "target": "mobile-production",
+        "idempotency_key": "stable-key",
+    }, {"GOOGLE_PLAY_SERVICE_ACCOUNT_JSON": json.dumps({
+        "client_email": "publisher@example.test",
+        "private_key_id": "rsa-1",
+        "private_key": _pem(private_key),
+    })}, str(tmp_path))
+
+    assert [request.method for request in requests] == [
+        "POST", "POST", "GET", "POST", "GET", "PUT", "POST", "POST"]
+    assert receipt["version_code"] == "10400"
+    assert receipt["artifact_sha256"] == digest
+    assert not any(request.method == "DELETE" for request in requests)
+
+
+def test_google_play_builtin_submitter_deletes_uncommitted_edit_on_hash_conflict(
+        tmp_path):
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    (tmp_path / "release.aab").write_bytes(b"new-payload")
+    methods = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.url.path == "/token":
+            return httpx.Response(200, json={"access_token": "oauth-token"})
+        if request.url.path.endswith("/edits") and request.method == "POST":
+            return httpx.Response(200, json={"id": "release-edit"})
+        if request.url.path.endswith("/bundles"):
+            return httpx.Response(200, json={
+                "bundles": [{"versionCode": 10400, "sha256": "wrong"}],
+            })
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(404)
+
+    adapter = StoreStatusAdapter(
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        google_token_url="https://google.test/token")
+    with pytest.raises(StoreAdapterError, match="different AAB SHA-256"):
+        adapter.submit_google_play({
+            "provider": "google_play", "package_name": "com.example.canary",
+            "track": "internal", "version_code": "10400",
+            "artifact_path": "release.aab",
+        }, {
+            "commit_sha": "a" * 40, "version": "1.4.0",
+            "target": "mobile-production", "idempotency_key": "stable-key",
+        }, {"GOOGLE_PLAY_SERVICE_ACCOUNT_JSON": json.dumps({
+            "client_email": "publisher@example.test",
+            "private_key_id": "rsa-1", "private_key": _pem(private_key),
+        })}, str(tmp_path))
+
+    assert methods == ["POST", "POST", "GET", "DELETE"]
+
+
 def test_official_adapter_requires_exact_structured_submission_receipt():
     profile = {
         "provider": "google_play",
@@ -349,3 +511,21 @@ def test_official_submission_recovery_requires_immutable_artifact_identity(
             "predeploy_command": "test-release",
             "deploy_command": "upload-release",
         }, "production")
+
+
+def test_builtin_google_submission_is_internal_only_and_needs_no_deploy_command():
+    profile = validate_profile({
+        "provider": "google_play",
+        "status_adapter": "official_api",
+        "submission_recovery": "official_api",
+        "submission_adapter": "official_api",
+        "package_name": "com.example.canary",
+        "track": "internal",
+        "version_code": "10400",
+        "artifact_path": "app/build/outputs/bundle/release/app-release.aab",
+        "predeploy_command": "run-mobile-tests",
+    }, "production")
+
+    assert profile["submission_adapter"] == "official_api"
+    with pytest.raises(ValueError, match="restricted to the internal track"):
+        validate_profile({**profile, "track": "production"}, "production")
