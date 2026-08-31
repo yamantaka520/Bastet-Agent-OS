@@ -1,20 +1,10 @@
 # Roadmap
 
-Last updated: 2026-08-31 · current version 0.35.x
+Last updated: 2026-08-31 · current version 0.36.x
 
 M0–M6 are done ([PROGRESS.md](../PROGRESS.md) says what was verified where). What
 follows is ordered by how much it would change daily use, not by how interesting
 it is to build.
-
-## Next
-
-- **Core engine redesign (accepted 2026-08-30).** Replace the linear project
-  runner and stage array with durable planning rounds plus validated task/stage
-  DAGs; add bounded visible PM↔system-analysis negotiation, frozen planning
-  sessions with next-round intake, adversarial handoff challenges, role/evidence
-  coverage, mandatory development integration receipts, Telegram progress/Q&A,
-  and schedulable Skill installation. See
-  [CORE-ENGINE-REDESIGN.md](CORE-ENGINE-REDESIGN.md).
 
 ## Shipped since this file was first written
 
@@ -24,8 +14,11 @@ Playwright tooling and per-stage time budgets (0.22), durable timezone-aware
 scheduled workflows with restart-safe dispatch and overlap suppression, and
 preview-first safe pruning of unreferenced managed credential files,
 receipt-bound branch review with verified promotion, and timezone-aware project
-daily cost ceilings that durably pause and automatically resume the runner (next
-release after 0.35.2). Async media resources can now register durable vendor
+daily cost ceilings that durably pause and automatically resume the runner.
+The 0.36 core redesign adds planning rounds, concurrent task/stage DAGs, visible
+PM↔system-analysis negotiation, frozen session intake, challenged handoffs,
+role/evidence coverage, verified mainline delivery, Telegram progress/Q&A and
+managed Skill contracts. Async media resources can register durable vendor
 claims; the host polls, safely downloads the result into the run worktree and
 automatically resumes verification after an Agent process has exited. Details in
 [CHANGELOG.md](../CHANGELOG.md).

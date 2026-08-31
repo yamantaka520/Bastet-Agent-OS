@@ -8,6 +8,64 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.36.0] - 2026-08-31
+
+### Added
+
+- Durable planning rounds freeze agreed customer sessions, carry unresolved
+  ideas into next-round intake, and require a visible, persisted PM ↔ system
+  analyst negotiation to reach acceptance within five exchanges before task
+  decomposition unlocks.
+- Project tasks and workflow stages are validated dependency DAGs with bounded
+  parallel execution, isolated branch worktrees, terminal joins, restart-safe
+  database claims, failure propagation, and receipt-bound retry of only the
+  affected subgraph.
+- Every receiving stage can challenge predecessor evidence in a bounded,
+  persisted exchange before execution. All eight built-in workflow families
+  now separate the product, system-analysis, architecture, UX, UI, visual-art,
+  implementation, integration, security, QA, operations and release concerns
+  they actually require.
+- Typed evidence matrices, per-node human approvals, complete-graph admission,
+  ordered same-role fallback chains, verified managed Skill installation and
+  health receipts, and Telegram graph progress, summaries and task-scoped Q&A.
+- Development tasks require verified integration or production delivery.
+  Integration refetches and merges the current remote target, reruns the trusted
+  candidate gate, pushes without force and reads back the exact remote SHA.
+  Branch-only work has a bounded diff review and receipt-bound promotion path.
+- Production delivery requires a structured online provider receipt bound to the
+  integrated commit, version and target. App Store Connect and Google Play add
+  durable async delivery states, exact official status adapters, credentialed
+  canaries, idempotent submission/recovery, a Google Play internal-track
+  submitter, and Apple resumable Build Upload, metadata, locale and screenshot
+  evidence gates.
+- Restart-safe IANA-timezone workflow schedules with overlap suppression;
+  project daily USD ceilings that pause new work and automatically resume at the
+  next local day; preview-first pruning of unreferenced Bastet credential files.
+- Durable asynchronous media claims let an Agent hand a long-running vendor task
+  to the host. Bastet polls outside the Agent process, safely downloads into the
+  worktree, records attempts/bytes/SHA-256/MIME and automatically reruns the
+  stage for verification.
+- Executable multiprocess reliability, parallel DAG-to-remote delivery and HTTP
+  production provider rehearsals.
+
+### Changed
+
+- The Web workbench loads pages as separate chunks, reducing the initial JS from
+  about 832 kB to 362 kB and removing the bundle-size warning.
+- Blocking CI covers Linux Python 3.11–3.14, macOS 3.11/3.14, the published
+  Python 3.12 image base, and a reproducible Node 22 Web build. Native
+  control-plane support is now stated accurately as Linux/macOS; Windows remains
+  a supported WebUI client through a Linux host, container or VM.
+
+### Fixed
+
+- Eliminated cross-role fallback, duplicate runner/stage/PM claims, stale graph
+  descendants, unsafe multithreaded `forkpty`, obsolete asyncio markers and
+  controllable TypeScript/ESLint/test warnings discovered during the redesign.
+- Background media retrieval rejects path escapes, redirects, unapproved hosts,
+  credential forwarding and oversized results; expiring signed result URLs are
+  not persisted or logged.
+
 ## [0.35.2] - 2026-08-30
 
 ### Fixed

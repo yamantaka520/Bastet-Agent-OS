@@ -4,7 +4,7 @@ Last updated: 2026-08-31
 
 ## Current project status
 
-- Unreleased core-redesign foundation: durable planning rounds with frozen source
+- Released core engine redesign: durable planning rounds with frozen source
   sessions and next-round intake; bounded planning negotiation records; stable task
   ids and validated dependency DAGs; a dependency-aware project runner that claims
   ready nodes concurrently under `max_parallel` and persists `job_deps`; direct
@@ -103,11 +103,11 @@ Last updated: 2026-08-31
   and recovery-time revalidation are recorded before review mutation. The same gate now
   proves exact App Info/version locale parity and requires provider-processed screenshot
   evidence per version locale, with configurable display types and no ambiguous App Info
-  guessing. Validation: 679 Python tests,
+  guessing. Validation: 704 Python tests,
   ruff clean, Web production build clean.
 
-- Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month
-  (2026-07-28 → 2026-08-30), ~132 commits. See [CHANGELOG.md](CHANGELOG.md) for
+- Released: **v0.36.0**. Version arc v0.1.0 → v0.36.0 in one month
+  (2026-07-28 → 2026-08-31), ~170 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.
 - v0.35.0–v0.35.2 make delivery part of the completion contract: required branches

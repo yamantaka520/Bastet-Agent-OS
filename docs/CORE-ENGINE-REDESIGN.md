@@ -172,7 +172,7 @@ integration delivery.
 
 ## Delivery sequence
 
-1. **Foundation (implemented, unreleased):** durable planning rounds/intake,
+1. **Foundation (released in 0.36.0):** durable planning rounds/intake,
    immutable sessions, task ids/dependencies, DAG validation and lifecycle APIs.
 2. **Scheduler (project and stage DAG foundations implemented):** concurrent
    ready-node claiming, dependency persistence, failure propagation, restart
