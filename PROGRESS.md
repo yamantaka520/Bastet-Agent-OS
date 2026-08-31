@@ -106,7 +106,7 @@ Last updated: 2026-08-31
   guessing. Validation: 704 Python tests,
   ruff clean, Web production build clean.
 
-- Released: **v0.36.0**. Version arc v0.1.0 → v0.36.0 in one month
+- Released: **v0.36.1**. Version arc v0.1.0 → v0.36.1 in one month
   (2026-07-28 → 2026-08-31), ~170 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.

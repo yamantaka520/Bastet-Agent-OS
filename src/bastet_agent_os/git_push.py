@@ -47,6 +47,8 @@ log = logging.getLogger("bastet.gitpush")
 PUSH_TIMEOUT_S = 120
 REVIEW_TIMEOUT_S = 20
 REVIEW_PATCH_LIMIT = 200_000
+GIT_IDENTITY = ("-c", "user.name=Bastet Agent OS",
+                "-c", "user.email=bastet@localhost")
 
 
 class BranchReviewError(RuntimeError):
@@ -327,7 +329,8 @@ def integrate_job_branch(db: Db, job, *, workdir: str,
         env = _env_for(db, url, resources, scratch)
         steps = [
             ["git", "-C", workdir, "fetch", "--no-tags", url, target_branch],
-            ["git", "-C", workdir, "merge", "--no-edit", "FETCH_HEAD"],
+            ["git", "-C", workdir, *GIT_IDENTITY,
+             "merge", "--no-edit", "FETCH_HEAD"],
         ]
         output = []
         for command in steps:
@@ -370,8 +373,9 @@ def integrate_job_branch(db: Db, job, *, workdir: str,
                         "detail": f"local release tag {release_tag} points elsewhere"}
             if local_tag.returncode != 0:
                 tagged = subprocess.run(
-                    ["git", "-C", workdir, "tag", "-a", release_tag, "-m",
-                     f"Release {release_tag}"], capture_output=True, text=True)
+                    ["git", "-C", workdir, *GIT_IDENTITY,
+                     "tag", "-a", release_tag, "-m", f"Release {release_tag}"],
+                    capture_output=True, text=True)
                 if tagged.returncode:
                     return {"pushed": False, "detail": tagged.stderr[-1200:]}
         push = ["git", "-C", workdir, "push", "--atomic", url,

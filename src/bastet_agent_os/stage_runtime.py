@@ -18,6 +18,8 @@ from pathlib import Path
 from .db import now
 
 SCRATCH_RELPATH = "._bastet"
+GIT_IDENTITY = ("-c", "user.name=Bastet Agent OS",
+                "-c", "user.email=bastet@localhost")
 
 
 @dataclass(frozen=True)
@@ -136,7 +138,8 @@ def join_stage_heads(primary_workdir: str, heads: list[str]) -> JoinResult:
         if contained.returncode == 0:
             merged.append(head)
             continue
-        result = _git(primary_workdir, "merge", "--no-ff", "--no-edit", head)
+        result = _git(primary_workdir, *GIT_IDENTITY,
+                      "merge", "--no-ff", "--no-edit", head)
         if result.returncode:
             _git(primary_workdir, "merge", "--abort")
             return JoinResult(False, _head(primary_workdir), tuple(merged), head,

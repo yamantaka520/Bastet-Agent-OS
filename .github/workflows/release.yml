@@ -47,7 +47,7 @@ jobs:
           TAG="${RELEASE_TAG#v}"
           test "$PKG" = "$TAG" || { echo "tag v$TAG != __version__ $PKG"; exit 1; }
       - run: pip install build && python -m build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -64,7 +64,7 @@ jobs:
     permissions:
       id-token: write        # Trusted Publishing: OIDC, no stored token
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -76,7 +76,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/

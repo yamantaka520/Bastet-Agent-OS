@@ -8,6 +8,18 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.36.1] - 2026-08-31
+
+### Fixed
+
+- Git joins, integration merges and annotated release tags now use Bastet's
+  explicit repository-local identity, so clean Agent hosts do not depend on an
+  operator's global Git configuration.
+- Cross-platform tests and delivery rehearsals explicitly initialize `main`
+  instead of inheriting the host's configurable default branch name.
+- Release artifact actions use their current Node 24 releases, eliminating the
+  GitHub Actions Node 20 deprecation annotations.
+
 ## [0.36.0] - 2026-08-31
 
 ### Added

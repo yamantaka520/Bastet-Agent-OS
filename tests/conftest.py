@@ -32,7 +32,7 @@ def repo(tmp_path):
     import subprocess
     path = tmp_path / "repo"
     path.mkdir()
-    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(path)], check=True)
     (path / "README.md").write_text("# test repo\n")
     subprocess.run(["git", "-C", str(path), "add", "."], check=True)
     subprocess.run(["git", "-C", str(path), "-c", "user.email=t@t", "-c",

@@ -101,7 +101,7 @@ def _seed_repo(root: Path) -> tuple[Path, Path, str]:
     remote = root / "origin.git"
     repo = root / "repo"
     subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
     (repo / "README.md").write_text("# delivery rehearsal\n")
     _git(repo, "add", ".")
     _git(repo, "-c", "user.name=Bastet Rehearsal",
