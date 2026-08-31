@@ -170,8 +170,10 @@ timers; unknown timezones fall back to UTC.
 exhausted" means only money will fix it, so the agent is marked depleted and
 **every** routing path skips it — role mapping, explicit override, alternate
 selection, job default, PM selection. The stall becomes recoverable *by
-routing*: the supervisor swaps in a funded stand-in without spending a PM
-intervention. Only a human clears the flag (the Agents card,
+routing* only when another enabled Agent is explicitly assigned to the same
+project role; preference orders that backup chain. An unrelated role or job
+default never silently takes over. A PM/human may still record an explicit
+override when cross-role takeover is genuinely intended. Only a human clears the flag (the Agents card,
 `POST /api/agents/{id}/undeplete`, or a retry that explicitly names the agent);
 automated retries cannot. Without this the router kept re-dispatching a dead
 agent every rework cycle, undoing the PM's correct handovers twice over.

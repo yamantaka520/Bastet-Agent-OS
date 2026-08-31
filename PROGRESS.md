@@ -44,6 +44,10 @@ Last updated: 2026-08-31
   least 24 hours old and absent from every resource/channel reference. Arbitrary
   files, user-managed `file:` paths, fresh files and symlinks are excluded; the
   reference set is recomputed before unlink and both preview/apply are audited.
+  Role fallback now matches the contract already exposed by the UI: multiple
+  assignments to the same project role form an ordered backup chain. Runtime,
+  recovery routing and whole-graph admission all reject an unrelated-role
+  fallback; cross-role takeover requires an explicit, audited override.
   Telegram now renders graph-node starts/passes, handoff reviews/challenges,
   delivery transitions and evidence-grounded completion summaries. `/job` reads
   the durable task snapshot; `/ask` gives the configured responder a task-scoped
@@ -221,9 +225,6 @@ feature is confirmed against real vendor CLIs before release:
   request branch-only delivery still leave merge authority to a human. Development
   templates instead require the verified `integration` or `production` path.
 - **Telegram bot token** from an early session should still be rotated.
-- **A one-agent role dead-ends less gracefully than it should.** Dispatch now
-  falls back to any funded agent on the project, but the stand-in may hold a
-  very different role; a per-role stand-in list would be honest about it.
 - **The E2E stage's own time budget is undeclared** on the live 網頁開發 preset.
   Since 0.30.0 a silent stage is bounded by `timeout_s` rather than by the
   supervisor's patience, so long suites (20-level FPS runs) should say how long

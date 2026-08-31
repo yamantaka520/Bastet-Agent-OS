@@ -96,6 +96,9 @@ async def test_explicit_incompatible_retry_is_refused_without_mutating_card(
 
 
 async def test_retry_audit_names_the_agent_selected_by_stage_routing(orch, seeded):
+    seeded.write(
+        "INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+        "VALUES('proj1','fakebot','tester',0)")
     add_template(seeded, "e2e", [
         {"name": "E2E", "role": "tester", "gate": "auto"},
     ])

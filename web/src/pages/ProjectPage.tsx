@@ -311,7 +311,8 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
                 : assigned.length
                   ? (<span className="role-agents">{assigned.map((a) => (
                       <span key={a.agent_id} className="role-chip">{a.agent_name}
-                        <span className="card-meta"> ({a.executor_type})</span>
+                        <span className="card-meta"> ({a.executor_type} · {
+                          t("role.prefShort", { n: a.preference })})</span>
                         {canOperate && (
                           <button className="ghost chip-x"
                                   title={t("project.removeAssign")}

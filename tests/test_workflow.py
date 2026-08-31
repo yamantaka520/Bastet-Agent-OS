@@ -509,6 +509,8 @@ async def test_role_prompt_and_project_secret_reach_the_run(orch, seeded, monkey
 
     seeded.write("INSERT INTO role_prompts(role, label, prompt, builtin, updated_at) "
                  "VALUES('reviewer','審查者','你是審查者：只找真正的問題。',1,?)", (_now(),))
+    seeded.write("INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+                 "VALUES('proj1','fakebot','reviewer',0)")
     secret_file = tmp_path / "deploy-token"
     secret_file.write_text("s3cr3t-value")
     seeded.write("INSERT INTO resources(id, kind, name, secret_ref, config_json, "

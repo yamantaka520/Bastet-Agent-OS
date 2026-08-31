@@ -173,7 +173,7 @@ class Orchestrator:
         from . import admission
         admission_report = admission.workflow_report(
             self.db, req.project_id, stages, default_agent_id=req.agent_id,
-            resource_id=req.resource_id, strict_roles=False)
+            resource_id=req.resource_id, strict_roles=True)
         if not admission_report["ok"]:
             self.db.audit(actor, "job.admission.blocked", "project", req.project_id,
                           {"title": req.title,
@@ -927,11 +927,13 @@ class Orchestrator:
                 "AND a.enabled=1 AND a.depleted_at IS NULL AND par.agent_id<>? "
                 "ORDER BY par.preference DESC",
                 (job["project_id"], role, last_agent or "")))
-        candidates.extend(self.db.query(
-            "SELECT DISTINCT a.* FROM project_agent_roles par JOIN agents a "
-            "ON a.id=par.agent_id WHERE par.project_id=? AND a.enabled=1 AND a.depleted_at IS NULL "
-            "AND par.agent_id<>? ORDER BY par.preference DESC",
-            (job["project_id"], last_agent or "")))
+        if not role:
+            candidates.extend(self.db.query(
+                "SELECT DISTINCT a.* FROM project_agent_roles par JOIN agents a "
+                "ON a.id=par.agent_id WHERE par.project_id=? AND a.enabled=1 "
+                "AND a.depleted_at IS NULL AND par.agent_id<>? "
+                "ORDER BY par.preference DESC",
+                (job["project_id"], last_agent or "")))
         seen = set()
         for agent in candidates:
             if agent["id"] in seen:
@@ -2969,19 +2971,17 @@ class Orchestrator:
             if not rows:
                 log.info("no agent for role %r in project %s; using job default",
                          stage.role, job["project_id"])
-        agent = self.db.one("SELECT * FROM agents WHERE id=? AND enabled=1 "
-                            "AND depleted_at IS NULL", (job["default_agent_id"],))
-        if agent is not None:
-            candidates.append(("default", agent))
-        # last resort: any funded agent on this project. Without it, a role with
-        # exactly one agent (the live case: `tester` = Grok1 alone) dead-ends the
-        # moment that agent's balance empties, even with capable stand-ins sitting
-        # right there under other roles.
-        stand_ins = self.db.query(
-            "SELECT DISTINCT a.* FROM project_agent_roles par JOIN agents a ON a.id=par.agent_id "
-            "WHERE par.project_id=? AND a.enabled=1 AND a.depleted_at IS NULL "
-            "ORDER BY par.preference DESC", (job["project_id"],))
-        candidates.extend(("stand-in", row) for row in stand_ins)
+        if not stage.role:
+            agent = self.db.one("SELECT * FROM agents WHERE id=? AND enabled=1 "
+                                "AND depleted_at IS NULL", (job["default_agent_id"],))
+            if agent is not None:
+                candidates.append(("default", agent))
+            stand_ins = self.db.query(
+                "SELECT DISTINCT a.* FROM project_agent_roles par JOIN agents a "
+                "ON a.id=par.agent_id WHERE par.project_id=? AND a.enabled=1 "
+                "AND a.depleted_at IS NULL ORDER BY par.preference DESC",
+                (job["project_id"],))
+            candidates.extend(("project", row) for row in stand_ins)
 
         seen = set()
         rejected = []
@@ -2994,10 +2994,6 @@ class Orchestrator:
                 if rejected:
                     log.warning("job %s stage %s: routed to %s after rejecting %s",
                                 job["id"], stage.name, candidate["id"], rejected)
-                elif source == "stand-in":
-                    log.warning("job %s: %r has no compatible role/default agent; "
-                                "standing in with %s", job["id"],
-                                stage.role or "default", candidate["id"])
                 return candidate
             if source == "override":
                 raise ValueError(
@@ -3013,10 +3009,20 @@ class Orchestrator:
             "SELECT id FROM agents WHERE id=? AND depleted_at IS NOT NULL",
             (job["default_agent_id"],))
         if depleted is not None:
+            if stage.role:
+                raise ValueError(
+                    f"job {job['id']} stage {stage.name!r}: assigned role "
+                    f"{stage.role!r} 的 Agent 額度都用盡；recharge it, assign an "
+                    "ordered same-role backup, or use an explicit override")
             raise ValueError(
                 f"job {job['id']}：所有可用 agent 的付費額度都用盡了（含 "
                 f"{depleted['id']}）。充值後在「組織 → Agents」解除暫停，或指派"
                 f"其他 agent 到這個角色。")
+        if stage.role:
+            raise ValueError(
+                f"job {job['id']} stage {stage.name!r}: no enabled, funded, "
+                f"route-compatible agent is assigned role {stage.role!r}; assign "
+                "an ordered same-role backup or use an explicit override")
         raise ValueError(f"job {job['id']}: default agent unavailable")
 
     def _project_repo(self, job) -> str:

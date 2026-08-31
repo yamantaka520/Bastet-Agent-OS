@@ -181,10 +181,10 @@ def test_clear_depleted_is_idempotent_and_audited(orch, seeded):
                       )["actor"] == "user:root"
 
 
-def test_a_one_agent_role_stands_in_rather_than_dead_ending(orch, seeded):
-    """The live shape: `tester` was Grok1 alone. When its balance emptied there
-    was no funded tester at all — but three capable agents sat under other
-    roles. Dead-ending there strands the card for no good reason."""
+def test_a_declared_role_never_silently_degrades_to_an_unrelated_agent(orch, seeded):
+    """A capable executor is not automatically qualified for every project role.
+    Same-role assignments are the ordered backup chain; cross-role takeover must
+    be an explicit override so the audit trail says who made that judgement."""
     from bastet_agent_os.workflow import parse_stages
     _two_testers(seeded)
     seeded.write("DELETE FROM project_agent_roles WHERE agent_id='agy1'")
@@ -194,6 +194,20 @@ def test_a_one_agent_role_stands_in_rather_than_dead_ending(orch, seeded):
     seeded.write("UPDATE jobs SET stage='test', default_agent_id='grok1' WHERE id='job1'")
     stage = parse_stages([{"name": "test", "role": "tester", "gate": "auto"}])[0]
 
+    with pytest.raises(ValueError, match="same-role backup"):
+        orch._agent_for_stage(seeded.one("SELECT * FROM jobs WHERE id='job1'"), stage)
+
+
+def test_cross_role_takeover_requires_an_explicit_override(orch, seeded):
+    from bastet_agent_os.workflow import parse_stages
+    _two_testers(seeded)
+    seeded.write("DELETE FROM project_agent_roles WHERE agent_id='agy1'")
+    seeded.write("INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+                 "VALUES('proj1','agy1','reviewer',10)")
+    seeded.write("UPDATE agents SET depleted_at=? WHERE id='grok1'", (now(),))
+    seeded.write("UPDATE jobs SET stage='test', default_agent_id='grok1',"
+                 "agent_override='agy1' WHERE id='job1'")
+    stage = parse_stages([{"name": "test", "role": "tester", "gate": "auto"}])[0]
     picked = orch._agent_for_stage(seeded.one("SELECT * FROM jobs WHERE id='job1'"), stage)
     assert picked["id"] == "agy1"
 

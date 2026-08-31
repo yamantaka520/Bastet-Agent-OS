@@ -607,6 +607,10 @@ async def test_work_walks_back_when_the_same_stage_keeps_failing(orch, seeded):
     stage itself, and the tester re-ran the same failing test nine times over
     four hours while nobody touched the product code it was failing on. The
     second hand-back must reach someone earlier."""
+    for role in ("engineer", "reviewer", "tester"):
+        seeded.write(
+            "INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+            "VALUES('proj1','fakebot',?,0)", (role,))
     add_template(seeded, "dev", [
         {"name": "implement", "role": "engineer", "gate": "auto"},
         {"name": "review", "role": "reviewer", "gate": "agent-review",
