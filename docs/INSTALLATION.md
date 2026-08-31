@@ -8,7 +8,7 @@ Everyone else uses its WebUI or CLI over the network.
 
 | | |
 |---|---|
-| OS | Linux, macOS, or Windows |
+| OS | Linux or macOS control-plane host; Windows is supported as a WebUI client |
 | Python | 3.11 – 3.14 |
 | git | required — every run happens in a git worktree of the project's repo |
 | Node | **not** required on the host; the built UI is committed to the repo |

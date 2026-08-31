@@ -1,6 +1,6 @@
 # Compatibility
 
-Current version: 0.34.8
+Current version: 0.35.2
 
 ## Platforms
 
@@ -8,16 +8,16 @@ Current version: 0.34.8
 |---|---|
 | Linux (Ubuntu 24.04 / 26.04) | supported — the validation host runs Ubuntu 26.04 with a systemd user service |
 | macOS (Apple Silicon, Intel) | supported — primary development platform |
-| Windows 10/11 | runs (control plane + CLI), but the test suite is not green there yet — the CI leg is informational. Treat as experimental; container isolation needs Docker Desktop |
+| Windows 10/11 | supported as a WebUI client; native control-plane execution is not supported. Use a Linux host or Linux container/VM |
 
 ## Python
 
 | Version | Status |
 |---|---|
-| 3.14 | tested (host and development) |
-| 3.13 | supported |
-| 3.12 | supported |
-| 3.11 | minimum |
+| 3.14 | tested on Linux/macOS; validation host and primary development runtime |
+| 3.13 | tested on Linux |
+| 3.12 | tested on Linux and in the published image base |
+| 3.11 | tested on Linux/macOS; minimum |
 
 ## Executors
 

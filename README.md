@@ -16,7 +16,7 @@ Bastet is a **control plane, not another agent framework**. Execution comes from
 orchestrating agents that already exist; what Bastet adds is governance, a
 workflow engine that keeps going when things fail, and team memory.
 
-Linux · macOS · Windows · WebUI + CLI ·
+Linux · macOS control plane · Windows supported as a WebUI client ·
 [繁體中文說明](README.zh-Hant.md)
 
 ## Screenshots

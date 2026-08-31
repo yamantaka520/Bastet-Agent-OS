@@ -18,7 +18,7 @@ Bastet 是**控制平面，不是另一個 agent 框架**。執行力來自調�
 鎖定期間會暫停新派工、重試、PM 介入與 driver 恢復，但既有 run 可自然完成；
 重啟驗證後再用 `bastet maintenance leave` 恢復派工。
 
-Linux · macOS · Windows · WebUI + CLI ·
+Linux · macOS 控制平面 · Windows 可作為 WebUI 用戶端 ·
 [English](README.md)
 
 ## 畫面展示

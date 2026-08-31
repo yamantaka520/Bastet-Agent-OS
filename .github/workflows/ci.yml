@@ -11,18 +11,18 @@ on:
 
 jobs:
   test:
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.11", "3.12"]
+        include:
+          - { os: ubuntu-latest, python: "3.11" }
+          - { os: ubuntu-latest, python: "3.12" }
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: ubuntu-latest, python: "3.14" }
+          - { os: macos-latest, python: "3.11" }
+          - { os: macos-latest, python: "3.14" }
     runs-on: ${{ matrix.os }}
-    # Windows is red across ~35 tests: the fake-executor fixtures are POSIX
-    # shell scripts, several assertions assume forward-slash paths, and CJK
-    # error messages hit cp1252 logs. Real Windows support needs its own pass
-    # (tracked in PROGRESS.md) — until then the leg reports but does not block,
-    # because a check that is always red checks nothing.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -35,6 +35,23 @@ jobs:
       - name: Test
         run: pytest -q
 
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - name: Built WebUI must match the wheel payload
+        run: git diff --exit-code -- src/bastet_agent_os/ui_dist
+
   # The leg that would have caught 0.23.2: inside a python:3.12-slim container —
   # the base of the image we publish — the interpreter lives in /usr/local/bin,
   # which is also one of Bastet's TOOL_DIRS. Hosted runners keep python in
@@ -42,6 +59,7 @@ jobs:
   # shipped artefact does.
   image-base:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container: python:3.12-slim
     steps:
       - name: git (worktrees are the unit of work, and checkout wants it)

@@ -163,8 +163,9 @@ Last updated: 2026-08-31
   6. **Interrupt the dead, not the merely quiet** (0.30.0): liveness decides
      interruption, so a 20-minute test is no longer executed at the 15-minute
      silence mark.
-- Test suite: **601 passing**, `ruff` clean; CI green on Linux/macOS and
-  inside the shipped Docker base image (Windows legs are declarative).
+- Test suite: **704 passing**, `ruff` clean; blocking CI covers Python 3.11–3.14
+  on Linux, the minimum/latest pair on macOS, the shipped Docker base image, and
+  a reproducible TypeScript/ESLint/Web build whose output must match the wheel.
 - Releases are automated: a `v*` tag publishes to PyPI (Trusted Publishing) and
   pushes the multi-arch image to Docker Hub.
 - Distribution: [PyPI](https://pypi.org/project/bastet-agent-os/) (wheel carries
@@ -240,9 +241,6 @@ feature is confirmed against real vendor CLIs before release:
 ## Open items
 
 - **Telegram bot token** from an early session should still be rotated.
-- **The Windows CI leg is red by declaration** (`continue-on-error`): ~35 tests
-  assume POSIX fake-executor scripts, forward-slash paths and 0600 bits. Real
-  Windows support needs its own pass.
 - **GitHub's hosted runners occasionally never pick up a job** ("not acquired by
   Runner of type hosted"), which cancels it at ~15 min and reddens the run. Not
   a repository failure — re-run the job.
