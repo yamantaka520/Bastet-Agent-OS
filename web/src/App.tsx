@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { api, getToken, setToken, openEventSocket, Me } from "./api";
 import { LanguagePicker, useT } from "./i18n";
 import { onEnterSubmit, setDisplayZone } from "./ui";
-import AdminPage from "./pages/Admin";
-import AuditPage from "./pages/Audit";
-import BoardPage from "./pages/Board";
-import ChatPage from "./pages/Chat";
-import MemoryPage from "./pages/Memory";
-import ProjectPage from "./pages/ProjectPage";
-import OrgPage from "./pages/Org";
-import ResourcesPage from "./pages/Resources";
-import TemplatesPage from "./pages/Templates";
+
+// Each workbench surface is substantial and most sessions visit only a few.
+// Route-like lazy boundaries keep login and the initial board payload small
+// without adding a router or changing the current tab state contract.
+const AdminPage = lazy(() => import("./pages/Admin"));
+const AuditPage = lazy(() => import("./pages/Audit"));
+const BoardPage = lazy(() => import("./pages/Board"));
+const ChatPage = lazy(() => import("./pages/Chat"));
+const MemoryPage = lazy(() => import("./pages/Memory"));
+const ProjectPage = lazy(() => import("./pages/ProjectPage"));
+const OrgPage = lazy(() => import("./pages/Org"));
+const ResourcesPage = lazy(() => import("./pages/Resources"));
+const TemplatesPage = lazy(() => import("./pages/Templates"));
 
 const ROLE_RANK: Record<string, number> = { viewer: 0, operator: 1, admin: 2 };
 
@@ -140,18 +144,20 @@ function Workbench({ me }: { me: Me }) {
                 onClick={() => setRefreshKey((k) => k + 1)}>↻</button>
       </header>
 
-      {tab === "board" && (projectId
-        ? <BoardPage projectId={projectId} refreshKey={refreshKey} canOperate={canOperate} />
-        : <div className="page"><p className="muted">{t("app.noProjects")}</p></div>)}
-      {tab === "chat" && <ChatPage canOperate={canOperate} refreshKey={refreshKey} />}
-      {tab === "project" && <ProjectPage canOperate={canOperate} isAdmin={isAdmin}
-                                         refreshKey={refreshKey} />}
-      {tab === "resources" && <ResourcesPage isAdmin={isAdmin} refreshKey={refreshKey} />}
-      {tab === "org" && <OrgPage canOperate={canOperate} refreshKey={refreshKey} />}
-      {tab === "templates" && <TemplatesPage canOperate={canOperate} refreshKey={refreshKey} />}
-      {tab === "memory" && <MemoryPage />}
-      {tab === "admin" && isAdmin && <AdminPage refreshKey={refreshKey} />}
-      {tab === "audit" && <AuditPage refreshKey={refreshKey} />}
+      <Suspense fallback={<div className="center">…</div>}>
+        {tab === "board" && (projectId
+          ? <BoardPage projectId={projectId} refreshKey={refreshKey} canOperate={canOperate} />
+          : <div className="page"><p className="muted">{t("app.noProjects")}</p></div>)}
+        {tab === "chat" && <ChatPage canOperate={canOperate} refreshKey={refreshKey} />}
+        {tab === "project" && <ProjectPage canOperate={canOperate} isAdmin={isAdmin}
+                                           refreshKey={refreshKey} />}
+        {tab === "resources" && <ResourcesPage isAdmin={isAdmin} refreshKey={refreshKey} />}
+        {tab === "org" && <OrgPage canOperate={canOperate} refreshKey={refreshKey} />}
+        {tab === "templates" && <TemplatesPage canOperate={canOperate} refreshKey={refreshKey} />}
+        {tab === "memory" && <MemoryPage />}
+        {tab === "admin" && isAdmin && <AdminPage refreshKey={refreshKey} />}
+        {tab === "audit" && <AuditPage refreshKey={refreshKey} />}
+      </Suspense>
 
       <footer>
         {feed.map((line, i) => <div key={i} className="feed-line">{line}</div>)}
