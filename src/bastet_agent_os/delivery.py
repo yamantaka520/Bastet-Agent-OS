@@ -178,7 +178,8 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
                 if parallelism < 1 or parallelism > 8:
                     raise ValueError("apple_upload_parallelism must be between 1 and 8")
                 for field_name in (
-                        "apple_required_locales", "apple_metadata_required_fields"):
+                        "apple_required_locales", "apple_metadata_required_fields",
+                        "apple_required_screenshot_display_types"):
                     raw_value = profile.get(field_name)
                     if raw_value is not None and not isinstance(raw_value, (str, list)):
                         raise ValueError(f"{field_name} must be a comma-separated string or list")
@@ -199,6 +200,9 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
                 if goal != "uploaded" and not fields:
                     raise ValueError(
                         "submitted App Store delivery requires metadata fields")
+                require_screenshots = profile.get("apple_require_screenshots", True)
+                if not isinstance(require_screenshots, bool):
+                    raise ValueError("apple_require_screenshots must be a boolean")
         try:
             interval = int(profile.get("poll_interval_seconds") or 300)
         except (TypeError, ValueError) as exc:

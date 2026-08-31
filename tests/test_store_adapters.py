@@ -77,6 +77,40 @@ def _apple_metadata(*, whats_new: str = "Safer delivery.",
     }
 
 
+def _apple_app_infos() -> dict:
+    return {"data": [{
+        "type": "appInfos", "id": "app-info-1",
+        "attributes": {"state": "PREPARE_FOR_SUBMISSION"},
+    }]}
+
+
+def _apple_info_localizations(*locales: str) -> dict:
+    return {"data": [{
+        "type": "appInfoLocalizations", "id": f"app-info-{locale}",
+        "attributes": {"locale": locale},
+    } for locale in (locales or ("en-US",))]}
+
+
+def _apple_screenshots(*, state: str = "COMPLETE",
+                       display_type: str = "APP_IPHONE_67") -> dict:
+    return {
+        "data": [{
+            "type": "appScreenshotSets", "id": "screenshot-set-1",
+            "attributes": {"screenshotDisplayType": display_type},
+            "relationships": {"appScreenshots": {
+                "data": [{"type": "appScreenshots", "id": "screenshot-1"}],
+            }},
+        }],
+        "included": [{
+            "type": "appScreenshots", "id": "screenshot-1",
+            "attributes": {
+                "fileName": "screen.png",
+                "assetDeliveryState": {"state": state},
+            },
+        }],
+    }
+
+
 def test_app_store_adapter_signs_request_and_normalizes_exact_version():
     private_key = ec.generate_private_key(ec.SECP256R1())
     seen = {}
@@ -353,6 +387,12 @@ def test_app_store_builtin_submitter_creates_version_attaches_build_and_submits_
             assert request.url.params["include"] == \
                 "appStoreVersionLocalizations,appStoreReviewDetail"
             return httpx.Response(200, json=_apple_metadata())
+        if path == "/v1/apps/123456/appInfos":
+            return httpx.Response(200, json=_apple_app_infos())
+        if path == "/v1/appInfos/app-info-1/appInfoLocalizations":
+            return httpx.Response(200, json=_apple_info_localizations())
+        if path == "/v1/appStoreVersionLocalizations/localization-1/appScreenshotSets":
+            return httpx.Response(200, json=_apple_screenshots())
         if path.endswith("/apps/123456/reviewSubmissions"):
             assert request.url.params["include"] == "items"
             assert request.url.params["fields[reviewSubmissionItems]"] == \
@@ -382,6 +422,7 @@ def test_app_store_builtin_submitter_creates_version_attaches_build_and_submits_
     receipt = adapter.submit_app_store({
         "provider": "app_store_connect", "app_id": "123456",
         "build_number": "87", "platform": "ios", "release_goal": "submitted",
+        "apple_required_screenshot_display_types": "APP_IPHONE_67",
     }, {
         "commit_sha": "a" * 40, "version": "1.4.0",
         "target": "mobile-production", "idempotency_key": "stable-key",
@@ -392,7 +433,8 @@ def test_app_store_builtin_submitter_creates_version_attaches_build_and_submits_
     })
 
     assert [request.method for request in requests] == [
-        "GET", "GET", "POST", "PATCH", "GET", "GET", "POST", "POST", "PATCH"]
+        "GET", "GET", "POST", "PATCH", "GET", "GET", "GET", "GET",
+        "GET", "POST", "POST", "PATCH"]
     assert receipt["app_store_version_id"] == "version-7"
     assert receipt["build_id"] == "build-87"
     assert receipt["review_submission_id"] == "review-1"
@@ -402,6 +444,15 @@ def test_app_store_builtin_submitter_creates_version_attaches_build_and_submits_
         "required_fields": ["description", "supportUrl", "whatsNew"],
         "review_contact": True,
         "demo_account_required": False,
+        "app_info_id": "app-info-1",
+        "localization_parity": True,
+        "screenshots": {
+            "required": True,
+            "required_display_types": ["APP_IPHONE_67"],
+            "locales": {"en-US": {
+                "complete": 1, "display_types": ["APP_IPHONE_67"],
+            }},
+        },
     }
 
 
@@ -446,6 +497,59 @@ def test_app_store_metadata_gate_blocks_review_mutation_with_exact_missing_field
     assert "appStoreReviewDetail.demoAccountPassword" in message
     assert [request.url.path for request in requests] == [
         "/v1/builds", "/v1/appStoreVersions", "/v1/appStoreVersions/version-7"]
+
+
+@pytest.mark.parametrize(
+    ("app_info_locales", "screenshot_state", "missing"),
+    [
+        (("en-US", "zh-Hant"), "COMPLETE", "localization parity"),
+        (("en-US",), "UPLOAD_COMPLETE", "en-US.appScreenshotSets"),
+    ],
+)
+def test_app_store_metadata_gate_requires_locale_parity_and_processed_screenshots(
+        app_info_locales, screenshot_state, missing):
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        if path == "/v1/builds":
+            return httpx.Response(200, json={"data": [{"id": "build-87"}]})
+        if path == "/v1/appStoreVersions":
+            return httpx.Response(200, json={"data": [{
+                "id": "version-7",
+                "relationships": {"build": {"data": {"id": "build-87"}}},
+            }]})
+        if path == "/v1/appStoreVersions/version-7":
+            return httpx.Response(200, json=_apple_metadata())
+        if path == "/v1/apps/123456/appInfos":
+            return httpx.Response(200, json=_apple_app_infos())
+        if path == "/v1/appInfos/app-info-1/appInfoLocalizations":
+            return httpx.Response(
+                200, json=_apple_info_localizations(*app_info_locales))
+        if path.endswith("/localization-1/appScreenshotSets"):
+            return httpx.Response(
+                200, json=_apple_screenshots(state=screenshot_state))
+        return httpx.Response(500)
+
+    adapter = StoreStatusAdapter(
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        apple_api_url="https://apple.test", now=lambda: 1000)
+    with pytest.raises(StoreAdapterError, match=missing):
+        adapter.submit_app_store({
+            "provider": "app_store_connect", "app_id": "123456",
+            "build_number": "87", "platform": "IOS", "release_goal": "submitted",
+        }, {
+            "commit_sha": "a" * 40, "version": "1.4.0",
+            "target": "mobile-production", "idempotency_key": "stable-key",
+        }, {
+            "APP_STORE_CONNECT_KEY_ID": "key",
+            "APP_STORE_CONNECT_ISSUER_ID": "issuer",
+            "APP_STORE_CONNECT_PRIVATE_KEY": _pem(private_key),
+        })
+
+    assert not any(request.method != "GET" for request in requests)
 
 
 def test_app_store_builtin_uploader_reserves_and_uploads_parts_in_parallel(tmp_path):
@@ -604,6 +708,12 @@ def test_app_store_builtin_recovery_requires_submitted_review_for_submitted_goal
             }]})
         if request.url.path == "/v1/appStoreVersions/version-7":
             return httpx.Response(200, json=_apple_metadata())
+        if request.url.path == "/v1/apps/123456/appInfos":
+            return httpx.Response(200, json=_apple_app_infos())
+        if request.url.path == "/v1/appInfos/app-info-1/appInfoLocalizations":
+            return httpx.Response(200, json=_apple_info_localizations())
+        if request.url.path.endswith("/localization-1/appScreenshotSets"):
+            return httpx.Response(200, json=_apple_screenshots())
         return httpx.Response(200, json={
             "data": [{
                 "type": "reviewSubmissions", "id": "review-1",
@@ -634,7 +744,7 @@ def test_app_store_builtin_recovery_requires_submitted_review_for_submitted_goal
         "APP_STORE_CONNECT_PRIVATE_KEY": _pem(private_key),
     })
 
-    assert methods == ["GET", "GET", "GET", "GET"]
+    assert methods == ["GET", "GET", "GET", "GET", "GET", "GET", "GET"]
     assert receipt["review_submission_id"] == "review-1"
     assert receipt["metadata_readiness"]["status"] == "ready"
 
@@ -907,4 +1017,8 @@ def test_builtin_app_store_submission_promotes_processed_build_without_deploy_co
     with pytest.raises(ValueError, match="requires metadata fields"):
         validate_profile({
             **upload_profile, "apple_metadata_required_fields": "",
+        }, "production")
+    with pytest.raises(ValueError, match="apple_require_screenshots must be a boolean"):
+        validate_profile({
+            **upload_profile, "apple_require_screenshots": "yes",
         }, "production")

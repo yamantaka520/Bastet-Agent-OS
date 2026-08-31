@@ -608,7 +608,11 @@ class StoreStatusAdapter:
             if not locale or locale in locale_rows:
                 raise StoreAdapterError(
                     "App Store Connect version localizations are ambiguous")
-            locale_rows[locale] = attributes
+            localization_id = str(row.get("id") or "")
+            if not localization_id:
+                raise StoreAdapterError(
+                    "App Store Connect version localization has no id")
+            locale_rows[locale] = {**attributes, "_resource_id": localization_id}
         required_locales = _profile_list(profile, "apple_required_locales")
         checked_locales = required_locales or sorted(locale_rows)
         if not checked_locales:
@@ -645,6 +649,14 @@ class StoreStatusAdapter:
         if missing:
             raise StoreAdapterError(
                 "App Store metadata readiness failed: " + ", ".join(missing))
+        app_info = self._apple_app_info_locales(profile, headers)
+        version_locales = sorted(locale_rows)
+        if version_locales != app_info["locales"]:
+            raise StoreAdapterError(
+                "App Store metadata readiness failed: localization parity "
+                f"version={version_locales}, appInfo={app_info['locales']}")
+        screenshots = self._apple_screenshot_readiness(
+            profile, locale_rows, headers)
         return {
             "status": "ready",
             "locales": checked_locales,
@@ -652,6 +664,135 @@ class StoreStatusAdapter:
             "review_contact": True,
             "demo_account_required": review_attributes.get(
                 "demoAccountRequired") is True,
+            "app_info_id": app_info["id"],
+            "localization_parity": True,
+            "screenshots": screenshots,
+        }
+
+    def _apple_app_info_locales(
+            self, profile: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+        app_id = quote(str(profile["app_id"]), safe="")
+        payload = _response_json(self.client.get(
+            f"{self.apple_api_url}/v1/apps/{app_id}/appInfos",
+            params={"fields[appInfos]": "state", "limit": "50"},
+            headers=headers), "App Store Connect")
+        rows = payload.get("data") or []
+        if not isinstance(rows, list):
+            raise StoreAdapterError("App Store Connect app infos response is invalid")
+        configured_id = str(profile.get("apple_app_info_id") or "").strip()
+        if configured_id:
+            matches = [row for row in rows if isinstance(row, dict)
+                       and str(row.get("id") or "") == configured_id]
+            if len(matches) != 1:
+                raise StoreAdapterError(
+                    "App Store metadata readiness failed: apple_app_info_id "
+                    "does not identify exactly one app info")
+            app_info_id = configured_id
+        elif len(rows) == 1 and isinstance(rows[0], dict) and rows[0].get("id"):
+            app_info_id = str(rows[0]["id"])
+        else:
+            raise StoreAdapterError(
+                "App Store metadata readiness failed: apple_app_info_id is required "
+                "when App Store Connect returns multiple app infos")
+        localization_payload = _response_json(self.client.get(
+            f"{self.apple_api_url}/v1/appInfos/"
+            f"{quote(app_info_id, safe='')}/appInfoLocalizations",
+            params={"fields[appInfoLocalizations]": "locale", "limit": "200"},
+            headers=headers), "App Store Connect")
+        localizations = localization_payload.get("data") or []
+        if not isinstance(localizations, list):
+            raise StoreAdapterError(
+                "App Store Connect app info localizations response is invalid")
+        locales = []
+        for row in localizations:
+            attributes = row.get("attributes") if isinstance(row, dict) else None
+            locale = str((attributes or {}).get("locale") or "") \
+                if isinstance(attributes, dict) else ""
+            if not locale or locale in locales:
+                raise StoreAdapterError(
+                    "App Store Connect app info localizations are ambiguous")
+            locales.append(locale)
+        return {"id": app_info_id, "locales": sorted(locales)}
+
+    def _apple_screenshot_readiness(
+            self, profile: dict[str, Any], locale_rows: dict[str, dict[str, Any]],
+            headers: dict[str, str]) -> dict[str, Any]:
+        if profile.get("apple_require_screenshots", True) is False:
+            return {"required": False, "locales": {}}
+        required_types = _profile_list(
+            profile, "apple_required_screenshot_display_types")
+        evidence: dict[str, dict[str, Any]] = {}
+        missing = []
+        for locale, localization in sorted(locale_rows.items()):
+            localization_id = str(localization.get("_resource_id") or "")
+            if not localization_id:
+                raise StoreAdapterError(
+                    "App Store Connect version localization has no id")
+            payload = _response_json(self.client.get(
+                f"{self.apple_api_url}/v1/appStoreVersionLocalizations/"
+                f"{quote(localization_id, safe='')}/appScreenshotSets",
+                params={
+                    "include": "appScreenshots",
+                    "fields[appScreenshotSets]":
+                        "screenshotDisplayType,appScreenshots",
+                    "fields[appScreenshots]":
+                        "fileName,assetDeliveryState,appScreenshotSet",
+                    "limit": "200",
+                    "limit[appScreenshots]": "50",
+                }, headers=headers), "App Store Connect")
+            sets = payload.get("data") or []
+            included = payload.get("included") or []
+            if not isinstance(sets, list) or not isinstance(included, list):
+                raise StoreAdapterError(
+                    "App Store Connect screenshot response is invalid")
+            screenshots = {
+                str(row.get("id") or ""): row for row in included
+                if isinstance(row, dict) and row.get("type") == "appScreenshots"
+            }
+            complete_by_type: dict[str, int] = {}
+            for screenshot_set in sets:
+                if not isinstance(screenshot_set, dict):
+                    raise StoreAdapterError(
+                        "App Store Connect screenshot set is invalid")
+                attributes = screenshot_set.get("attributes") or {}
+                relationships = screenshot_set.get("relationships") or {}
+                display_type = str(attributes.get("screenshotDisplayType") or "") \
+                    if isinstance(attributes, dict) else ""
+                refs = (((relationships.get("appScreenshots") or {}).get("data"))
+                        if isinstance(relationships, dict) else None) or []
+                if not display_type or not isinstance(refs, list):
+                    raise StoreAdapterError(
+                        "App Store Connect screenshot set is ambiguous")
+                count = 0
+                for ref in refs:
+                    screenshot = screenshots.get(str((ref or {}).get("id") or "")) \
+                        if isinstance(ref, dict) else None
+                    screenshot_attributes = (screenshot or {}).get("attributes") or {}
+                    state = (screenshot_attributes.get("assetDeliveryState") or {}
+                             if isinstance(screenshot_attributes, dict) else {})
+                    if isinstance(state, dict) and state.get("state") == "COMPLETE":
+                        count += 1
+                if count:
+                    complete_by_type[display_type] = \
+                        complete_by_type.get(display_type, 0) + count
+            if required_types:
+                for display_type in required_types:
+                    if not complete_by_type.get(display_type):
+                        missing.append(
+                            f"{locale}.appScreenshotSets.{display_type}")
+            elif not complete_by_type:
+                missing.append(f"{locale}.appScreenshotSets")
+            evidence[locale] = {
+                "complete": sum(complete_by_type.values()),
+                "display_types": sorted(complete_by_type),
+            }
+        if missing:
+            raise StoreAdapterError(
+                "App Store metadata readiness failed: " + ", ".join(missing))
+        return {
+            "required": True,
+            "required_display_types": required_types,
+            "locales": evidence,
         }
 
     def _upload_app_store_build(

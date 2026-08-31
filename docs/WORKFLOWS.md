@@ -309,6 +309,10 @@ recovery—the adapter reads version localizations and review detail. A configur
 Bastet policy defaults to `description`, `supportUrl`, and `whatsNew`, optionally
 requires named locales, always requires review contact, and conditionally requires demo
 credentials. It records the successful check in the receipt and never authors metadata.
+It also requires the complete App Store Version and selected App Info locale sets to be
+identical. Multiple App Info records require an explicit `apple_app_info_id`. Every
+version locale must have at least one `COMPLETE` screenshot by default; profiles may
+name platform-specific display types, while `UPLOAD_COMPLETE` remains non-ready.
 
 If `artifact_path` names an `.ipa` (iOS/tvOS/visionOS) or `.pkg` (macOS), the adapter
 first creates or reuses the exact Build Upload and its single asset file. Apple-issued
@@ -330,6 +334,9 @@ Official provider references: [Apple app and submission statuses](https://develo
 [Apple version localization fields](https://developer.apple.com/documentation/appstoreconnectapi/appstoreversionlocalization/attributes-data.dictionary),
 [Apple version localizations](https://developer.apple.com/documentation/appstoreconnectapi/get-v1-appstoreversions-_id_-appstoreversionlocalizations),
 [Apple review details](https://developer.apple.com/documentation/appstoreconnectapi/read_the_app_store_review_details_resource_information_of_an_app_store_version),
+[Apple App Info localizations](https://developer.apple.com/documentation/appstoreconnectapi/get-v1-appinfos-_id_-appinfolocalizations),
+[Apple screenshot sets](https://developer.apple.com/documentation/appstoreconnectapi/get-v1-appstoreversionlocalizations-_id_-appscreenshotsets),
+[Apple media asset states](https://developer.apple.com/documentation/appstoreconnectapi/appmediaassetstate),
 [Google Play edits](https://developers.google.com/android-publisher/edits),
 [Google Play track release states](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks),
 and [Google Play managed publishing](https://support.google.com/googleplay/android-developer/answer/9859654).

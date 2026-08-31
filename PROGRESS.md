@@ -79,7 +79,10 @@ Last updated: 2026-08-31
   restart-safe continuation into the existing review path. Apple review submission now
   has a read-only metadata evidence gate: configurable exact locales and localized
   fields, required review contact, conditional demo credentials, exact missing paths,
-  and recovery-time revalidation are recorded before review mutation. Validation: 677 Python tests,
+  and recovery-time revalidation are recorded before review mutation. The same gate now
+  proves exact App Info/version locale parity and requires provider-processed screenshot
+  evidence per version locale, with configurable display types and no ambiguous App Info
+  guessing. Validation: 679 Python tests,
   ruff clean, Web production build clean.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month

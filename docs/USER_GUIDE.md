@@ -198,6 +198,15 @@ demo credentials must be present. Missing paths fail closed and readiness eviden
 saved in the submission receipt. This is an explicit Bastet policy, not a claim that
 Apple universally requires the same text fields for every app.
 
+Bastet also lists the app's App Info records and requires the App Info localization set
+to equal the complete version-localization set, matching Apple's submission rule. If
+Apple returns more than one App Info record, set `apple_app_info_id`; the adapter will
+not guess. Screenshots are required by default: every version locale needs at least one
+screenshot whose provider state is `COMPLETE`. Use
+`apple_required_screenshot_display_types` for platform-specific display targets, or
+explicitly set `apple_require_screenshots=false` only when another release gate owns
+that evidence. `UPLOAD_COMPLETE` is still processing and does not pass.
+
 To upload the Apple binary through the same adapter, add a worktree-relative
 `artifact_path`: `.ipa` for iOS/tvOS/visionOS or `.pkg` for macOS. Optional
 `artifact_sha256` pins the expected file digest; `apple_upload_parallelism` accepts
@@ -215,8 +224,8 @@ continues to version attachment and review submission. `FAILED`, duplicate ident
 conflicting files/checksums, unsafe operations, gaps, overlaps, or provider errors fail
 closed instead of creating another upload.
 
-This gate does not yet verify screenshots or parity with App Information locales; keep
-those in the release checklist until their provider relationships are covered.
+The gate checks existence, display type and provider processing state; it does not
+visually judge screenshot content or automate asset creation.
 
 For a Google Play internal-track release, `submission_adapter=official_api` replaces
 that external command with Bastet's narrowly scoped submitter. Configure:

@@ -63,6 +63,9 @@ type DeliveryProfile = { target_branch?: string; target?: string;
   apple_upload_parallelism?: string;
   apple_required_locales?: string;
   apple_metadata_required_fields?: string;
+  apple_app_info_id?: string;
+  apple_require_screenshots?: boolean;
+  apple_required_screenshot_display_types?: string;
   package_name?: string; track?: string; version_code?: string;
   artifact_path?: string; artifact_sha256?: string;
   google_release_status?: "draft" | "completed";
@@ -853,6 +856,37 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
                                    ...draft.deliveryProfile,
                                    apple_metadata_required_fields: e.target.value,
                                  } })} />
+                        </label>
+                        <label className="res-field">
+                          <span>{t("project.delivery.apple_app_info_id")}</span>
+                          <input value={draft.deliveryProfile.apple_app_info_id ?? ""}
+                                 disabled={!canOperate}
+                                 onChange={(e) => patch({ deliveryProfile: {
+                                   ...draft.deliveryProfile,
+                                   apple_app_info_id: e.target.value,
+                                 } })} />
+                        </label>
+                        <label className="res-field">
+                          <span>{t("project.delivery.apple_required_screenshot_display_types")}</span>
+                          <input value={draft.deliveryProfile
+                                         .apple_required_screenshot_display_types ?? ""}
+                                 disabled={!canOperate}
+                                 placeholder="APP_IPHONE_67,APP_IPAD_PRO_3GEN_129"
+                                 onChange={(e) => patch({ deliveryProfile: {
+                                   ...draft.deliveryProfile,
+                                   apple_required_screenshot_display_types: e.target.value,
+                                 } })} />
+                        </label>
+                        <label className="res-field res-check">
+                          <input type="checkbox"
+                                 checked={draft.deliveryProfile
+                                   .apple_require_screenshots ?? true}
+                                 disabled={!canOperate}
+                                 onChange={(e) => patch({ deliveryProfile: {
+                                   ...draft.deliveryProfile,
+                                   apple_require_screenshots: e.target.checked,
+                                 } })} />
+                          <span>{t("project.delivery.apple_require_screenshots")}</span>
                         </label>
                       </>
                     )}

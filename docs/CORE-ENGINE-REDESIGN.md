@@ -387,6 +387,18 @@ locales and fields into the immutable receipt and reports exact missing paths be
 any review mutation. Metadata authoring, screenshots, and App Information locale parity
 remain separate work rather than being silently inferred.
 
+The twenty-sixth follows the provider relationships instead of accepting a text-only
+facsimile of readiness. It lists App Info and requires its complete locale set to equal
+the App Store Version locale set, as Apple's submission contract specifies; ambiguous
+App Info records require a configured exact ID. For every version localization it then
+reads screenshot sets with included screenshots and accepts only provider-processed
+`COMPLETE` assets. At least one processed screenshot per locale is the default, while
+profiles can name platform-specific display types or explicitly delegate screenshot
+evidence to another gate. `UPLOAD_COMPLETE`, missing sets/types, locale mismatch,
+ambiguous provider objects and malformed responses all fail before review mutation.
+The receipt preserves App Info identity, parity, screenshot counts and display types;
+visual-content review and screenshot authoring remain outside the trusted adapter.
+
 Provider adapters normalize official state into milestones while retaining the raw
 status. Apple distinguishes `WAITING_FOR_REVIEW`, `IN_REVIEW`,
 `PENDING_DEVELOPER_RELEASE`, and `READY_FOR_DISTRIBUTION`; Google Play track releases

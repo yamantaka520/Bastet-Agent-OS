@@ -77,8 +77,9 @@ worktree-contained `.ipa` or macOS `.pkg` lets the same adapter create/reuse an 
 Build Upload, reserve the file, upload Apple-provided byte ranges concurrently, commit
 its SHA-256, and park durably while Apple processes it. Before review mutation, Bastet
 also reads the exact version localizations and review contact, enforcing a configurable
-metadata-readiness policy and recording the evidence in the receipt. Public Google
-tracks still require an explicit submitter.
+metadata-readiness policy, proves App Info locale parity, and requires processed
+screenshot evidence for every version locale before recording the evidence in the
+receipt. Public Google tracks still require an explicit submitter.
 
 ## Why
 
