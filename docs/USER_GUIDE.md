@@ -345,6 +345,9 @@ The workflow design desk:
 Stage options when editing: role, gate, gate command, read-only, isolation
 (worktree / container), `max_retries` (executor-level retries), and the rework
 controls: `on_fail` (`rework` | `block`), `rework_target`, `max_cycles`.
+Long-running stages should set `timeout_s` explicitly. The built-in web preset
+gives both its browser precheck reviewer and E2E stage 7200 seconds, so long
+browser suites are not killed by the one-hour dispatch default.
 
 ### 記憶 (Memory)
 

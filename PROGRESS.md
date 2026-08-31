@@ -48,6 +48,11 @@ Last updated: 2026-08-31
   assignments to the same project role form an ordered backup chain. Runtime,
   recovery routing and whole-graph admission all reject an unrelated-role
   fallback; cross-role takeover requires an explicit, audited override.
+  The web preset's browser precheck and E2E stages now declare a two-hour budget
+  instead of silently inheriting one hour. The WebUI build is ESLint-warning-free,
+  obsolete module-wide asyncio markers are gone, Starlette tests use its new
+  `httpx2` backend, and the login wizard uses subprocess plus `openpty()` instead
+  of calling the unsafe/deprecated `forkpty()` path from a multithreaded server.
   Telegram now renders graph-node starts/passes, handoff reviews/challenges,
   delivery transitions and evidence-grounded completion summaries. `/job` reads
   the durable task snapshot; `/ask` gives the configured responder a task-scoped
@@ -225,10 +230,6 @@ feature is confirmed against real vendor CLIs before release:
   request branch-only delivery still leave merge authority to a human. Development
   templates instead require the verified `integration` or `production` path.
 - **Telegram bot token** from an early session should still be rotated.
-- **The E2E stage's own time budget is undeclared** on the live 網頁開發 preset.
-  Since 0.30.0 a silent stage is bounded by `timeout_s` rather than by the
-  supervisor's patience, so long suites (20-level FPS runs) should say how long
-  they may take.
 - **The Windows CI leg is red by declaration** (`continue-on-error`): ~35 tests
   assume POSIX fake-executor scripts, forward-slash paths and 0600 bits. Real
   Windows support needs its own pass.

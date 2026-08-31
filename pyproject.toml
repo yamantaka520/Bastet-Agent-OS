@@ -35,7 +35,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "ruff"]
+dev = ["pytest", "pytest-asyncio", "ruff", "httpx2"]
 sdk = ["claude-agent-sdk"]     # claude-sdk executor (in-run interactions)
 keyring = ["keyring"]
 

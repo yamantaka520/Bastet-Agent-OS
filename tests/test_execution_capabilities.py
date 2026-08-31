@@ -170,3 +170,7 @@ def test_web_preset_declares_trusted_browser_requirement():
     preset = next(item for item in PRESETS if item["id"] == "web-dev")
     e2e = next(item for item in preset["stages"] if item["name"] == "E2E 測試")
     assert e2e["requires"] == ["browser.playwright"]
+    assert e2e["timeout_s"] == 7200
+    accessibility = next(
+        item for item in preset["stages"] if item["name"] == "響應式與無障礙檢查")
+    assert accessibility["timeout_s"] == 7200

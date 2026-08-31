@@ -13,6 +13,7 @@ import asyncio
 import os
 import re
 import signal
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -43,6 +44,7 @@ class LoginSession:
     kind: str
     pid: int
     master_fd: int
+    process: subprocess.Popen | None = None
     buffer: bytes = b""
     strip_alt_screen: bool = False   # web-hostile sequence filter
     subscribers: set = field(default_factory=set)
@@ -60,18 +62,24 @@ class LoginSessionManager:
         if sys.platform == "win32":
             raise RuntimeError("WebUI 登入精靈暫不支援 Windows — 請在終端執行登入指令")
         import fcntl
-        import pty
         import struct
         import termios
 
-        pid, master_fd = pty.fork()
-        if pid == 0:  # child: exec the login command in the PTY
-            os.environ.update(env)
-            os.environ.setdefault("TERM", "xterm-256color")
-            try:
-                os.execvp(argv[0], argv)
-            finally:
-                os._exit(127)
+        master_fd, slave_fd = os.openpty()
+        child_env = {**os.environ, **env}
+        child_env.setdefault("TERM", "xterm-256color")
+        try:
+            # subprocess uses Python's safe spawn path where available. Calling
+            # pty.fork() from FastAPI's multithreaded process is deprecated on
+            # Python 3.14 and can deadlock before exec.
+            process = subprocess.Popen(
+                argv, stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
+                env=child_env, start_new_session=True, close_fds=True)
+        except Exception:
+            os.close(master_fd)
+            raise
+        finally:
+            os.close(slave_fd)
 
         # full-screen TUIs need a window size or they stall/render blind
         winsize = struct.pack("HHHH", 30, 100, 0, 0)
@@ -80,8 +88,8 @@ class LoginSessionManager:
         except OSError:
             pass
 
-        session = LoginSession(id=new_id("lgn"), kind=kind, pid=pid,
-                               master_fd=master_fd,
+        session = LoginSession(id=new_id("lgn"), kind=kind, pid=process.pid,
+                               master_fd=master_fd, process=process,
                                strip_alt_screen=strip_alt_screen)
         self.sessions[session.id] = session
         loop = asyncio.get_running_loop()
@@ -111,10 +119,12 @@ class LoginSessionManager:
             return
         session.done = True
         asyncio.get_running_loop().remove_reader(session.master_fd)
-        try:
-            _, status = os.waitpid(session.pid, os.WNOHANG)
-            session.exit_code = os.waitstatus_to_exitcode(status)
-        except ChildProcessError:
+        if session.process:
+            try:
+                session.exit_code = session.process.wait(timeout=0.1)
+            except subprocess.TimeoutExpired:
+                session.exit_code = -1
+        else:
             session.exit_code = -1
         try:
             os.close(session.master_fd)
@@ -138,7 +148,7 @@ class LoginSessionManager:
         if session is None or session.done:
             return
         try:
-            os.kill(session.pid, signal.SIGTERM)
+            os.killpg(session.pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
 

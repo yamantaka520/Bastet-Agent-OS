@@ -275,6 +275,9 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
     useState<"branch" | "integration" | "production">("integration");
   const [repairDeliveryVersion, setRepairDeliveryVersion] = useState("");
   const [repairDeliveryError, setRepairDeliveryError] = useState("");
+  const imagePreviewNames = useMemo(
+    () => previews.filter((name) => /\.(png|jpe?g|gif|webp)$/i.test(name)),
+    [previews]);
 
   useEffect(() => {
     api<string[]>(`/api/jobs/${jobId}/previews`).then(setPreviews)
@@ -289,8 +292,7 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
     let dead = false;
     const urls: Record<string, string> = {};
     (async () => {
-      for (const name of previews) {
-        if (!/\.(png|jpe?g|gif|webp)$/i.test(name)) continue;
+      for (const name of imagePreviewNames) {
         try {
           const blob = await apiBlob(`/api/jobs/${jobId}/previews/${encodeURIComponent(name)}`);
           if (dead) return;
@@ -300,7 +302,7 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
       }
     })();
     return () => { dead = true; Object.values(urls).forEach(URL.revokeObjectURL); };
-  }, [previews.join("|"), jobId]);
+  }, [imagePreviewNames, jobId]);
 
   const addSupply = async () => {
     setSupplyError("");

@@ -10,12 +10,9 @@ to, and a loop that has spent its cycles without converging.
 import json
 from pathlib import Path
 
-import pytest
 from fake_executor import SCRIPT, add_template, req
 
 from bastet_agent_os.executors.base import RunResult
-
-pytestmark = pytest.mark.asyncio
 
 
 def audit(db, action: str) -> list[dict]:
