@@ -42,6 +42,10 @@ const SCOPE_KEY: Record<string, string> = { global: "sec.labelGlobal",
                                             team: "sec.labelTeam",
                                             project: "sec.labelProject" };
 const INSTALLABLE = "install_command";
+const MEDIA_ASYNC_FIELDS = ["async_status_path", "async_status_field",
+  "async_success_values", "async_failure_values", "async_result_url_field",
+  "async_download_hosts", "async_poll_interval_seconds", "async_max_attempts",
+  "async_max_bytes"];
 
 /** Mirrors resource_test._url_shape: the URL form decides which credential the
  *  resource needs, so the form can say which one to paste. */
@@ -395,6 +399,16 @@ function ResourceForm({ draft, setDraft, catalog, secrets, projects, teams, edit
       {draft.kind === "git" && (
         <p className="muted">{t(gitShape(draft.endpoint) === "ssh"
           ? "res.gitSshHint" : "res.gitHttpsHint")}</p>
+      )}
+
+      {fields.includes("async_status_path") && (
+        <details>
+          <summary>{t("res.asyncMedia")}</summary>
+          <p className="muted">{t("res.asyncMediaHint")}</p>
+          <div className="inline-form">
+            {MEDIA_ASYNC_FIELDS.map((field) => text(field, true))}
+          </div>
+        </details>
       )}
 
       <div className="inline-form">

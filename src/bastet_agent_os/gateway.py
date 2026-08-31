@@ -266,7 +266,7 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
             return JSONResponse({"error": f"upstream error: {type(exc).__name__}"},
                                 status_code=502)
         try:
-            if resp.status_code == 200:
+            if 200 <= resp.status_code < 300:
                 config = json.loads(resource["config_json"] or "{}")
                 calls = 1
                 model = None
@@ -291,6 +291,42 @@ def build_router(ctx: GatewayContext, upstream_transport: httpx.AsyncBaseTranspo
         content_headers = {k: v for k, v in resp.headers.items()
                            if k.lower() not in STRIP_RESPONSE_HEADERS}
         return Response(resp.content, status_code=resp.status_code, headers=content_headers)
+
+    @router.post("/v1/media/claims")
+    async def register_media_claim(request: Request):
+        """Hand an async vendor task to Bastet before the Agent exits."""
+        run = _auth(ctx, request)
+        if run is None:
+            return JSONResponse({"error": "invalid or expired run token"}, status_code=401)
+        if run["status"] not in ("queued", "running", "waiting_input"):
+            return JSONResponse({"error": "run is not active"}, status_code=401)
+        try:
+            payload = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        ref = str(payload.get("resource") or "").strip()
+        resource = ctx.db.one(
+            "SELECT * FROM resources WHERE (id=? OR name=?) AND enabled=1",
+            (ref, ref)) if ref else None
+        if resource is None:
+            return JSONResponse({"error": "enabled media resource not found"},
+                                status_code=403)
+        grant = resolve_grant(ctx.db, resource["id"], run["project_id"], run["agent_id"])
+        if grant is None:
+            return JSONResponse({"error": "no grant covers this resource"}, status_code=403)
+        from . import media_claims
+        try:
+            claim = media_claims.register(
+                ctx.db, run, resource,
+                provider_task_id=str(payload.get("task_id") or ""),
+                destination=str(payload.get("destination") or ""),
+                expires_at=str(payload.get("expires_at") or ""))
+        except media_claims.MediaClaimError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({
+            "id": claim["id"], "status": claim["status"],
+            "destination": claim["destination"],
+        }, status_code=201)
 
     @router.post("/v1/images/generations")
     async def images_endpoint(request: Request):

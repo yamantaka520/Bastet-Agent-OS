@@ -494,6 +494,22 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
           {mergeError && <p className="error">{mergeError}</p>}
         </div>
       )}
+      {!!job.media_claims?.length && (
+        <div className="notice">
+          <h3>{t("board.mediaClaims")}</h3>
+          {job.media_claims.map((claim) => (
+            <p className="card-meta" key={claim.id}>
+              {claim.status === "fetched" ? "✅" : claim.status === "failed" ? "🟠" : "⏳"}
+              {` ${claim.destination} · ${claim.status}`}
+              {claim.provider_status ? ` · ${claim.provider_status}` : ""}
+              {claim.attempts ? ` · ${claim.attempts} ${t("board.pollAttempts")}` : ""}
+              {claim.bytes ? ` · ${claim.bytes.toLocaleString()} B` : ""}
+              {claim.sha256 ? ` · sha256:${claim.sha256.slice(0, 12)}` : ""}
+              {claim.error ? ` · ${claim.error.slice(0, 240)}` : ""}
+            </p>
+          ))}
+        </div>
+      )}
       {canOperate && job.status === "done"
         && (!job.delivery_status || job.delivery_status === "not_required") && (
         <div className="approval">

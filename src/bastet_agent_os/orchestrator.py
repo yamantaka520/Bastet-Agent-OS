@@ -1284,6 +1284,10 @@ class Orchestrator:
 
         result, run_id = await self._run_stage_with_retries(
             job, stage, req, workdir_override=workdir)
+        from . import media_claims
+        if media_claims.park_if_pending(
+                self.db, job, run_id, stage.name, emit=self._emit):
+            return
         if result.status in EXEC_FAILURES:
             finish_node(self.db, job["id"], stage.name, status="failed",
                         head_commit=self._worktree_head(workdir))
@@ -1485,6 +1489,10 @@ class Orchestrator:
                 raise _MaintenanceParked
 
             result, run_id = await self._run_stage_with_retries(job, stage, req)
+            from . import media_claims
+            if media_claims.park_if_pending(
+                    self.db, job, run_id, stage.name, emit=self._emit):
+                return
             if result.status in EXEC_FAILURES:
                 from .execution_capabilities import classify_failure
                 failure_kind = classify_failure(result.summary or "")
@@ -2552,6 +2560,11 @@ class Orchestrator:
                 flavor = resource["api_flavor"]
             llm = {"flavor": flavor, "model": model} if (model or flavor) else None
             extra_env: dict[str, str] = self._project_secrets(job, run_id)
+            # The run-scoped token also authenticates non-LLM control calls
+            # such as durable async media claims. Exposing these two vars does
+            # not reroute a direct executor's inference through the Gateway.
+            extra_env["BASTET_GATEWAY_URL"] = self.gateway_url
+            extra_env["BASTET_RUN_TOKEN"] = token
             # granted pool resources: env vars + an MCP config the agent can use
             from . import resource_access
             access = resource_access.build(
@@ -2795,12 +2808,14 @@ class Orchestrator:
                 "（assets/、public/、或任務指定的路徑）。廠商回傳的下載 URL 有"
                 "時效，過期就什麼都不剩；工作流會把 worktree 的檔案 commit 到任務"
                 "分支並推到遠端 —— 只有真的存在的檔案會被保存。\n"
-                "**絕對不要把生成丟到背景然後結束回合**：這是一次性的 headless "
-                "執行，你結束的瞬間所有子行程一併回收，沒有任何『完成通知』會送達"
-                "—— 曾有任務因此空轉三輪（每輪都啟動管線、退場、什麼都沒留下）。"
-                "正確做法是**前景等待**：迴圈裡輪詢（sleep 後檢查檔案是否落地），"
-                "直到所有目標檔案存在、驗證通過才結束。生成很多張就分批，每批等完"
-                "再下一批；時間真的不夠就先完成一部分並明說做到哪，讓下一輪接續。")
+                "**不要把生成丟到背景（未登記的子行程）後就結束回合**：headless 子行程會被"
+                "回收，曾因此空轉三輪。若資源清單明示支援 Bastet 背景擷取，vendor 回傳"
+                "task id 後，請在 run 結束前 POST `$BASTET_GATEWAY_URL/v1/media/claims`，"
+                "使用 `Authorization: Bearer $BASTET_RUN_TOKEN`，JSON 為"
+                "`{\"resource\":\"資源名\",\"task_id\":\"vendor-id\","
+                "\"destination\":\"assets/output.ext\"}`。Bastet 會持久輪詢、在 URL"
+                "過期前下載到 worktree，完成後自動重跑本階段核驗。未支援此協議的資源"
+                "仍須**前景等待**到檔案落地；生成很多張可分批處理。")
         # a card that was sent back carries WHY, verbatim — the agent cannot fix
         # what it cannot see, and this is the difference between a loop that
         # converges and one that repeats the same run

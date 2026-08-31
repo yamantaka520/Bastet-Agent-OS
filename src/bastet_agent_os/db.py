@@ -280,7 +280,7 @@ CREATE TABLE IF NOT EXISTS runs (
   workdir TEXT,
   isolation TEXT NOT NULL DEFAULT 'worktree',
   status TEXT NOT NULL DEFAULT 'queued',
-  -- queued|running|waiting_input|succeeded|failed|cancelled|timeout|orphaned
+  -- queued|running|waiting_input|waiting_external|succeeded|failed|cancelled|timeout|orphaned
   error TEXT,
   executor_handle_json TEXT,
   tokens_in INTEGER NOT NULL DEFAULT 0,
@@ -316,6 +316,32 @@ CREATE TABLE IF NOT EXISTS usage_ledger (
   cost_usd REAL NOT NULL DEFAULT 0,
   at TEXT NOT NULL
 );
+
+-- Vendor media jobs may outlive the Agent process.  The host owns polling and
+-- downloads the expiring result into the exact run worktree before resuming.
+CREATE TABLE IF NOT EXISTS media_claims (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  resource_id TEXT NOT NULL REFERENCES resources(id),
+  provider_task_id TEXT NOT NULL,
+  destination TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  provider_status TEXT NOT NULL DEFAULT '',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_poll_at TEXT,
+  expires_at TEXT,
+  bytes INTEGER NOT NULL DEFAULT 0,
+  sha256 TEXT NOT NULL DEFAULT '',
+  mime TEXT NOT NULL DEFAULT '',
+  error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  finished_at TEXT,
+  UNIQUE(run_id, resource_id, provider_task_id, destination)
+);
+CREATE INDEX IF NOT EXISTS idx_media_claims_due
+  ON media_claims(status, next_poll_at);
 
 CREATE TABLE IF NOT EXISTS gate_results (
   id TEXT PRIMARY KEY,

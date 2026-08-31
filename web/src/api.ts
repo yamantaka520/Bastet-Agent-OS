@@ -71,8 +71,16 @@ export type JobDetail = Job & {
   evidence_matrix?: EvidenceMatrixRow[];
   deliveries: DeliveryReceipt[];
   delivery_actions?: DeliveryAction[];
+  media_claims?: MediaClaim[];
   // what the PM did — and, on an escalation, the question it needs answered
   pm_decision?: PmDecision | null;
+};
+
+export type MediaClaim = {
+  id: string; run_id: string; resource_id: string; provider_task_id: string;
+  destination: string; status: string; provider_status: string; attempts: number;
+  next_poll_at: string | null; bytes: number; sha256: string; mime: string;
+  error: string; created_at: string; finished_at: string | null;
 };
 
 export type DeliveryAction = {

@@ -210,16 +210,24 @@ an approval request without evidence is a request to sign blind.
 ## 8. Media stages
 
 When the project has media resources granted (image / video / music / tts /
-stt), the brief adds two hard rules, both from live incidents:
+stt / model3d), the brief distinguishes synchronous and asynchronous providers:
 
 - **Download the artefact, not the URL.** Vendor download links expire (48h at
   one provider); only a real file in the worktree survives to the branch.
-- **Never background the generation and end the turn.** A headless run is
-  one-shot: its children are reaped the moment it ends and no completion
-  notification can ever arrive — one card burned three cycles starting a
-  pipeline and exiting. Poll in the foreground until the files exist; batch
-  large sets; if time runs out, keep what finished and say exactly where you
-  stopped.
+- **Use the durable claim protocol for configured async providers.** After the
+  vendor returns its task id, POST `resource`, `task_id`, `destination` and an
+  optional future `expires_at` to `$BASTET_GATEWAY_URL/v1/media/claims` with the
+  run token. Bastet parks the stage, polls the configured status endpoint,
+  downloads the result into that relative worktree path and reruns the stage for
+  verification. Do not start an untracked background child process.
+- **Otherwise finish in the foreground.** A provider without an
+  `async_status_path` has no durable status contract, so poll until the actual
+  files exist; batch large sets and report an honest partial result on timeout.
+
+The status credential is sent only to the resource endpoint. Result downloads
+do not inherit it, reject redirects, and are limited to that endpoint host plus
+`async_download_hosts`. Destinations cannot escape the worktree, and
+`async_max_bytes` is capped by a host-side 500 MiB ceiling.
 
 In chat, an agent's generated files return to the conversation via
 `$BASTET_CHAT_OUTBOX` (8 files / 50 MB caps) and render inline.

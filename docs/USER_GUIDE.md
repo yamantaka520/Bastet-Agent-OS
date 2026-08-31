@@ -339,6 +339,17 @@ than 24 hours, and absent from every resource and channel reference. Preview is
 non-destructive; apply asks again and is audited. Arbitrary files, symlinks,
 fresh rotations, and user-managed `file:` paths outside this store are excluded.
 
+Media resources whose vendor finishes work asynchronously can enable **background
+retrieval**. Set `async_status_path` to a resource-relative path containing
+`{task_id}` (for example `/tasks/{task_id}`), then map the provider status and
+result URL fields. Configure success/failure values, polling interval, attempts,
+maximum bytes, and every additional permitted download host. Once an Agent
+registers a claim through the run-scoped Gateway, the card visibly waits while
+Bastet polls; it resumes the same stage automatically after the file is saved.
+The provider credential is never forwarded to the result host, redirects and
+worktree path escapes are rejected, and the receipt shows byte count, SHA-256,
+MIME type and polling attempts.
+
 ### 組織 (Org)
 
 Teams, projects, agents, executor accounts, and role assignments. The executor

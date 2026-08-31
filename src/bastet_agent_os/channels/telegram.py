@@ -661,6 +661,16 @@ class TelegramChannel:
             text = (f"▶️ 專案每日成本額度已重置並自動續行\n"
                     f"專案 {event.get('project_id')} · "
                     f"時區 {event.get('timezone') or 'UTC'}")
+        elif etype == "media.waiting":
+            text = (f"⏳ Bastet 已接手非同步媒體擷取\n{self._job_line(event)}\n"
+                    f"階段：{event.get('stage')} · {event.get('claims')} 個結果\n"
+                    "Agent 已結束；背景 worker 會持久輪詢並在完成後自動續行。")
+        elif etype == "media.fetched":
+            text = (f"✅ 非同步媒體已保存，任務自動續行\n{self._job_line(event)}\n"
+                    f"檔案：{', '.join(event.get('files') or [])}")
+        elif etype == "media.failed":
+            text = (f"🟠 非同步媒體擷取失敗\n{self._job_line(event)}\n"
+                    f"{self._detail_block(event.get('detail'))}")
         elif etype in ("budget.exceeded", "budget.warning"):
             icon = "🛑" if etype == "budget.exceeded" else "⚠️"
             detail = event.get("reason") or event.get("stage") or ""

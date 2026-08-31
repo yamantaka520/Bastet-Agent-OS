@@ -490,6 +490,8 @@ def create_app(home: Home) -> FastAPI:
         tasks.append(asyncio.get_running_loop().create_task(orch.supervision_loop()))
         tasks.append(asyncio.get_running_loop().create_task(
             app.state.workflow_scheduler.run()))
+        tasks.append(asyncio.get_running_loop().create_task(
+            app.state.media_claim_worker.run()))
         # a job whose driver died with the process is nobody's responsibility
         # otherwise: the runner only resumes projects with undispatched tasks,
         # and retry refuses anything that is not blocked
@@ -1458,6 +1460,8 @@ def create_app(home: Home) -> FastAPI:
     app.state.project_runner = runner_mod.ProjectRunner(db, orch, bus)
     from . import schedules as schedules_mod
     app.state.workflow_scheduler = schedules_mod.WorkflowScheduler(db, orch, bus)
+    from . import media_claims as media_claims_mod
+    app.state.media_claim_worker = media_claims_mod.MediaClaimWorker(db, orch, bus)
     # the self-configuration skill: the guide file tracks the code, so it is
     # rewritten on every boot; the pool resource is created once
     from . import self_config as self_config_mod
@@ -2383,6 +2387,11 @@ def create_app(home: Home) -> FastAPI:
         job["delivery_actions"] = [dict(a) for a in db.query(
             "SELECT action,provider,idempotency_key,status,error,started_at,finished_at "
             "FROM delivery_actions WHERE job_id=? ORDER BY started_at", (job_id,))]
+        job["media_claims"] = [dict(claim) for claim in db.query(
+            "SELECT id,run_id,resource_id,provider_task_id,destination,status,"
+            "provider_status,attempts,next_poll_at,bytes,sha256,mime,error,created_at,"
+            "finished_at FROM media_claims WHERE job_id=? ORDER BY created_at",
+            (job_id,))]
         job["stage_nodes"] = [dict(node) for node in db.query(
             "SELECT stage,status,needs_json,workspace,worktree_path,head_commit,"
             "started_at,finished_at,updated_at FROM job_stage_nodes "

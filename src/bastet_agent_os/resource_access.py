@@ -127,6 +127,10 @@ def build(db, home_root: Path | str, project_id: str, team_id: str,
             if config.get("default_model"):
                 access.env[f"{prefix}_MODEL"] = config["default_model"]
                 how.append(f"model `{config['default_model']}`")
+            if kind in {"image", "video", "music", "tts", "stt", "model3d"} \
+                    and config.get("async_status_path"):
+                access.env[f"{prefix}_ASYNC_CLAIMS"] = "1"
+                how.append("支援 Bastet 背景擷取（`POST /v1/media/claims`）")
             skill_path = config.get("skill_target") or config.get("skill_source")
             if skill_path:
                 access.env[f"{prefix}_SOURCE"] = skill_path

@@ -228,13 +228,17 @@ feature is confirmed against real vendor CLIs before release:
   constraint, and the file rendered inline in the conversation. Workflow cards
   produced 52-PNG sprite sets, Playwright viewport screenshots for approvals,
   and 3D-integration builds — all delivered as branches.
+- **Durable async media retrieval**: a media stage may register a vendor task and
+  end. Bastet persists the claim, polls it outside the Agent process, downloads
+  only from explicitly allowed hosts with no provider credential, enforces a
+  bounded payload, records bytes/SHA-256/MIME evidence, and automatically reruns
+  the parked stage after the file lands. Expired worker leases are reclaimed
+  after restart; path traversal and unapproved result hosts fail closed.
 - **Restart recovery, heartbeats, supplies, previews, timezone display** — each
   validated by the incident that motivated it (see docs/HISTORY.md).
 
 ## Open items
 
-- **Async media fetcher**: generation that outlives its run has no background
-  claimer; the rule today is poll-to-completion inside the run.
 - **Telegram bot token** from an early session should still be rotated.
 - **The Windows CI leg is red by declaration** (`continue-on-error`): ~35 tests
   assume POSIX fake-executor scripts, forward-slash paths and 0600 bits. Real

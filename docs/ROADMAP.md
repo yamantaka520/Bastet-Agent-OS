@@ -16,11 +16,6 @@ it is to build.
   and schedulable Skill installation. See
   [CORE-ENGINE-REDESIGN.md](CORE-ENGINE-REDESIGN.md).
 
-- **Async media fetcher.** Media stages must currently poll a vendor's async
-  generation to completion within their own run. A background fetcher that
-  claims the result later (before the URL expires) and files it into the
-  project would lift that limit.
-
 ## Shipped since this file was first written
 
 PyPI + Docker Hub distribution (0.19), config-by-conversation and auto-push
@@ -30,7 +25,9 @@ scheduled workflows with restart-safe dispatch and overlap suppression, and
 preview-first safe pruning of unreferenced managed credential files,
 receipt-bound branch review with verified promotion, and timezone-aware project
 daily cost ceilings that durably pause and automatically resume the runner (next
-release after 0.35.2). Details in
+release after 0.35.2). Async media resources can now register durable vendor
+claims; the host polls, safely downloads the result into the run worktree and
+automatically resumes verification after an Agent process has exited. Details in
 [CHANGELOG.md](../CHANGELOG.md).
 
 ## Under consideration

@@ -16,6 +16,12 @@ from typing import Any
 # groups order = display order in the UI
 GROUPS = ["model", "tool", "asset", "media"]
 
+MEDIA_ASYNC_FIELDS = [
+    "async_status_path", "async_status_field", "async_success_values",
+    "async_failure_values", "async_result_url_field", "async_download_hosts",
+    "async_poll_interval_seconds", "async_max_attempts", "async_max_bytes",
+]
+
 KINDS: list[dict[str, Any]] = [
     {"id": "llm", "group": "model", "auth": "required",
      "fields": ["endpoint", "api_flavor", "default_model", "secret"]},
@@ -31,20 +37,20 @@ KINDS: list[dict[str, Any]] = [
     {"id": "git", "group": "asset", "auth": "optional",
      "fields": ["git_provider", "endpoint", "secret"]},
     {"id": "image", "group": "media", "auth": "required",
-     "fields": ["endpoint", "default_model", "secret"]},
+     "fields": ["endpoint", "default_model", "secret", *MEDIA_ASYNC_FIELDS]},
     {"id": "video", "group": "media", "auth": "required",
-     "fields": ["endpoint", "default_model", "secret"]},
+     "fields": ["endpoint", "default_model", "secret", *MEDIA_ASYNC_FIELDS]},
     {"id": "music", "group": "media", "auth": "required",
-     "fields": ["endpoint", "default_model", "secret"]},
+     "fields": ["endpoint", "default_model", "secret", *MEDIA_ASYNC_FIELDS]},
     {"id": "tts", "group": "media", "auth": "required",
-     "fields": ["endpoint", "default_model", "secret"]},
+     "fields": ["endpoint", "default_model", "secret", *MEDIA_ASYNC_FIELDS]},
     {"id": "stt", "group": "media", "auth": "required",
-     "fields": ["endpoint", "default_model", "secret"]},
+     "fields": ["endpoint", "default_model", "secret", *MEDIA_ASYNC_FIELDS]},
     # 3D generation (Meshy-style text/image→model, rigging, animation) was being
     # filed under "image" for lack of anything truer — a category that misleads
     # both the resource browser and the media brief an agent receives
     {"id": "model3d", "group": "media", "auth": "required",
-     "fields": ["endpoint", "default_model", "secret"]},
+     "fields": ["endpoint", "default_model", "secret", *MEDIA_ASYNC_FIELDS]},
 ]
 
 BY_ID = {k["id"]: k for k in KINDS}
@@ -54,7 +60,7 @@ CONFIG_FIELDS = {"default_model", "mcp_transport", "mcp_command", "mcp_url",
                  "mcp_secret_env", "install_command", "skill_source",
                  "skill_id", "skill_version", "skill_target", "skill_digest",
                  "compatible_executors", "health_command", "git_provider",
-                 "auth_header"}
+                 "auth_header", *MEDIA_ASYNC_FIELDS}
 
 MCP_TRANSPORTS = ("stdio", "http")
 GIT_PROVIDERS = ("github", "gitlab", "custom")
@@ -122,6 +128,16 @@ def validate(kind: str, endpoint: str | None, secret_ref: str | None,
             problems.append("endpoint-missing")
         elif base_endpoint(endpoint)[1]:
             problems.append("endpoint-is-operation-url")
+    if kind in {"image", "video", "music", "tts", "stt", "model3d"}:
+        status_path = str(config.get("async_status_path") or "")
+        if status_path and (not status_path.startswith("/")
+                            or "{task_id}" not in status_path):
+            problems.append("async-status-path-invalid")
+        for field in ("async_poll_interval_seconds", "async_max_attempts",
+                      "async_max_bytes"):
+            value = str(config.get(field) or "").strip()
+            if value and (not value.isdigit() or int(value) < 1):
+                problems.append("async-limit-invalid")
     if kind == "skill":
         if not config.get("skill_source"):
             problems.append("skill-source-missing")
