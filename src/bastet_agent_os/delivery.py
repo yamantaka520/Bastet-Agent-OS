@@ -65,7 +65,7 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
         raise ValueError("delivery profile must be an object")
     required_commands = ["predeploy_command"]
     if mode == "production":
-        required_commands.extend(["deploy_command", "verify_command"])
+        required_commands.append("deploy_command")
     missing = [key for key in required_commands
                if not str(profile.get(key) or "").strip()]
     if missing:
@@ -76,6 +76,11 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
         raise ValueError(
             f"delivery profile provider must be web or one of {sorted(STORE_PROVIDERS)}")
     if provider in STORE_PROVIDERS:
+        status_adapter = str(profile.get("status_adapter") or "command").strip()
+        if status_adapter not in {"command", "official_api"}:
+            raise ValueError("store status_adapter must be command or official_api")
+        if status_adapter == "command" and not str(profile.get("verify_command") or "").strip():
+            missing.append("verify_command")
         goal = str(profile.get("release_goal") or "published").strip()
         if goal not in STORE_MILESTONES:
             raise ValueError(
@@ -93,6 +98,11 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
             raise ValueError("store poll_interval_seconds must be an integer") from exc
         if interval < 1 or interval > 86400:
             raise ValueError("store poll_interval_seconds must be between 1 and 86400")
+    elif mode == "production" and not str(profile.get("verify_command") or "").strip():
+        missing.append("verify_command")
+    if missing:
+        raise ValueError(
+            f"{mode} delivery profile is missing: {', '.join(missing)}")
     return profile
 
 
@@ -127,7 +137,50 @@ def _package_version(workdir: str, source: str) -> str:
     return version
 
 
-def _verification_receipt(output: str, *, commit_sha: str, version: str,
+def _json_receipt(output: str, label: str) -> dict[str, Any]:
+    """Read a JSON object from the whole command output or its final JSON line."""
+    candidates = [output.strip()]
+    candidates.extend(line.strip() for line in reversed(output.splitlines()) if line.strip())
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(value, dict):
+            return value
+    raise DeliveryError(f"{label} must emit a JSON object")
+
+
+def _submission_receipt(output: str, *, commit_sha: str, version: str,
+                        target: str, profile: dict[str, Any]) -> dict[str, Any]:
+    """Bind an official status query to the exact object created by deployment."""
+    receipt = _json_receipt(output, "store deployment")
+    provider = str(profile["provider"])
+    expected = {
+        "provider": provider,
+        "commit_sha": commit_sha,
+        "version": version,
+        "target": target,
+        **({"app_id": str(profile["app_id"])} if provider == "app_store_connect" else {
+            "package_name": str(profile["package_name"]),
+            "track": str(profile["track"]),
+        }),
+    }
+    mismatches = [
+        f"{field} expected {wanted!r}, got {receipt.get(field)!r}"
+        for field, wanted in expected.items()
+        if str(receipt.get(field) or "") != wanted
+    ]
+    if mismatches:
+        raise DeliveryError("store submission receipt mismatch: " + "; ".join(mismatches))
+    provider_id = ("app_store_version_id" if provider == "app_store_connect"
+                   else "version_code")
+    if not str(receipt.get(provider_id) or "").strip():
+        raise DeliveryError(f"store submission receipt is missing: {provider_id}")
+    return receipt
+
+
+def _verification_receipt(output: str | dict[str, Any], *, commit_sha: str, version: str,
                           target: str, profile: dict[str, Any] | None = None,
                           ) -> tuple[dict[str, Any], bool]:
     """Parse and bind provider-observed state to this exact release.
@@ -136,21 +189,14 @@ def _verification_receipt(output: str, *, commit_sha: str, version: str,
     artifact. The trusted verifier must emit a JSON object, either as its whole
     output or as its final non-empty line.
     """
-    candidates = [output.strip()]
-    candidates.extend(line.strip() for line in reversed(output.splitlines())
-                      if line.strip())
-    receipt = None
-    for candidate in candidates:
+    if isinstance(output, dict):
+        receipt = output
+    else:
         try:
-            value = json.loads(candidate)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if isinstance(value, dict):
-            receipt = value
-            break
-    if receipt is None:
-        raise DeliveryError(
-            "online verification must emit a JSON deployment receipt")
+            receipt = _json_receipt(output, "online verification")
+        except DeliveryError as exc:
+            raise DeliveryError(
+                "online verification must emit a JSON deployment receipt") from exc
     profile = profile or {}
     provider = str(profile.get("provider") or "web")
     expected = {
@@ -281,9 +327,22 @@ def execute(db: Db, job, workdir: str, contract: dict,
     }
     evidence["deploy"] = _run(
         str(profile.get("deploy_command") or ""), workdir, delivery_env, "deployment")
-    evidence["verify"] = _run(
-        str(profile.get("verify_command") or ""), workdir, delivery_env,
-        "online verification")
+    if str(profile.get("status_adapter") or "command") == "official_api":
+        from .store_adapters import StoreAdapterError, official_status
+
+        submission = _submission_receipt(
+            evidence["deploy"], commit_sha=commit_sha, version=expected,
+            target=target, profile=profile)
+        evidence["submission_receipt"] = submission
+        try:
+            evidence["verify"] = official_status(
+                profile, submission, {**os.environ, **(env or {})})
+        except StoreAdapterError as exc:
+            raise DeliveryError(str(exc)) from exc
+    else:
+        evidence["verify"] = _run(
+            str(profile.get("verify_command") or ""), workdir, delivery_env,
+            "online verification")
     receipt, complete = _verification_receipt(
         evidence["verify"], commit_sha=commit_sha, version=expected, target=target,
         profile=profile)
@@ -314,11 +373,23 @@ def poll(workdir: str, contract: dict, delivery_row, *,
         "BASTET_DELIVERY_TARGET": target,
         "BASTET_DELIVERY_COMMIT": commit_sha,
     }
-    output = _run(str(profile.get("verify_command") or ""), workdir, delivery_env,
-                  "store status verification")
+    evidence = json.loads(delivery_row["evidence_json"] or "{}")
+    if str(profile.get("status_adapter") or "command") == "official_api":
+        from .store_adapters import StoreAdapterError, official_status
+
+        submission = evidence.get("submission_receipt")
+        if not isinstance(submission, dict):
+            raise DeliveryError("store delivery has no durable submission receipt")
+        try:
+            output = official_status(
+                profile, submission, {**os.environ, **(env or {})})
+        except StoreAdapterError as exc:
+            raise DeliveryError(str(exc)) from exc
+    else:
+        output = _run(str(profile.get("verify_command") or ""), workdir, delivery_env,
+                      "store status verification")
     receipt, complete = _verification_receipt(
         output, commit_sha=commit_sha, version=version, target=target, profile=profile)
-    evidence = json.loads(delivery_row["evidence_json"] or "{}")
     evidence["verify"] = output
     evidence["verification_receipt"] = receipt
     return DeliveryResult(

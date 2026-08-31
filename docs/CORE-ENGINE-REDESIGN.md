@@ -289,6 +289,18 @@ submission or Agent work. Startup immediately reclaims a crashed poll owner; a s
 live server reclaims it after lease expiry and continues from the same receipt.
 Published completes once; rejected blocks and never emits `job.deployed`.
 
+The eighteenth replaces environment-specific status scripts with optional built-in
+official API adapters. A trusted upload command must first emit a structured submission
+receipt bound to the integrated commit, version, target and provider identity, plus the
+exact Apple `app_store_version_id` or Google `version_code`. Only then does Bastet sign
+an App Store Connect ES256 JWT or Google service-account RS256 assertion and query that
+exact object. Apple verifies the returned version belongs to the configured app. Google
+creates an uncommitted read edit, selects exactly one matching versionCode on the chosen
+track, and deletes the edit without commit. Credentials enter only through granted
+secret environment variables; neither profile nor evidence contains them. Unknown
+provider states, ambiguous versions, wrong app relationships, missing credentials and
+HTTP failures all fail closed.
+
 Provider adapters normalize official state into milestones while retaining the raw
 status. Apple distinguishes `WAITING_FOR_REVIEW`, `IN_REVIEW`,
 `PENDING_DEVELOPER_RELEASE`, and `READY_FOR_DISTRIBUTION`; Google Play track releases
@@ -299,9 +311,9 @@ equate API upload, edit commit, review acceptance, or staged rollout with public
 No phase is shipped solely from unit tests. Multiprocess dispatch/restart/race now
 has an executable acceptance receipt, and the multi-branch DAG-to-remote release path
 now has an end-to-end Git receipt. The production provider boundary is now
-machine-checkable, while each real provider still requires an environment-specific
-verifier. The provider-neutral success/stale canary is executable locally; each real
-provider still needs its own environment canary before release.
+machine-checkable. Provider-neutral and fake official-endpoint tests are executable
+locally; each real provider still needs a sandbox/TestFlight or internal-track
+credentialed canary before release.
 
 ## Requirement traceability
 

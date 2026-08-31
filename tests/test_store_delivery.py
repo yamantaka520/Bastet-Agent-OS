@@ -192,3 +192,80 @@ async def test_store_dispatch_rejects_workflow_without_terminal_human_approval(
         orch.dispatch(req(
             template_id="unsafe-mobile", use_worktree=True,
             delivery={"mode": "production", "version": "1.4.0"}))
+
+
+async def test_official_api_adapter_polls_durable_submission_without_redeploy(
+        orch, seeded, origin, monkeypatch, tmp_path):
+    deploy_count = tmp_path / "official-deploy-count.txt"
+    receipt = {
+        "provider": "app_store_connect",
+        "app_id": "123456",
+        "app_store_version_id": "version-7",
+    }
+    deploy_script = (
+        "import json,os,pathlib;"
+        f"counter=pathlib.Path({str(deploy_count)!r});"
+        "counter.write_text(str(int(counter.read_text() or '0')+1) "
+        "if counter.exists() else '1');"
+        f"payload={receipt!r};"
+        "payload.update(commit_sha=os.environ['BASTET_DELIVERY_COMMIT'],"
+        "version=os.environ['BASTET_DELIVERY_VERSION'],"
+        "target=os.environ['BASTET_DELIVERY_TARGET']);"
+        "print(json.dumps(payload))"
+    )
+    profile = {
+        "provider": "app_store_connect",
+        "status_adapter": "official_api",
+        "app_id": "123456",
+        "release_goal": "published",
+        "poll_interval_seconds": 1,
+        "target_branch": "main",
+        "target": "app-store:123456",
+        "predeploy_command": "test -f mobile.bin",
+        "deploy_command": command(deploy_script),
+    }
+    seeded.write("UPDATE projects SET config_json=? WHERE id='proj1'",
+                 (json.dumps({"delivery_profile": profile}),))
+    add_template(seeded, "official-mobile", [
+        {"name": "release", "gate": "human-approve", "delivery_modes": ["production"]},
+    ])
+    SCRIPT.append(writes_mobile_release)
+    statuses = iter([("submitted", "IN_REVIEW"),
+                     ("published", "READY_FOR_DISTRIBUTION")])
+    calls = []
+
+    def fake_status(actual_profile, submission, env):
+        calls.append((actual_profile, submission, env))
+        milestone, provider_status = next(statuses)
+        return {
+            "provider": "app_store_connect",
+            "app_id": "123456",
+            "commit_sha": submission["commit_sha"],
+            "version": submission["version"],
+            "target": submission["target"],
+            "milestone": milestone,
+            "provider_status": provider_status,
+        }
+
+    monkeypatch.setattr("bastet_agent_os.store_adapters.official_status", fake_status)
+    job_id = orch.dispatch(req(
+        template_id="official-mobile", use_worktree=True,
+        delivery={"mode": "production", "version": "1.4.0"}))
+    await orch.wait_idle()
+    orch.approve(job_id, True, "release submission approved", user="release-manager")
+    await orch.wait_idle()
+
+    delivery = seeded.one("SELECT * FROM deliveries WHERE job_id=?", (job_id,))
+    evidence = json.loads(delivery["evidence_json"])
+    assert delivery["status"] == "waiting_external"
+    assert evidence["submission_receipt"]["app_store_version_id"] == "version-7"
+    assert deploy_count.read_text() == "1"
+
+    seeded.write("UPDATE deliveries SET next_poll_at='2020-01-01T00:00:00+00:00' "
+                 "WHERE id=?", (delivery["id"],))
+    outcome = await orch.poll_external_deliveries()
+
+    assert outcome == {"completed": [job_id], "waiting": [], "failed": []}
+    assert deploy_count.read_text() == "1"
+    assert len(calls) == 2
+    assert calls[0][1] == calls[1][1]

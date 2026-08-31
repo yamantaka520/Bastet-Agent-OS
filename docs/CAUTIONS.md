@@ -131,6 +131,10 @@
   release-manager 人工閘道與非同步 store receipt；`waiting_external` 期間只輪詢狀態，
   不能重跑上傳／送審。設定 `release_goal=published` 時，submitted 或 approved 都不能把
   卡片標成完成；rejected 必須阻擋並保留 provider 原始狀態。
+- **官方 API adapter 不替你上傳或送審。** `status_adapter=official_api` 只查詢上傳指令
+  receipt 指定的 Apple version ID／Google versionCode。上傳指令若沒有回傳綁定本次
+  commit、version、target 與商店物件 ID 的 JSON，交付直接失敗；商店私鑰只能由專案
+  Secrets 注入，不能放進 delivery profile、指令輸出或 evidence。
 - **審計是 hash 串接的 append-only。** 不要手動改 audit_log —— 鏈會斷，
   `verify_audit_chain()` 會抓到。刪任務/專案時的用量帳務會被拒絕或要求 force
   並記錄寫掉的金額，這是刻意的。

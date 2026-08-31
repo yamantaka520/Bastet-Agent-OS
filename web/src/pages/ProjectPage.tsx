@@ -54,6 +54,7 @@ type Overview = {
 type DeliveryProfile = { target_branch?: string; target?: string;
   predeploy_command?: string; deploy_command?: string; verify_command?: string;
   provider?: "web" | "app_store_connect" | "google_play";
+  status_adapter?: "command" | "official_api";
   release_goal?: "uploaded" | "submitted" | "approved" | "published";
   app_id?: string; package_name?: string; track?: string;
   poll_interval_seconds?: string };
@@ -680,8 +681,8 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
                 <option value="google_play">Google Play</option>
               </select>
             </label>
-            {(["target_branch", "target", "predeploy_command", "deploy_command",
-               "verify_command"] as (keyof DeliveryProfile)[]).map((key) => (
+            {(["target_branch", "target", "predeploy_command", "deploy_command"] as (keyof DeliveryProfile)[])
+              .map((key) => (
               <label className="res-field" key={key}>
                 <span>{t(`project.delivery.${key}`)}</span>
                 <input value={draft.deliveryProfile[key] ?? ""}
@@ -692,6 +693,20 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
             ))}
             {(draft.deliveryProfile.provider === "app_store_connect"
               || draft.deliveryProfile.provider === "google_play") && (<>
+              <label className="res-field">
+                <span>{t("project.delivery.status_adapter")}</span>
+                <select value={draft.deliveryProfile.status_adapter ?? "command"}
+                        disabled={!canOperate}
+                        onChange={(e) => patch({ deliveryProfile: {
+                          ...draft.deliveryProfile,
+                          status_adapter: e.target.value as DeliveryProfile["status_adapter"],
+                        } })}>
+                  <option value="command">{t("project.delivery.adapter.command")}</option>
+                  <option value="official_api">
+                    {t("project.delivery.adapter.official_api")}
+                  </option>
+                </select>
+              </label>
               <label className="res-field">
                 <span>{t("project.delivery.release_goal")}</span>
                 <select value={draft.deliveryProfile.release_goal ?? "published"}
@@ -738,6 +753,16 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
                          poll_interval_seconds: e.target.value } })} />
               </label>
             </>)}
+            {(draft.deliveryProfile.provider === "web"
+              || (draft.deliveryProfile.status_adapter ?? "command") === "command") && (
+              <label className="res-field">
+                <span>{t("project.delivery.verify_command")}</span>
+                <input value={draft.deliveryProfile.verify_command ?? ""}
+                       disabled={!canOperate}
+                       onChange={(e) => patch({ deliveryProfile: {
+                         ...draft.deliveryProfile, verify_command: e.target.value } })} />
+              </label>
+            )}
           </div>
           <p className="muted">{t("project.deliveryHint")}</p>
         </div>

@@ -140,6 +140,24 @@ Apple credentials should be supplied through a granted secret for App Store Conn
 JWT/API-key access; Google Play should use a granted service-account credential with
 the minimum Android Publisher permissions. Never store either credential in the
 profile or verifier output.
+
+Set `status_adapter` to `official_api` to use Bastet's authenticated read-only status
+adapter instead of `verify_command`. The upload command must then print a JSON
+submission receipt as its last non-empty line. Common fields are `provider`,
+`commit_sha`, `version`, `target`, plus the configured provider identity. Apple also
+requires `app_store_version_id`; Google requires `version_code`. Bastet rejects any
+field that differs from the integrated release before it contacts the provider.
+
+Grant these exact secret environment names to the project:
+
+- Apple: `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, and
+  `APP_STORE_CONNECT_PRIVATE_KEY` (the ES256 `.p8` PEM content).
+- Google: `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` (the complete service-account JSON).
+
+The Apple adapter reads the exact App Store version and verifies its app relationship.
+The Google adapter exchanges a signed service-account assertion, creates a temporary
+uncommitted edit, reads the configured track and exact `versionCode`, then deletes the
+read edit. Neither adapter uploads, submits, commits, releases, or changes rollout.
 | 刪除 | remove the project (admin only) — see below |
 
 Expanded, a card shows the task plan (with provenance: which conversation it came

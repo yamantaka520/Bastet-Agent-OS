@@ -94,6 +94,8 @@ audit trail behind every state change.
   a release-manager approval, then persist through upload, submission, approval
   and publication. Review can take days: Bastet records `waiting_external`, polls
   provider receipts across restarts, and never labels upload/submission as live.
+  Optional built-in adapters authenticate directly to App Store Connect and
+  Google Play; credentials stay in granted Secrets, not project profiles.
 - **Project lifecycle with a light.** planning → ready → running ⇄ paused →
   maintenance → closed, as a real state machine: only declared transitions, each
   one audited. Run / pause / stop controls on the card.
