@@ -70,8 +70,14 @@ export type JobDetail = Job & {
   gates: Gate[];
   evidence_matrix?: EvidenceMatrixRow[];
   deliveries: DeliveryReceipt[];
+  delivery_actions?: DeliveryAction[];
   // what the PM did — and, on an escalation, the question it needs answered
   pm_decision?: PmDecision | null;
+};
+
+export type DeliveryAction = {
+  action: string; provider: string; idempotency_key: string; status: string;
+  error: string; started_at: string; finished_at: string | null;
 };
 
 export type EvidenceMatrixRow = {

@@ -787,7 +787,7 @@ class Orchestrator:
             "SELECT COUNT(*) AS rows, COALESCE(SUM(cost_usd), 0) AS cost "
             "FROM usage_ledger WHERE run_id IN (SELECT id FROM runs WHERE job_id IN "
             "(SELECT id FROM jobs WHERE project_id=?))", (project_id,))
-        runs = 0
+        runs = deliveries = delivery_actions = 0
         for job in jobs:
             run_ids = [r["id"] for r in self.db.query(
                 "SELECT id FROM runs WHERE job_id=?", (job["id"],))]
@@ -800,8 +800,13 @@ class Orchestrator:
             self.db.write("DELETE FROM runs WHERE job_id=?", (job["id"],))
             self.db.write("DELETE FROM job_deps WHERE job_id=? OR depends_on_job_id=?",
                           (job["id"], job["id"]))
+            delivery_actions += self.db.write(
+                "DELETE FROM delivery_actions WHERE job_id=?", (job["id"],)).rowcount
+            deliveries += self.db.write(
+                "DELETE FROM deliveries WHERE job_id=?", (job["id"],)).rowcount
             self.db.write("DELETE FROM jobs WHERE id=?", (job["id"],))
         return {"jobs": len(jobs), "runs": runs,
+                "deliveries": deliveries, "delivery_actions": delivery_actions,
                 "usage_rows": spend["rows"], "usage_usd": round(spend["cost"], 4)}
 
     def _spawn(self, coro) -> None:

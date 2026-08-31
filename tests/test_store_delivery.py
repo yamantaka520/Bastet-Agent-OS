@@ -210,7 +210,8 @@ async def test_official_api_adapter_polls_durable_submission_without_redeploy(
         f"payload={receipt!r};"
         "payload.update(commit_sha=os.environ['BASTET_DELIVERY_COMMIT'],"
         "version=os.environ['BASTET_DELIVERY_VERSION'],"
-        "target=os.environ['BASTET_DELIVERY_TARGET']);"
+        "target=os.environ['BASTET_DELIVERY_TARGET'],"
+        "idempotency_key=os.environ['BASTET_DELIVERY_IDEMPOTENCY_KEY']);"
         "print(json.dumps(payload))"
     )
     profile = {
@@ -260,6 +261,12 @@ async def test_official_api_adapter_polls_durable_submission_without_redeploy(
     assert delivery["status"] == "waiting_external"
     assert evidence["submission_receipt"]["app_store_version_id"] == "version-7"
     assert deploy_count.read_text() == "1"
+    action = seeded.one(
+        "SELECT * FROM delivery_actions WHERE job_id=? AND action='store-submit'",
+        (job_id,))
+    assert action["status"] == "succeeded"
+    assert json.loads(action["receipt_json"])["idempotency_key"] == \
+        evidence["submission_receipt"]["idempotency_key"]
 
     seeded.write("UPDATE deliveries SET next_poll_at='2020-01-01T00:00:00+00:00' "
                  "WHERE id=?", (delivery["id"],))
@@ -269,3 +276,82 @@ async def test_official_api_adapter_polls_durable_submission_without_redeploy(
     assert deploy_count.read_text() == "1"
     assert len(calls) == 2
     assert calls[0][1] == calls[1][1]
+
+
+async def test_official_status_retry_reuses_submit_receipt_without_resubmitting(
+        orch, seeded, origin, monkeypatch, tmp_path):
+    from bastet_agent_os.store_adapters import StoreAdapterError
+
+    deploy_count = tmp_path / "retry-deploy-count.txt"
+    deploy_script = (
+        "import json,os,pathlib;"
+        f"counter=pathlib.Path({str(deploy_count)!r});"
+        "counter.write_text(str(int(counter.read_text() or '0')+1) "
+        "if counter.exists() else '1');"
+        "print(json.dumps({'provider':'google_play',"
+        "'package_name':'com.example.canary','track':'internal','version_code':'10400',"
+        "'commit_sha':os.environ['BASTET_DELIVERY_COMMIT'],"
+        "'version':os.environ['BASTET_DELIVERY_VERSION'],"
+        "'target':os.environ['BASTET_DELIVERY_TARGET'],"
+        "'idempotency_key':os.environ['BASTET_DELIVERY_IDEMPOTENCY_KEY']}))"
+    )
+    profile = {
+        "provider": "google_play",
+        "status_adapter": "official_api",
+        "package_name": "com.example.canary",
+        "track": "internal",
+        "release_goal": "published",
+        "target_branch": "main",
+        "target": "google-play:com.example.canary:internal",
+        "predeploy_command": "test -f mobile.bin",
+        "deploy_command": command(deploy_script),
+    }
+    seeded.write("UPDATE projects SET config_json=? WHERE id='proj1'",
+                 (json.dumps({"delivery_profile": profile}),))
+    add_template(seeded, "retry-mobile", [
+        {"name": "release", "gate": "human-approve", "delivery_modes": ["production"]},
+    ])
+    SCRIPT.append(writes_mobile_release)
+    calls = 0
+
+    def status(profile, submission, env):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise StoreAdapterError("temporary provider outage")
+        return {
+            "provider": "google_play",
+            "package_name": profile["package_name"],
+            "track": profile["track"],
+            "commit_sha": submission["commit_sha"],
+            "version": submission["version"],
+            "target": submission["target"],
+            "milestone": "published",
+            "provider_status": "completed",
+        }
+
+    monkeypatch.setattr("bastet_agent_os.store_adapters.official_status", status)
+    job_id = orch.dispatch(req(
+        template_id="retry-mobile", use_worktree=True,
+        delivery={"mode": "production", "version": "1.4.0"}))
+    await orch.wait_idle()
+    orch.approve(job_id, True, "submit", user="release-manager")
+    await orch.wait_idle()
+
+    assert dict(seeded.one(
+        "SELECT status,delivery_status FROM jobs WHERE id=?", (job_id,))) == {
+            "status": "blocked", "delivery_status": "failed"}
+    assert deploy_count.read_text() == "1"
+    assert seeded.one(
+        "SELECT status FROM delivery_actions WHERE job_id=?", (job_id,))["status"] == \
+        "succeeded"
+
+    await orch._run_delivery(job_id)
+
+    assert dict(seeded.one(
+        "SELECT status,delivery_status FROM jobs WHERE id=?", (job_id,))) == {
+            "status": "done", "delivery_status": "succeeded"}
+    assert deploy_count.read_text() == "1"
+    assert calls == 2
+    assert seeded.one(
+        "SELECT COUNT(*) AS n FROM deliveries WHERE job_id=?", (job_id,))["n"] == 2

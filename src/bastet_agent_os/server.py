@@ -2243,6 +2243,12 @@ def create_app(home: Home) -> FastAPI:
             "WHERE r.job_id=? ORDER BY g.at", (job_id,))]
         job["deliveries"] = [dict(d) for d in db.query(
             "SELECT * FROM deliveries WHERE job_id=? ORDER BY started_at", (job_id,))]
+        # Deliberately omit command output/receipt_json: the action ledger proves
+        # deduplication, while detailed evidence already lives on deliveries and
+        # raw submitter output may contain vendor diagnostics not meant for viewers.
+        job["delivery_actions"] = [dict(a) for a in db.query(
+            "SELECT action,provider,idempotency_key,status,error,started_at,finished_at "
+            "FROM delivery_actions WHERE job_id=? ORDER BY started_at", (job_id,))]
         job["stage_nodes"] = [dict(node) for node in db.query(
             "SELECT stage,status,needs_json,workspace,worktree_path,head_commit,"
             "started_at,finished_at,updated_at FROM job_stage_nodes "

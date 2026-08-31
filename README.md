@@ -99,6 +99,9 @@ audit trail behind every state change.
   provider receipts across restarts, and never labels upload/submission as live.
   Optional built-in adapters authenticate directly to App Store Connect and
   Google Play; credentials stay in granted Secrets, not project profiles.
+  Store submission uses a durable action ledger and stable idempotency key, so
+  retrying a failed status check reuses the accepted submission receipt instead
+  of uploading or submitting the release a second time.
 - **Project lifecycle with a light.** planning → ready → running ⇄ paused →
   maintenance → closed, as a real state machine: only declared transitions, each
   one audited. Run / pause / stop controls on the card.

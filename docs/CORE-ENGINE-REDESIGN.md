@@ -311,6 +311,18 @@ secret values never enter output or audit. `ok` means authentication and exact-o
 observation succeeded, while `meets_release_goal` remains separate, so even a rejected
 object cannot be mistaken for a successful release.
 
+The twentieth closes the ordinary retry duplication window for store submissions.
+Before invoking the trusted submitter, the engine writes a `delivery_actions` row with
+a deterministic SHA-256 idempotency key derived from job, provider, integrated commit,
+version and target, and exports it as `BASTET_DELIVERY_IDEMPOTENCY_KEY`. The submitter
+must implement lookup-or-create and echo the exact key in its structured receipt. A
+successful receipt is persisted before official status verification; later delivery
+attempts validate and reuse it, so an API/authentication outage cannot upload or submit
+again. A changed release identity fails closed. The task API/UI exposes sanitized
+action status and a shortened key but not raw command output. This provides durable
+at-most-once orchestration after receipt persistence; the command's own idempotent
+lookup remains necessary for the narrow process-death interval during its execution.
+
 Provider adapters normalize official state into milestones while retaining the raw
 status. Apple distinguishes `WAITING_FOR_REVIEW`, `IN_REVIEW`,
 `PENDING_DEVELOPER_RELEASE`, and `READY_FOR_DISTRIBUTION`; Google Play track releases

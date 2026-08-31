@@ -185,6 +185,22 @@ CREATE TABLE IF NOT EXISTS deliveries (
 );
 CREATE INDEX IF NOT EXISTS idx_deliveries_job ON deliveries(job_id, started_at);
 
+-- External release side effects need a lifetime longer than one delivery attempt.
+-- A status/API failure after upload must not make retry upload or submit again.
+CREATE TABLE IF NOT EXISTS delivery_actions (
+  job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  status TEXT NOT NULL,              -- running|succeeded|failed
+  output TEXT NOT NULL DEFAULT '',
+  receipt_json TEXT NOT NULL DEFAULT '{}',
+  error TEXT NOT NULL DEFAULT '',
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  PRIMARY KEY (job_id, action)
+);
+
 -- data handed to a job while it runs: deploy targets, endpoints, decisions the
 -- agent could not know. Injected into every later run's brief and dropped into
 -- the live worktree's inbox. Secrets do NOT belong here (they would travel in a

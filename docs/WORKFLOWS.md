@@ -275,6 +275,13 @@ fields plus one monotonic milestone (`uploaded` → `submitted` → `approved` �
 the profile's `release_goal` schedules another verification poll; it does not rerun
 the upload command. A `rejected` milestone is terminal failure.
 
+An official-adapter submission command also receives
+`BASTET_DELIVERY_IDEMPOTENCY_KEY`. It must use that key for lookup-or-create and return
+the same value as `idempotency_key` in its submission receipt. Bastet persists that
+receipt independently of delivery attempts. A retry caused by a later status failure
+therefore skips submission and reuses the provider object ID; changing release identity
+under the same job is rejected.
+
 Apple submission and review are separate operations, and approval can still leave a
 version at Pending Developer Release. Google Play edits are not live until committed;
 managed publishing can further hold reviewed changes before publication. Templates

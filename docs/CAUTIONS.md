@@ -139,6 +139,11 @@
   是否達到交付目標必須看獨立的 `meets_release_goal`。`--project --submission` 的 commit
   provenance 是外部檔案自述，正式驗收應使用綁定 frozen delivery 的 `--job`。Google 查詢
   會建立隨即刪除、絕不 commit 的 read edit；它不等於完全無 API-side object creation。
+- **submission command 必須真的使用 idempotency key。** 引擎會固定
+  `BASTET_DELIVERY_IDEMPOTENCY_KEY`、要求 receipt 原樣回傳並保存成功 action；這能保證狀態
+  查詢失敗後不重跑 command。但若 command 只是回傳 key、實際上沒有 lookup-or-create，主機
+  在外部成功而本機尚未保存 receipt 的極小 crash window 仍可能重複副作用。內建 submitter
+  完成前，不得把任意 shell script 宣稱為 exactly-once。
 - **審計是 hash 串接的 append-only。** 不要手動改 audit_log —— 鏈會斷，
   `verify_audit_chain()` 會抓到。刪任務/專案時的用量帳務會被拒絕或要求 force
   並記錄寫掉的金額，這是刻意的。

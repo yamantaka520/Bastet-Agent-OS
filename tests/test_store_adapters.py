@@ -186,6 +186,20 @@ def test_official_adapter_requires_exact_structured_submission_receipt():
             target="mobile-production", profile=profile)
 
 
+def test_store_submitter_must_echo_the_engine_idempotency_key():
+    profile = {
+        "provider": "google_play",
+        "package_name": "com.example.canary",
+        "track": "production",
+    }
+
+    with pytest.raises(DeliveryError, match="idempotency_key expected"):
+        _submission_receipt(
+            json.dumps(_submission("google_play")), commit_sha="a" * 40,
+            version="1.4.0", target="mobile-production", profile=profile,
+            idempotency_key="stable-action-key")
+
+
 def test_official_adapter_profile_does_not_require_verify_command():
     profile = validate_profile({
         "provider": "app_store_connect",

@@ -148,6 +148,15 @@ submission receipt as its last non-empty line. Common fields are `provider`,
 requires `app_store_version_id`; Google requires `version_code`. Bastet rejects any
 field that differs from the integrated release before it contacts the provider.
 
+For built-in official adapters, Bastet also exports
+`BASTET_DELIVERY_IDEMPOTENCY_KEY`. The trusted upload/submit command must implement
+lookup-or-create with that key and echo it as `idempotency_key` in the submission
+receipt. Bastet writes the accepted receipt to `delivery_actions` before the first
+status query. If authentication or provider status lookup then fails, retry uses the
+same durable receipt and does not invoke the upload/submit command again. Changing the
+commit, version, target or provider under an existing action is rejected. The task
+drawer shows the action status and a shortened key, but omits raw command output.
+
 Grant these exact secret environment names to the project:
 
 - Apple: `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, and

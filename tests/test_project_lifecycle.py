@@ -582,6 +582,45 @@ def test_a_trial_project_can_be_removed(tmp_path):
     db.close()
 
 
+def test_project_removal_purges_delivery_attempts_and_action_ledger(tmp_path):
+    client, home = _client(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    client.post("/api/teams", json={"id": "t1", "name": "T"})
+    client.post("/api/projects", json={"id": "released", "repo_path": str(repo),
+                                       "team_id": "t1"})
+    db = Db(home.db_path)
+    stamp = now()
+    db.write_many([
+        ("INSERT INTO jobs(id,project_id,stages_snapshot_json,title,stage,status,"
+         "created_at,updated_at) VALUES('release-job','released','[]','Release',"
+         "'done','done',?,?)", (stamp, stamp)),
+        ("INSERT INTO deliveries(id,job_id,mode,status,started_at) "
+         "VALUES('delivery','release-job','production','succeeded',?)", (stamp,)),
+        ("INSERT INTO delivery_actions(job_id,action,provider,idempotency_key,status,"
+         "started_at) VALUES('release-job','store-submit','google_play','stable',"
+         "'succeeded',?)", (stamp,)),
+    ])
+    db.close()
+
+    detail = client.get("/api/jobs/release-job").json()
+    assert detail["delivery_actions"] == [{
+        "action": "store-submit", "provider": "google_play",
+        "idempotency_key": "stable", "status": "succeeded", "error": "",
+        "started_at": stamp, "finished_at": None,
+    }]
+    assert "output" not in detail["delivery_actions"][0]
+
+    out = client.delete("/api/projects/released")
+
+    assert out.status_code == 200, out.text
+    assert out.json()["deliveries"] == out.json()["delivery_actions"] == 1
+    db = Db(home.db_path)
+    assert db.query("SELECT * FROM deliveries WHERE job_id='release-job'") == []
+    assert db.query("SELECT * FROM delivery_actions WHERE job_id='release-job'") == []
+    db.close()
+
+
 def test_deleting_a_project_with_spend_needs_force_and_records_the_amount(tmp_path):
     """Usage rows are the accounting. They may go when the whole project goes,
     but not silently — the refusal names the amount and forcing records it."""

@@ -8,6 +8,7 @@ fails keeps the card blocked and preserves its worktree for repair/retry.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -152,7 +153,8 @@ def _json_receipt(output: str, label: str) -> dict[str, Any]:
 
 
 def _submission_receipt(output: str, *, commit_sha: str, version: str,
-                        target: str, profile: dict[str, Any]) -> dict[str, Any]:
+                        target: str, profile: dict[str, Any],
+                        idempotency_key: str = "") -> dict[str, Any]:
     """Bind an official status query to the exact object created by deployment."""
     receipt = _json_receipt(output, "store deployment")
     provider = str(profile["provider"])
@@ -166,6 +168,8 @@ def _submission_receipt(output: str, *, commit_sha: str, version: str,
             "track": str(profile["track"]),
         }),
     }
+    if idempotency_key:
+        expected["idempotency_key"] = idempotency_key
     mismatches = [
         f"{field} expected {wanted!r}, got {receipt.get(field)!r}"
         for field, wanted in expected.items()
@@ -178,6 +182,77 @@ def _submission_receipt(output: str, *, commit_sha: str, version: str,
     if not str(receipt.get(provider_id) or "").strip():
         raise DeliveryError(f"store submission receipt is missing: {provider_id}")
     return receipt
+
+
+def _delivery_action_key(job_id: str, provider: str, commit_sha: str,
+                         version: str, target: str) -> str:
+    payload = json.dumps({
+        "job_id": job_id,
+        "action": "store-submit",
+        "provider": provider,
+        "commit_sha": commit_sha,
+        "version": version,
+        "target": target,
+    }, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _store_submit_once(db: Db, job_id: str, profile: dict[str, Any], workdir: str,
+                       env: dict[str, str], *, commit_sha: str, version: str,
+                       target: str) -> tuple[str, dict[str, Any]]:
+    """Run a store submitter with a stable key, then durably reuse its receipt.
+
+    The command is responsible for implementing lookup-or-create semantics for
+    BASTET_DELIVERY_IDEMPOTENCY_KEY. Requiring the same key in its receipt makes
+    that contract machine-checkable; a later status retry never invokes it again.
+    """
+    provider = str(profile["provider"])
+    key = _delivery_action_key(job_id, provider, commit_sha, version, target)
+    row = db.one("SELECT * FROM delivery_actions WHERE job_id=? AND action='store-submit'",
+                 (job_id,))
+    if row is not None and row["idempotency_key"] != key:
+        raise DeliveryError(
+            "stored submission action belongs to a different release identity")
+    if row is not None and row["status"] == "succeeded":
+        try:
+            receipt = json.loads(row["receipt_json"] or "{}")
+        except json.JSONDecodeError as exc:
+            raise DeliveryError("stored submission receipt is corrupt") from exc
+        checked = _submission_receipt(
+            json.dumps(receipt), commit_sha=commit_sha, version=version,
+            target=target, profile=profile, idempotency_key=key)
+        return str(row["output"] or ""), checked
+    stamp = datetime.now(UTC).isoformat(timespec="seconds")
+    if row is None:
+        db.write(
+            "INSERT INTO delivery_actions(job_id,action,provider,idempotency_key,status,"
+            "started_at) VALUES(?,'store-submit',?,?, 'running',?)",
+            (job_id, provider, key, stamp))
+    else:
+        db.write(
+            "UPDATE delivery_actions SET status='running',error='',started_at=?,"
+            "finished_at=NULL WHERE job_id=? AND action='store-submit'",
+            (stamp, job_id))
+    try:
+        output = _run(str(profile.get("deploy_command") or ""), workdir, {
+            **env, "BASTET_DELIVERY_IDEMPOTENCY_KEY": key,
+        }, "store submission")
+        receipt = _submission_receipt(
+            output, commit_sha=commit_sha, version=version, target=target,
+            profile=profile, idempotency_key=key)
+    except Exception as exc:
+        db.write(
+            "UPDATE delivery_actions SET status='failed',error=?,finished_at=? "
+            "WHERE job_id=? AND action='store-submit'",
+            (f"{type(exc).__name__}: {exc}"[-8000:],
+             datetime.now(UTC).isoformat(timespec="seconds"), job_id))
+        raise
+    db.write(
+        "UPDATE delivery_actions SET status='succeeded',output=?,receipt_json=?,"
+        "error='',finished_at=? WHERE job_id=? AND action='store-submit'",
+        (output, json.dumps(receipt), datetime.now(UTC).isoformat(timespec="seconds"),
+         job_id))
+    return output, receipt
 
 
 def _verification_receipt(output: str | dict[str, Any], *, commit_sha: str, version: str,
@@ -328,14 +403,12 @@ def execute(db: Db, job, workdir: str, contract: dict,
         **base_env,
         "BASTET_DELIVERY_COMMIT": commit_sha,
     }
-    evidence["deploy"] = _run(
-        str(profile.get("deploy_command") or ""), workdir, delivery_env, "deployment")
     if str(profile.get("status_adapter") or "command") == "official_api":
         from .store_adapters import StoreAdapterError, official_status
 
-        submission = _submission_receipt(
-            evidence["deploy"], commit_sha=commit_sha, version=expected,
-            target=target, profile=profile)
+        evidence["deploy"], submission = _store_submit_once(
+            db, job["id"], profile, workdir, delivery_env,
+            commit_sha=commit_sha, version=expected, target=target)
         evidence["submission_receipt"] = submission
         try:
             evidence["verify"] = official_status(
@@ -343,6 +416,9 @@ def execute(db: Db, job, workdir: str, contract: dict,
         except StoreAdapterError as exc:
             raise DeliveryError(str(exc)) from exc
     else:
+        evidence["deploy"] = _run(
+            str(profile.get("deploy_command") or ""), workdir, delivery_env,
+            "deployment")
         evidence["verify"] = _run(
             str(profile.get("verify_command") or ""), workdir, delivery_env,
             "online verification")

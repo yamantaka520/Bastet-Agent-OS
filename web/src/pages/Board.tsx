@@ -415,6 +415,13 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
               {d.error ? ` · ${d.error.slice(0, 240)}` : ""}
             </p>
           ))}
+          {job.delivery_actions?.map((a) => (
+            <p className="card-meta" key={`${a.action}:${a.idempotency_key}`}>
+              ↻ {a.action} · {a.provider} · {a.status}
+              {a.idempotency_key ? ` · key ${a.idempotency_key.slice(0, 12)}` : ""}
+              {a.error ? ` · ${a.error.slice(0, 240)}` : ""}
+            </p>
+          ))}
         </div>
       )}
       {canOperate && job.status === "done"
