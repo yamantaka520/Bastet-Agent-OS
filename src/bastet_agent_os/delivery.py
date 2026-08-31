@@ -24,6 +24,14 @@ COMMAND_TIMEOUT_S = 1800
 OUTPUT_LIMIT = 8000
 STORE_PROVIDERS = {"app_store_connect", "google_play"}
 STORE_MILESTONES = {"uploaded": 0, "submitted": 1, "approved": 2, "published": 3}
+APPLE_VERSION_METADATA_FIELDS = {
+    "description",
+    "keywords",
+    "marketingUrl",
+    "promotionalText",
+    "supportUrl",
+    "whatsNew",
+}
 
 
 class DeliveryError(RuntimeError):
@@ -169,6 +177,28 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
                         "apple_upload_parallelism must be an integer") from exc
                 if parallelism < 1 or parallelism > 8:
                     raise ValueError("apple_upload_parallelism must be between 1 and 8")
+                for field_name in (
+                        "apple_required_locales", "apple_metadata_required_fields"):
+                    raw_value = profile.get(field_name)
+                    if raw_value is not None and not isinstance(raw_value, (str, list)):
+                        raise ValueError(f"{field_name} must be a comma-separated string or list")
+                raw_fields = profile.get(
+                    "apple_metadata_required_fields",
+                    "description,supportUrl,whatsNew",
+                )
+                fields = ([str(value).strip() for value in raw_fields]
+                          if isinstance(raw_fields, list)
+                          else [value.strip() for value in str(raw_fields).split(",")])
+                fields = [value for value in fields if value]
+                unknown_fields = sorted(set(fields) - APPLE_VERSION_METADATA_FIELDS)
+                if unknown_fields:
+                    raise ValueError(
+                        "unsupported apple_metadata_required_fields: "
+                        + ", ".join(unknown_fields))
+                goal = str(profile.get("release_goal") or "published")
+                if goal != "uploaded" and not fields:
+                    raise ValueError(
+                        "submitted App Store delivery requires metadata fields")
         try:
             interval = int(profile.get("poll_interval_seconds") or 300)
         except (TypeError, ValueError) as exc:

@@ -549,6 +549,8 @@ const ko: Dict = {
   "project.delivery.apple_artifact_path": "Apple IPA/PKG 경로(선택)",
   "project.delivery.apple_artifact_sha256": "Apple 파일 SHA-256(선택)",
   "project.delivery.apple_upload_parallelism": "Apple 분할 업로드 병렬 수",
+  "project.delivery.apple_required_locales": "필수 App Store 로케일(쉼표 구분)",
+  "project.delivery.apple_metadata_required_fields": "필수 현지화 metadata 필드",
   "project.delivery.provider": "릴리스 Provider",
   "project.delivery.release_goal": "완료 마일스톤",
   "project.delivery.app_id": "App Store app ID",

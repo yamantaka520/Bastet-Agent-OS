@@ -61,6 +61,8 @@ type DeliveryProfile = { target_branch?: string; target?: string;
   app_id?: string; platform?: string; build_number?: string;
   apple_release_type?: "MANUAL";
   apple_upload_parallelism?: string;
+  apple_required_locales?: string;
+  apple_metadata_required_fields?: string;
   package_name?: string; track?: string; version_code?: string;
   artifact_path?: string; artifact_sha256?: string;
   google_release_status?: "draft" | "completed";
@@ -830,6 +832,26 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
                                  onChange={(e) => patch({ deliveryProfile: {
                                    ...draft.deliveryProfile,
                                    apple_upload_parallelism: e.target.value,
+                                 } })} />
+                        </label>
+                        <label className="res-field">
+                          <span>{t("project.delivery.apple_required_locales")}</span>
+                          <input value={draft.deliveryProfile.apple_required_locales ?? ""}
+                                 disabled={!canOperate}
+                                 placeholder="en-US,zh-Hant"
+                                 onChange={(e) => patch({ deliveryProfile: {
+                                   ...draft.deliveryProfile,
+                                   apple_required_locales: e.target.value,
+                                 } })} />
+                        </label>
+                        <label className="res-field">
+                          <span>{t("project.delivery.apple_metadata_required_fields")}</span>
+                          <input value={draft.deliveryProfile.apple_metadata_required_fields
+                                         ?? "description,supportUrl,whatsNew"}
+                                 disabled={!canOperate}
+                                 onChange={(e) => patch({ deliveryProfile: {
+                                   ...draft.deliveryProfile,
+                                   apple_metadata_required_fields: e.target.value,
                                  } })} />
                         </label>
                       </>

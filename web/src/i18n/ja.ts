@@ -549,6 +549,8 @@ const ja: Dict = {
   "project.delivery.apple_artifact_path": "Apple IPA／PKG パス（任意）",
   "project.delivery.apple_artifact_sha256": "Apple ファイル SHA-256（任意）",
   "project.delivery.apple_upload_parallelism": "Apple 分割アップロード並列数",
+  "project.delivery.apple_required_locales": "必須 App Store ロケール（カンマ区切り）",
+  "project.delivery.apple_metadata_required_fields": "必須ローカライズ metadata 項目",
   "project.delivery.provider": "リリース Provider",
   "project.delivery.release_goal": "完了マイルストーン",
   "project.delivery.app_id": "App Store app ID",

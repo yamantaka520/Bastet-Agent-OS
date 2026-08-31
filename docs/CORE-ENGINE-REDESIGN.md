@@ -376,6 +376,17 @@ Duplicate identities, conflicting files or checksums, unsafe/gapped ranges and p
 failure all stop closed. This separates transfer, Apple processing and review state
 while still converging them through one delivery contract.
 
+The twenty-fifth makes review submission contingent on evidence rather than assuming
+that an attached build is ready. Before creating or submitting a review—and again when
+recovering an already-submitted review—the adapter reads the exact version's included
+localizations and review detail. Its explicit configurable policy requires at least one
+localization, defaults localized text checks to `description`, `supportUrl`, and
+`whatsNew`, can require named locales, always checks the review contact, and requires
+demo credentials only when the provider marks them necessary. It emits the checked
+locales and fields into the immutable receipt and reports exact missing paths before
+any review mutation. Metadata authoring, screenshots, and App Information locale parity
+remain separate work rather than being silently inferred.
+
 Provider adapters normalize official state into milestones while retaining the raw
 status. Apple distinguishes `WAITING_FOR_REVIEW`, `IN_REVIEW`,
 `PENDING_DEVELOPER_RELEASE`, and `READY_FOR_DISTRIBUTION`; Google Play track releases

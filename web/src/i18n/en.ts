@@ -549,6 +549,8 @@ const en: Dict = {
   "project.delivery.apple_artifact_path": "Apple IPA/PKG path (optional)",
   "project.delivery.apple_artifact_sha256": "Apple file SHA-256 (optional)",
   "project.delivery.apple_upload_parallelism": "Apple upload parallelism",
+  "project.delivery.apple_required_locales": "Required App Store locales (comma-separated)",
+  "project.delivery.apple_metadata_required_fields": "Required localized metadata fields",
   "project.delivery.provider": "release provider",
   "project.delivery.release_goal": "completion milestone",
   "project.delivery.app_id": "App Store app ID",

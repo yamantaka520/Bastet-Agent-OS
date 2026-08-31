@@ -156,6 +156,10 @@
   轉送至 pre-signed upload URL。處理期間必須維持 `waiting_external`，直到 exact build 為 `VALID`
   才能附掛與送審；仍強制 terminal `human-approve`。送審 recovery 也必須看到同一 review item
   已進入 submitted-or-later，不能只因 build 已附掛就誤判成功。
+- **Apple metadata readiness 是 Bastet policy，不是替 Apple 猜規則。** 送審前會唯讀核對指定語系、
+  預設 `description`／`supportUrl`／`whatsNew`、review 聯絡資料，以及 Apple 表示需要 demo account
+  時的帳密；缺哪個 path 就在 review mutation 前停止。它不會自動填內容，目前也尚未涵蓋截圖與
+  App Information 語系集合一致性，這兩項仍須 release checklist 核驗。
 - **審計是 hash 串接的 append-only。** 不要手動改 audit_log —— 鏈會斷，
   `verify_audit_chain()` 會抓到。刪任務/專案時的用量帳務會被拒絕或要求 force
   並記錄寫掉的金額，這是刻意的。

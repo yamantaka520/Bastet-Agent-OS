@@ -197,6 +197,12 @@ def _state(attributes: dict[str, Any], field: str) -> str:
     return str(value)
 
 
+def _profile_list(profile: dict[str, Any], field: str, default: str = "") -> list[str]:
+    raw = profile.get(field, default)
+    values = raw if isinstance(raw, list) else str(raw or "").split(",")
+    return sorted({str(value).strip() for value in values if str(value).strip()})
+
+
 @dataclass
 class StoreStatusAdapter:
     """Provider client with injectable endpoints/transport for deterministic tests."""
@@ -369,6 +375,8 @@ class StoreStatusAdapter:
             if review is None or review[1] not in APPLE_SUBMITTED_REVIEW_STATES:
                 return None
             fields["review_submission_id"] = review[0]
+            fields["metadata_readiness"] = self._apple_metadata_readiness(
+                profile, version_id, headers)
         return _submission_receipt(release, profile, fields)
 
     def _apple_build_and_version(
@@ -516,6 +524,8 @@ class StoreStatusAdapter:
         if str(profile.get("release_goal") or "published") == "uploaded":
             return _submission_receipt(release, profile, fields)
 
+        fields["metadata_readiness"] = self._apple_metadata_readiness(
+            profile, version_id, headers)
         review = self._apple_review_for_version(app_id, version_id, headers)
         if review is None:
             submission_payload = _response_json(self.client.post(
@@ -559,6 +569,90 @@ class StoreStatusAdapter:
                     f"App Store Connect review submission did not advance: {state}")
         fields["review_submission_id"] = review_id
         return _submission_receipt(release, profile, fields)
+
+    def _apple_metadata_readiness(
+            self, profile: dict[str, Any], version_id: str,
+            headers: dict[str, str]) -> dict[str, Any]:
+        payload = _response_json(self.client.get(
+            f"{self.apple_api_url}/v1/appStoreVersions/{quote(version_id, safe='')}",
+            params={
+                "include": "appStoreVersionLocalizations,appStoreReviewDetail",
+                "fields[appStoreVersions]":
+                    "appStoreVersionLocalizations,appStoreReviewDetail",
+                "fields[appStoreVersionLocalizations]":
+                    "locale,description,keywords,marketingUrl,promotionalText,"
+                    "supportUrl,whatsNew",
+                "fields[appStoreReviewDetails]":
+                    "contactFirstName,contactLastName,contactPhone,contactEmail,"
+                    "demoAccountName,demoAccountPassword,demoAccountRequired,notes",
+                "limit[appStoreVersionLocalizations]": "50",
+            }, headers=headers), "App Store Connect")
+        data = payload.get("data")
+        if not isinstance(data, dict) or str(data.get("id") or "") != version_id:
+            raise StoreAdapterError(
+                "App Store Connect returned the wrong version metadata object")
+        included = payload.get("included") or []
+        if not isinstance(included, list):
+            raise StoreAdapterError("App Store Connect metadata include is invalid")
+        localizations = [row for row in included if isinstance(row, dict)
+                         and row.get("type") == "appStoreVersionLocalizations"]
+        review_details = [row for row in included if isinstance(row, dict)
+                          and row.get("type") == "appStoreReviewDetails"]
+        locale_rows: dict[str, dict[str, Any]] = {}
+        for row in localizations:
+            attributes = row.get("attributes") or {}
+            if not isinstance(attributes, dict):
+                raise StoreAdapterError(
+                    "App Store Connect version localization attributes are invalid")
+            locale = str(attributes.get("locale") or "")
+            if not locale or locale in locale_rows:
+                raise StoreAdapterError(
+                    "App Store Connect version localizations are ambiguous")
+            locale_rows[locale] = attributes
+        required_locales = _profile_list(profile, "apple_required_locales")
+        checked_locales = required_locales or sorted(locale_rows)
+        if not checked_locales:
+            raise StoreAdapterError(
+                "App Store metadata readiness failed: no version localization")
+        missing_locales = sorted(set(checked_locales) - set(locale_rows))
+        required_fields = _profile_list(
+            profile, "apple_metadata_required_fields",
+            "description,supportUrl,whatsNew")
+        missing_fields = []
+        for locale in checked_locales:
+            attributes = locale_rows.get(locale) or {}
+            for field in required_fields:
+                if not str(attributes.get(field) or "").strip():
+                    missing_fields.append(f"{locale}.{field}")
+        if len(review_details) != 1:
+            missing_fields.append("appStoreReviewDetail")
+            review_attributes: dict[str, Any] = {}
+        else:
+            review_attributes = review_details[0].get("attributes") or {}
+            if not isinstance(review_attributes, dict):
+                raise StoreAdapterError(
+                    "App Store Connect review detail attributes are invalid")
+            for field in ("contactFirstName", "contactLastName",
+                          "contactPhone", "contactEmail"):
+                if not str(review_attributes.get(field) or "").strip():
+                    missing_fields.append(f"appStoreReviewDetail.{field}")
+            if review_attributes.get("demoAccountRequired") is True:
+                for field in ("demoAccountName", "demoAccountPassword"):
+                    if not str(review_attributes.get(field) or "").strip():
+                        missing_fields.append(f"appStoreReviewDetail.{field}")
+        missing = [*[f"locale:{locale}" for locale in missing_locales],
+                   *missing_fields]
+        if missing:
+            raise StoreAdapterError(
+                "App Store metadata readiness failed: " + ", ".join(missing))
+        return {
+            "status": "ready",
+            "locales": checked_locales,
+            "required_fields": required_fields,
+            "review_contact": True,
+            "demo_account_required": review_attributes.get(
+                "demoAccountRequired") is True,
+        }
 
     def _upload_app_store_build(
             self, profile: dict[str, Any], release: dict[str, Any],

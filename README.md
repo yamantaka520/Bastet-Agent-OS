@@ -75,8 +75,10 @@ processed `VALID` build: Bastet looks up or creates the exact version, attaches 
 build, creates/reuses its review submission item, and submits it for review. An optional
 worktree-contained `.ipa` or macOS `.pkg` lets the same adapter create/reuse an exact
 Build Upload, reserve the file, upload Apple-provided byte ranges concurrently, commit
-its SHA-256, and park durably while Apple processes it. Public Google tracks still
-require an explicit submitter.
+its SHA-256, and park durably while Apple processes it. Before review mutation, Bastet
+also reads the exact version localizations and review contact, enforcing a configurable
+metadata-readiness policy and recording the evidence in the receipt. Public Google
+tracks still require an explicit submitter.
 
 ## Why
 

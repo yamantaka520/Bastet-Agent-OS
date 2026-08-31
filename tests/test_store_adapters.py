@@ -44,6 +44,39 @@ def _submission(provider: str) -> dict:
     }
 
 
+def _apple_metadata(*, whats_new: str = "Safer delivery.",
+                    demo_required: bool = False,
+                    demo_password: str = "") -> dict:
+    return {
+        "data": {"type": "appStoreVersions", "id": "version-7"},
+        "included": [
+            {
+                "type": "appStoreVersionLocalizations",
+                "id": "localization-1",
+                "attributes": {
+                    "locale": "en-US",
+                    "description": "Bastet companion app",
+                    "supportUrl": "https://example.test/support",
+                    "whatsNew": whats_new,
+                },
+            },
+            {
+                "type": "appStoreReviewDetails",
+                "id": "review-detail-1",
+                "attributes": {
+                    "contactFirstName": "Bastet",
+                    "contactLastName": "Release",
+                    "contactPhone": "+1 555 0100",
+                    "contactEmail": "release@example.test",
+                    "demoAccountRequired": demo_required,
+                    "demoAccountName": "reviewer" if demo_required else "",
+                    "demoAccountPassword": demo_password,
+                },
+            },
+        ],
+    }
+
+
 def test_app_store_adapter_signs_request_and_normalizes_exact_version():
     private_key = ec.generate_private_key(ec.SECP256R1())
     seen = {}
@@ -316,6 +349,10 @@ def test_app_store_builtin_submitter_creates_version_attaches_build_and_submits_
             assert json.loads(request.content) == {
                 "data": {"type": "builds", "id": "build-87"}}
             return httpx.Response(204)
+        if path == "/v1/appStoreVersions/version-7" and request.method == "GET":
+            assert request.url.params["include"] == \
+                "appStoreVersionLocalizations,appStoreReviewDetail"
+            return httpx.Response(200, json=_apple_metadata())
         if path.endswith("/apps/123456/reviewSubmissions"):
             assert request.url.params["include"] == "items"
             assert request.url.params["fields[reviewSubmissionItems]"] == \
@@ -355,10 +392,60 @@ def test_app_store_builtin_submitter_creates_version_attaches_build_and_submits_
     })
 
     assert [request.method for request in requests] == [
-        "GET", "GET", "POST", "PATCH", "GET", "POST", "POST", "PATCH"]
+        "GET", "GET", "POST", "PATCH", "GET", "GET", "POST", "POST", "PATCH"]
     assert receipt["app_store_version_id"] == "version-7"
     assert receipt["build_id"] == "build-87"
     assert receipt["review_submission_id"] == "review-1"
+    assert receipt["metadata_readiness"] == {
+        "status": "ready",
+        "locales": ["en-US"],
+        "required_fields": ["description", "supportUrl", "whatsNew"],
+        "review_contact": True,
+        "demo_account_required": False,
+    }
+
+
+def test_app_store_metadata_gate_blocks_review_mutation_with_exact_missing_fields():
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/v1/builds":
+            return httpx.Response(200, json={"data": [{"id": "build-87"}]})
+        if request.url.path == "/v1/appStoreVersions":
+            return httpx.Response(200, json={"data": [{
+                "id": "version-7",
+                "relationships": {"build": {"data": {"id": "build-87"}}},
+            }]})
+        if request.url.path == "/v1/appStoreVersions/version-7":
+            return httpx.Response(200, json=_apple_metadata(
+                whats_new="", demo_required=True, demo_password=""))
+        return httpx.Response(500)
+
+    adapter = StoreStatusAdapter(
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        apple_api_url="https://apple.test", now=lambda: 1000)
+    with pytest.raises(StoreAdapterError) as exc_info:
+        adapter.submit_app_store({
+            "provider": "app_store_connect", "app_id": "123456",
+            "build_number": "87", "platform": "IOS", "release_goal": "submitted",
+            "apple_required_locales": "en-US,zh-Hant",
+        }, {
+            "commit_sha": "a" * 40, "version": "1.4.0",
+            "target": "mobile-production", "idempotency_key": "stable-key",
+        }, {
+            "APP_STORE_CONNECT_KEY_ID": "key",
+            "APP_STORE_CONNECT_ISSUER_ID": "issuer",
+            "APP_STORE_CONNECT_PRIVATE_KEY": _pem(private_key),
+        })
+
+    message = str(exc_info.value)
+    assert "locale:zh-Hant" in message
+    assert "en-US.whatsNew" in message
+    assert "appStoreReviewDetail.demoAccountPassword" in message
+    assert [request.url.path for request in requests] == [
+        "/v1/builds", "/v1/appStoreVersions", "/v1/appStoreVersions/version-7"]
 
 
 def test_app_store_builtin_uploader_reserves_and_uploads_parts_in_parallel(tmp_path):
@@ -515,6 +602,8 @@ def test_app_store_builtin_recovery_requires_submitted_review_for_submitted_goal
                 "id": "version-7",
                 "relationships": {"build": {"data": {"id": "build-87"}}},
             }]})
+        if request.url.path == "/v1/appStoreVersions/version-7":
+            return httpx.Response(200, json=_apple_metadata())
         return httpx.Response(200, json={
             "data": [{
                 "type": "reviewSubmissions", "id": "review-1",
@@ -545,8 +634,9 @@ def test_app_store_builtin_recovery_requires_submitted_review_for_submitted_goal
         "APP_STORE_CONNECT_PRIVATE_KEY": _pem(private_key),
     })
 
-    assert methods == ["GET", "GET", "GET"]
+    assert methods == ["GET", "GET", "GET", "GET"]
     assert receipt["review_submission_id"] == "review-1"
+    assert receipt["metadata_readiness"]["status"] == "ready"
 
 
 def test_builtin_google_recovery_binds_version_code_to_local_aab_hash(tmp_path):
@@ -810,3 +900,11 @@ def test_builtin_app_store_submission_promotes_processed_build_without_deploy_co
     assert upload_profile["artifact_path"] == "release.ipa"
     with pytest.raises(ValueError, match="between 1 and 8"):
         validate_profile({**upload_profile, "apple_upload_parallelism": 9}, "production")
+    with pytest.raises(ValueError, match="unsupported apple_metadata_required_fields"):
+        validate_profile({
+            **upload_profile, "apple_metadata_required_fields": "description,screenshots",
+        }, "production")
+    with pytest.raises(ValueError, match="requires metadata fields"):
+        validate_profile({
+            **upload_profile, "apple_metadata_required_fields": "",
+        }, "production")

@@ -76,7 +76,10 @@ Last updated: 2026-08-31
   creation/reuse, submitted-state recovery, and manual-release-only validation.
   Apple binary upload now uses exact Build Upload/file reservations, bounded concurrent
   pre-signed ranges, SHA-256 commit, durable asynchronous processing receipts and
-  restart-safe continuation into the existing review path. Validation: 676 Python tests,
+  restart-safe continuation into the existing review path. Apple review submission now
+  has a read-only metadata evidence gate: configurable exact locales and localized
+  fields, required review contact, conditional demo credentials, exact missing paths,
+  and recovery-time revalidation are recorded before review mutation. Validation: 677 Python tests,
   ruff clean, Web production build clean.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month

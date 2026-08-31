@@ -304,7 +304,11 @@ app/version/platform/build-number tuple, creates the App Store version only when
 missing, attaches only the matching build, and for goals above `uploaded` creates or
 reuses the version's review submission item before setting `submitted=true`. A restart
 does not accept build attachment alone as proof of a submitted goal. Release type is
-restricted to `MANUAL`; completion of Apple metadata remains outside this mutation boundary.
+restricted to `MANUAL`. Immediately before review mutation—and again during submitted
+recovery—the adapter reads version localizations and review detail. A configurable
+Bastet policy defaults to `description`, `supportUrl`, and `whatsNew`, optionally
+requires named locales, always requires review contact, and conditionally requires demo
+credentials. It records the successful check in the receipt and never authors metadata.
 
 If `artifact_path` names an `.ipa` (iOS/tvOS/visionOS) or `.pkg` (macOS), the adapter
 first creates or reuses the exact Build Upload and its single asset file. Apple-issued
@@ -323,6 +327,9 @@ rollout, or actual public publication.
 Official provider references: [Apple app and submission statuses](https://developer.apple.com/help/app-store-connect/reference/app-information/app-and-submission-statuses),
 [Apple review submissions](https://developer.apple.com/documentation/appstoreconnectapi/reviewsubmission),
 [Apple Build Uploads](https://developer.apple.com/documentation/appstoreconnectapi/build-uploads),
+[Apple version localization fields](https://developer.apple.com/documentation/appstoreconnectapi/appstoreversionlocalization/attributes-data.dictionary),
+[Apple version localizations](https://developer.apple.com/documentation/appstoreconnectapi/get-v1-appstoreversions-_id_-appstoreversionlocalizations),
+[Apple review details](https://developer.apple.com/documentation/appstoreconnectapi/read_the_app_store_review_details_resource_information_of_an_app_store_version),
 [Google Play edits](https://developers.google.com/android-publisher/edits),
 [Google Play track release states](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks),
 and [Google Play managed publishing](https://support.google.com/googleplay/android-developer/answer/9859654).

@@ -569,6 +569,8 @@ const zhHans: Dict = {
   "project.delivery.apple_artifact_path": "Apple IPA／PKG 路径（可选）",
   "project.delivery.apple_artifact_sha256": "Apple 文件 SHA-256（可选）",
   "project.delivery.apple_upload_parallelism": "Apple 分段上传并发数",
+  "project.delivery.apple_required_locales": "App Store 必要语言（逗号分隔）",
+  "project.delivery.apple_metadata_required_fields": "必要本地化 metadata 字段",
   "project.delivery.provider": "发布 Provider",
   "project.delivery.release_goal": "完成里程碑",
   "project.delivery.app_id": "App Store app ID",

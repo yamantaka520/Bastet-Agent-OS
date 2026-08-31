@@ -568,6 +568,8 @@ const zhHant = {
   "project.delivery.apple_artifact_path": "Apple IPA／PKG 路徑（選填）",
   "project.delivery.apple_artifact_sha256": "Apple 檔案 SHA-256（選填）",
   "project.delivery.apple_upload_parallelism": "Apple 分段上傳並行數",
+  "project.delivery.apple_required_locales": "App Store 必要語系（逗號分隔）",
+  "project.delivery.apple_metadata_required_fields": "必要在地化 metadata 欄位",
   "project.delivery.provider": "發布 Provider",
   "project.delivery.release_goal": "完成里程碑",
   "project.delivery.app_id": "App Store app ID",

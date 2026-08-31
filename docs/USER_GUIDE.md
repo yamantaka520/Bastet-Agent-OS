@@ -188,7 +188,15 @@ then attaches the build. With `release_goal=uploaded` it stops there. Higher goa
 also look up or create one review submission and version item and set `submitted=true`.
 Recovery requires that exact review item to have reached a submitted-or-later state,
 so a crash between attachment and review submission resumes instead of falsely
-completing. This path does not fill missing metadata.
+completing. This path does not fill missing metadata. Instead, before any review
+mutation it reads the exact version's localizations and review detail. By default each
+checked locale must contain `description`, `supportUrl`, and `whatsNew`; configure a
+comma-separated `apple_required_locales` to require named locales, or change the
+allow-listed checks with `apple_metadata_required_fields`. At least one localization,
+all four review contact fields, and—when Apple says a demo account is required—both
+demo credentials must be present. Missing paths fail closed and readiness evidence is
+saved in the submission receipt. This is an explicit Bastet policy, not a claim that
+Apple universally requires the same text fields for every app.
 
 To upload the Apple binary through the same adapter, add a worktree-relative
 `artifact_path`: `.ipa` for iOS/tvOS/visionOS or `.pkg` for macOS. Optional
@@ -206,6 +214,9 @@ digest, observes the exact Build Upload, and only when the exact build becomes `
 continues to version attachment and review submission. `FAILED`, duplicate identities,
 conflicting files/checksums, unsafe operations, gaps, overlaps, or provider errors fail
 closed instead of creating another upload.
+
+This gate does not yet verify screenshots or parity with App Information locales; keep
+those in the release checklist until their provider relationships are covered.
 
 For a Google Play internal-track release, `submission_adapter=official_api` replaces
 that external command with Bastet's narrowly scoped submitter. Configure:
