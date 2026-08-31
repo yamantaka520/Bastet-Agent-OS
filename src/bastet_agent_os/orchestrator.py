@@ -129,6 +129,8 @@ class Orchestrator:
         project = self.db.one("SELECT * FROM projects WHERE id=?", (req.project_id,))
         if project is None:
             raise ValueError(f"unknown project {req.project_id!r}")
+        from .project_budget import require_available
+        require_available(self.db, req.project_id)
         agent = self.db.one("SELECT * FROM agents WHERE id=? AND enabled=1", (req.agent_id,))
         if agent is None:
             raise ValueError(f"unknown or disabled agent {req.agent_id!r}")

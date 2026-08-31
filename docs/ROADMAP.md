@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-08-30 · current version 0.35.x
+Last updated: 2026-08-31 · current version 0.35.x
 
 M0–M6 are done ([PROGRESS.md](../PROGRESS.md) says what was verified where). What
 follows is ordered by how much it would change daily use, not by how interesting
@@ -16,14 +16,6 @@ it is to build.
   and schedulable Skill installation. See
   [CORE-ENGINE-REDESIGN.md](CORE-ENGINE-REDESIGN.md).
 
-- **Cost ceilings that stop work.** Budgets are recorded per grant and enforced
-  at dispatch; a per-project daily ceiling that pauses the runner (rather than
-  failing a run) is a better shape for the same intent.
-- **Review UI for branch deliveries.** A normal `branch` delivery still leaves
-  reviewable work on `bastet/<job_id>` for a deliberate merge; a diff view with
-  a merge button belongs on the board. Explicit `production` delivery is now a
-  separate audited path that atomically publishes the target and release tag.
-
 - **Async media fetcher.** Media stages must currently poll a vendor's async
   generation to completion within their own run. A background fetcher that
   claims the result later (before the URL expires) and files it into the
@@ -35,8 +27,10 @@ PyPI + Docker Hub distribution (0.19), config-by-conversation and auto-push
 (0.20), the media loop and honest retry semantics (0.21), quota self-wait,
 Playwright tooling and per-stage time budgets (0.22), durable timezone-aware
 scheduled workflows with restart-safe dispatch and overlap suppression, and
-preview-first safe pruning of unreferenced managed credential files (next release
-after 0.35.2). Details in
+preview-first safe pruning of unreferenced managed credential files,
+receipt-bound branch review with verified promotion, and timezone-aware project
+daily cost ceilings that durably pause and automatically resume the runner (next
+release after 0.35.2). Details in
 [CHANGELOG.md](../CHANGELOG.md).
 
 ## Under consideration

@@ -294,6 +294,8 @@ class ProjectUpdateIn(BaseModel):
     repo_path: str | None = None
     description: str | None = None
     delivery_profile: dict[str, Any] | None = None
+    daily_cost_limit_usd: float | None = None
+    daily_cost_timezone: str | None = None
 
 
 class DeliveryIn(BaseModel):
@@ -765,6 +767,7 @@ def create_app(home: Home) -> FastAPI:
     def list_projects(status: str = "", q: str = "", since: str = "", until: str = ""):
         """Projects with their lifecycle state, filterable by status, keyword and
         time window — the project tab groups on these rather than guessing."""
+        from . import project_budget
         from . import project_lifecycle as lc
         lc.reconcile_all(db, actor="ui")     # the list must not show a stale light
         rows = []
@@ -778,6 +781,7 @@ def create_app(home: Home) -> FastAPI:
             item["progress"] = lc.job_progress(db, item["id"])
             item["task_count"] = len(lc.task_plan(db, item["id"])["tasks"])
             item["running"] = app.state.project_runner.is_active(item["id"])
+            item["budget"] = project_budget.status(db, item["id"])
             if status and item["status"] != status:
                 continue
             if q:
@@ -1231,6 +1235,25 @@ def create_app(home: Home) -> FastAPI:
             config["description"] = p.description
         if p.delivery_profile is not None:
             config["delivery_profile"] = p.delivery_profile
+        budget_fields = {"daily_cost_limit_usd", "daily_cost_timezone"}
+        if p.model_fields_set & budget_fields:
+            from . import project_budget
+            raw_limit = (p.daily_cost_limit_usd
+                         if "daily_cost_limit_usd" in p.model_fields_set
+                         else config.get("daily_cost_limit_usd"))
+            raw_timezone = (p.daily_cost_timezone
+                            if "daily_cost_timezone" in p.model_fields_set
+                            else config.get("daily_cost_timezone") or "UTC")
+            try:
+                limit, timezone = project_budget.validate(
+                    raw_limit, raw_timezone or "UTC")
+            except project_budget.ProjectBudgetError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if limit is None:
+                config.pop("daily_cost_limit_usd", None)
+            else:
+                config["daily_cost_limit_usd"] = limit
+            config["daily_cost_timezone"] = timezone
         if p.repo_path is not None and p.repo_path.strip():
             try:
                 p.repo_path = check_repo_path(p.repo_path)
@@ -1240,7 +1263,9 @@ def create_app(home: Home) -> FastAPI:
                  (p.repo_path if p.repo_path is not None else row["repo_path"],
                   json.dumps(config), now(), project_id))
         db.audit(auth.actor, "project.update", "project", project_id,
-                 {"repo_path": p.repo_path})
+                 {"repo_path": p.repo_path,
+                  "daily_cost_limit_usd": config.get("daily_cost_limit_usd"),
+                  "daily_cost_timezone": config.get("daily_cost_timezone")})
         return {"id": project_id}
 
     @app.get("/api/projects/{project_id}/overview",
@@ -1275,6 +1300,7 @@ def create_app(home: Home) -> FastAPI:
                                "agents": by_role.get(role, [])})
 
         from . import admission as admission_mod
+        from . import project_budget
         plan_tasks = lifecycle_mod.task_plan(db, project_id)["tasks"]
         admission_report = (admission_mod.project_plan_report(
             db, project_id, plan_tasks, require_default=False)
@@ -1296,6 +1322,7 @@ def create_app(home: Home) -> FastAPI:
                         "repo_path": project["repo_path"],
                         "description": config.get("description", ""),
                         "delivery_profile": config.get("delivery_profile", {}),
+                        "budget": project_budget.status(db, project_id),
                         "template_id": project["default_template_id"]},
             "stages": stages,
             "role_coverage": needed,

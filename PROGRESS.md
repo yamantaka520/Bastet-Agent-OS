@@ -217,6 +217,11 @@ feature is confirmed against real vendor CLIs before release:
   reruns the pre-deploy gate, atomically pushes, and verifies the remote SHA.
 - **Quota self-wait**: `resets 1:30am (Asia/Taipei)` parsed, card resumed itself
   after the vendor's clock passed.
+- **Project daily cost fence**: a project-wide USD ceiling combines Gateway ledger
+  precision with direct executor-reported cost, pauses new dispatch once reached,
+  leaves in-flight jobs intact, and automatically resumes the durable runner at the
+  next configured IANA-local day. Pause/resume receipts, Web status and Telegram
+  notifications make the wait visible.
 - **The media loop**: a chat agent read vendor docs (WebFetch), proposed a
   conforming resource (bastet-config), the human applied it, the agent generated
   a real image through the granted credential, self-corrected on a real API

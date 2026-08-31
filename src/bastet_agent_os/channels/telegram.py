@@ -652,9 +652,17 @@ class TelegramChannel:
             from ..job_reporting import render
             text = "✅ 任務完成\n" + render(
                 self.db, event.get("job_id") or "", compact=True)
+        elif etype == "budget.exceeded" and event.get("limit_usd") is not None:
+            text = (f"🛑 專案已達每日成本上限\n專案 {event.get('project_id')}\n"
+                    f"今日：${float(event.get('spent_usd') or 0):.4f} / "
+                    f"${float(event.get('limit_usd')):.4f}\n"
+                    f"新工作暫停；預計自動續行：{event.get('resets_at')}")
+        elif etype == "budget.resumed":
+            text = (f"▶️ 專案每日成本額度已重置並自動續行\n"
+                    f"專案 {event.get('project_id')} · "
+                    f"時區 {event.get('timezone') or 'UTC'}")
         elif etype in ("budget.exceeded", "budget.warning"):
-            icon = {"job.done": "✅", "budget.exceeded": "🛑",
-                    "budget.warning": "⚠️"}[etype]
+            icon = "🛑" if etype == "budget.exceeded" else "⚠️"
             detail = event.get("reason") or event.get("stage") or ""
             text = f"{icon} {etype}: {event.get('job_id') or event.get('grant_id')} {detail}"
         else:

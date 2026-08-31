@@ -132,6 +132,18 @@ CREATE TABLE IF NOT EXISTS project_task_dispatches (
 CREATE INDEX IF NOT EXISTS idx_project_task_dispatches_job
   ON project_task_dispatches(job_id);
 
+-- One durable pause/resume receipt per project-local budget day.  The project
+-- remains running while its runner waits, so the next day resumes automatically.
+CREATE TABLE IF NOT EXISTS project_cost_pauses (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  period_start TEXT NOT NULL,
+  limit_usd REAL NOT NULL,
+  spent_usd REAL NOT NULL,
+  paused_at TEXT NOT NULL,
+  resumed_at TEXT,
+  PRIMARY KEY(project_id, period_start)
+);
+
 -- Durable recurring workflow intent. Cron evaluation is timezone-aware; each
 -- occurrence receives a unique run ledger row before dispatch so two servers
 -- cannot create duplicate jobs and restart can resume a claimed occurrence.

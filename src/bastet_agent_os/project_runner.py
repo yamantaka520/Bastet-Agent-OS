@@ -23,6 +23,7 @@ from typing import Any
 from . import project_lifecycle as lifecycle
 from .db import now
 from .orchestrator import DispatchRequest
+from .project_budget import ProjectBudgetExceeded, sync_pause
 
 log = logging.getLogger("bastet.project")
 
@@ -396,6 +397,15 @@ class ProjectRunner:
                 # maintenance resumes automatically without another UI action.
                 await asyncio.sleep(POLL_S)
                 continue
+            budget, budget_event = sync_pause(
+                self.db, project_id, actor=actor or "runner")
+            if budget_event and self.bus is not None:
+                self.bus.emit(budget_event, project_id, **budget)
+            if budget["exceeded"]:
+                # Keep durable RUNNING intent and the loop alive.  In-flight
+                # jobs reach their own safe boundary; no new task is claimed.
+                await asyncio.sleep(POLL_S)
+                continue
             plan = lifecycle.task_plan(self.db, project_id)
             tasks = lifecycle.normalize_task_graph(plan["tasks"])
             states = self._task_states(tasks)
@@ -433,6 +443,8 @@ class ProjectRunner:
                 except Exception as exc:
                     from .maintenance_mode import MaintenanceModeError
                     if isinstance(exc, MaintenanceModeError):
+                        break
+                    if isinstance(exc, ProjectBudgetExceeded):
                         break
                     raise
                 for dependency in task["needs"]:

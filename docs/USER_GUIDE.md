@@ -114,6 +114,15 @@ Each card carries the light, progress, and the controls that its state allows:
 | ■ 停止 | cancel what is in flight |
 | 結案 / 重啟 | close, or reopen a closed project |
 
+An optional **daily project ceiling (USD)** is configured on the project together
+with an IANA timezone such as `Asia/Taipei`. Spend combines exact Gateway ledger
+rows with direct executor-reported run cost without double counting. Once the
+ceiling is reached, no new manual, scheduled, or runner dispatch can create a job;
+the project runner stays alive and automatically resumes at the next local midnight.
+Jobs already in flight are not killed mid-work, so parallel jobs can create a bounded
+overshoot above the ceiling. The project header, audit log and Telegram show the
+pause and automatic resume. Clearing the amount disables the fence.
+
 Every confirmed task has a **delivery mode**. `none` is for analysis with no
 external result. `branch` requires `bastet/<job_id>` to reach the project remote.
 `production` additionally requires a new version and the project's delivery

@@ -10,11 +10,14 @@ import { Secret, scopeText } from "./Secrets";
 
 type Progress = { total: number; done: number; active: number; blocked: number;
                   open: number; cancelled: number };
+type ProjectBudget = { enabled: boolean; limit_usd: number | null;
+  spent_usd: number; remaining_usd: number | null; exceeded: boolean;
+  timezone: string; period_start: string; resets_at: string };
 type Project = {
   id: string; team_id: string; repo_path: string | null; description: string;
   default_template_id: string | null; status: string; light: string;
   transitions: string[]; progress: Progress; task_count: number;
-  running: boolean; created_at: string; updated_at: string;
+  running: boolean; budget: ProjectBudget; created_at: string; updated_at: string;
 };
 type Stage = { name: string; role?: string | null; gate: string; read_only?: boolean;
                needs?: string[]; workspace?: "shared" | "isolated" };
@@ -38,7 +41,7 @@ type Admission = { ok: boolean; errors: { code: string; detail: string }[];
 type Overview = {
   project: { id: string; team_id: string; repo_path: string | null;
              description: string; template_id: string | null;
-             delivery_profile?: DeliveryProfile };
+             delivery_profile?: DeliveryProfile; budget: ProjectBudget };
   stages: Stage[];
   role_coverage: { stage: string; role: string;
                    agents: { agent_id: string; agent_name: string;
@@ -214,6 +217,12 @@ function ProjectCard({ project, open, canOperate, isAdmin, refreshKey, onToggle,
             {t("proj.progress", p.progress)}</span>
         )}
         {p.running && <span className="card-meta">⚙ {t("proj.runnerActive")}</span>}
+        {p.budget?.enabled && (
+          <span className={p.budget.exceeded ? "error" : "card-meta"}>
+            💰 ${p.budget.spent_usd.toFixed(2)} / ${p.budget.limit_usd?.toFixed(2)}
+            {p.budget.exceeded ? ` · ${t("project.budgetPaused")}` : ""}
+          </span>
+        )}
         {canOperate && (
           <span className="row-ops">
             {p.transitions.map((tx) => (
@@ -279,6 +288,7 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
                      repo={ov.project.repo_path ?? ""}
                      desc={ov.project.description}
                      deliveryProfile={ov.project.delivery_profile ?? {}}
+                     budget={ov.project.budget}
                      onSaved={() => { load(); onChanged(); }} />
 
       <h4>{t("project.workflowBlock")}</h4>
@@ -736,25 +746,31 @@ function Picker({ options, label, empty, onPick, t }: {
  *  a WS event mid-typing snapped the path back and the edit looked impossible.
  *  State lives here, seeded once per project, and is only re-seeded when the
  *  server value actually changes while the field is untouched. */
-function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onSaved, t }: {
+function ContentEditor({ projectId, repo, desc, deliveryProfile, budget,
+  canOperate, onSaved, t }: {
   projectId: string; repo: string; desc: string; canOperate: boolean;
-  deliveryProfile: DeliveryProfile; onSaved: () => void; t: T;
+  deliveryProfile: DeliveryProfile; budget: ProjectBudget; onSaved: () => void; t: T;
 }) {
-  const [draft, setDraft] = useState({ repo, desc, deliveryProfile });
+  const [draft, setDraft] = useState({ repo, desc, deliveryProfile,
+    dailyLimit: budget.limit_usd?.toString() ?? "", dailyTimezone: budget.timezone });
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    if (!dirty) setDraft({ repo, desc, deliveryProfile });
-  }, [repo, desc, deliveryProfile, dirty]);
+    if (!dirty) setDraft({ repo, desc, deliveryProfile,
+      dailyLimit: budget.limit_usd?.toString() ?? "", dailyTimezone: budget.timezone });
+  }, [repo, desc, deliveryProfile, budget.limit_usd, budget.timezone, dirty]);
 
   const save = async () => {
     setError("");
     try {
       await put(`/api/projects/${projectId}`,
                 { repo_path: draft.repo.trim(), description: draft.desc,
-                  delivery_profile: draft.deliveryProfile });
+                  delivery_profile: draft.deliveryProfile,
+                  daily_cost_limit_usd: draft.dailyLimit.trim()
+                    ? Number(draft.dailyLimit) : null,
+                  daily_cost_timezone: draft.dailyTimezone.trim() || "UTC" });
       setDirty(false);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2000);
@@ -763,7 +779,8 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
   };
 
   const patch = (part: Partial<{ repo: string; desc: string;
-                                deliveryProfile: DeliveryProfile }>) => {
+                                deliveryProfile: DeliveryProfile;
+                                dailyLimit: string; dailyTimezone: string }>) => {
     setDraft({ ...draft, ...part });
     setDirty(true);
     setSaved(false);
@@ -787,6 +804,30 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
         {saved && <span className="muted">✅</span>}
       </div>
       <p className="muted">{t("project.repoHint")}</p>
+      <div className="inline-form">
+        <label className="res-field">
+          <span>{t("project.dailyCostLimit")}</span>
+          <input type="number" min="0.01" step="0.01"
+                 placeholder={t("project.dailyCostLimitPh")}
+                 value={draft.dailyLimit} disabled={!canOperate}
+                 onChange={(e) => patch({ dailyLimit: e.target.value })} />
+        </label>
+        <label className="res-field">
+          <span>{t("project.dailyCostTimezone")}</span>
+          <input placeholder="Asia/Taipei" value={draft.dailyTimezone}
+                 disabled={!canOperate}
+                 onChange={(e) => patch({ dailyTimezone: e.target.value })} />
+        </label>
+        {budget.enabled && (
+          <span className={budget.exceeded ? "error" : "muted"}>
+            {t("project.dailyCostUsage", {
+              spent: budget.spent_usd.toFixed(2),
+              limit: budget.limit_usd?.toFixed(2) ?? "0.00",
+            })}
+          </span>
+        )}
+      </div>
+      <p className="muted">{t("project.dailyCostHint")}</p>
       <details>
         <summary>{t("project.deliveryProfile")}</summary>
         <div className="stage-editor">

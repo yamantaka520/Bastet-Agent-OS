@@ -43,7 +43,7 @@ EVENT_TYPES = {
     "schedule.dispatched", "schedule.skipped", "schedule.failed",
     # everything else
     "chat.message",
-    "budget.warning", "budget.exceeded",
+    "budget.warning", "budget.exceeded", "budget.resumed",
     "resource.health_changed",
     "capability.unavailable", "skill.supply_required",
     "agent.depleted",

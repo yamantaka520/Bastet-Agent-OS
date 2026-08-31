@@ -50,6 +50,9 @@
 - **訂閱額度用盡是計時器，不是錯誤。** `You've hit your session limit · resets
   1:30am (Asia/Taipei)` 這類失敗會自動停靠並在重置後自己續跑 —— 期間手動重試
   幾次都一樣死，不用按。等不及可以按，會搶先。
+- **專案每日成本上限擋的是新工作，不會半途殺 run。** 達線時 runner 會保留 running
+  意圖並等下一個設定時區的午夜自動續行；已經並行啟動的 job 仍會完成，所以最終花費
+  可能比上限多出這些 in-flight job 的成本。要縮小超額上界，同時降低 `max_parallel`。
 - **廠商會無預警收緊 API 驗證。** OpenAI strict schema 曾讓所有 codex 審查一夜
   全滅（`invalid_json_schema`）。症狀是秒殺且錯誤指向 schema/request 而非任務
   內容 —— 這類是產品修法，重試無效。
