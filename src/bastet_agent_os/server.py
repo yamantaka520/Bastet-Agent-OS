@@ -441,6 +441,11 @@ class SecretUpdateIn(BaseModel):
     scope_id: str | None = None
 
 
+class SecretPruneIn(BaseModel):
+    apply: bool = False
+    minimum_age_hours: int = 24
+
+
 def create_app(home: Home) -> FastAPI:
     from .config import augment_path
 
@@ -1141,6 +1146,27 @@ def create_app(home: Home) -> FastAPI:
         return {"id": rid, "env_name": env_name,
                 "note": "run 啟動時會以此環境變數注入可見範圍內的任務"}
 
+    @app.post("/api/secrets/prune")
+    def prune_secret_files(body: SecretPruneIn,
+                           auth: Auth = Depends(require_role("admin"))):
+        if body.minimum_age_hours < 1 or body.minimum_age_hours > 24 * 365:
+            raise HTTPException(status_code=400,
+                                detail="minimum_age_hours must be between 1 and 8760")
+        try:
+            result = secrets_store.prune_managed_files(
+                db, home.root, apply=body.apply,
+                minimum_age_s=body.minimum_age_hours * 3600)
+        except secrets_store.SecretError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        db.audit(auth.actor,
+                 "secret.prune" if body.apply else "secret.prune.preview",
+                 "secret_store", "managed_files",
+                 {"candidates": len(result["candidates"]),
+                  "removed": len(result["removed"]),
+                  "bytes": result["bytes"],
+                  "minimum_age_hours": body.minimum_age_hours})
+        return result
+
     @app.put("/api/secrets/{secret_id}")
     def update_secret(secret_id: str, sec: SecretUpdateIn,
                       auth: Auth = Depends(require_role("admin"))):
@@ -1189,7 +1215,7 @@ def create_app(home: Home) -> FastAPI:
         db.write("DELETE FROM resources WHERE id=?", (secret_id,))
         db.audit(auth.actor, "secret.delete", "resource", secret_id, {"name": row["name"]})
         return {"deleted": secret_id,
-                "note": "憑證檔案本身保留在 <home>/secrets，確認後可自行刪除"}
+                "note": "憑證檔案會先保留；管理頁可預覽並清理滿 24 小時且未被引用的 Bastet 檔案"}
 
     # ---- project overview: one place per project -----------------------------------
 

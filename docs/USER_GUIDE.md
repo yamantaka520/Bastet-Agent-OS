@@ -315,6 +315,12 @@ MCP resources keep the vendor's install command. Press install and you get the
 full output back, so a failed install can be fixed in place and retried. Nothing
 installs implicitly.
 
+The Admin credentials section has a preview-first orphan-file cleanup. It only
+offers regular files created under Bastet's random-suffix naming contract, older
+than 24 hours, and absent from every resource and channel reference. Preview is
+non-destructive; apply asks again and is audited. Arbitrary files, symlinks,
+fresh rotations, and user-managed `file:` paths outside this store are excluded.
+
 ### 組織 (Org)
 
 Teams, projects, agents, executor accounts, and role assignments. The executor

@@ -16,8 +16,6 @@ it is to build.
   and schedulable Skill installation. See
   [CORE-ENGINE-REDESIGN.md](CORE-ENGINE-REDESIGN.md).
 
-- **Prune `~/.bastet/secrets`.** Rotated credential files accumulate; nothing
-  removes the superseded ones.
 - **Cost ceilings that stop work.** Budgets are recorded per grant and enforced
   at dispatch; a per-project daily ceiling that pauses the runner (rather than
   failing a run) is a better shape for the same intent.
@@ -35,9 +33,10 @@ it is to build.
 
 PyPI + Docker Hub distribution (0.19), config-by-conversation and auto-push
 (0.20), the media loop and honest retry semantics (0.21), quota self-wait,
-Playwright tooling and per-stage time budgets (0.22), and durable timezone-aware
-scheduled workflows with restart-safe dispatch and overlap suppression (next
-release after 0.35.2). Details in
+Playwright tooling and per-stage time budgets (0.22), durable timezone-aware
+scheduled workflows with restart-safe dispatch and overlap suppression, and
+preview-first safe pruning of unreferenced managed credential files (next release
+after 0.35.2). Details in
 [CHANGELOG.md](../CHANGELOG.md).
 
 ## Under consideration

@@ -16,6 +16,8 @@ type Project = { id: string; team_id: string };
  *  write-only, so there is nothing to prefill it with. */
 type Edit = { id: string; name: string; value: string; env_name: string;
               scope_type: string; scope_id: string; note: string };
+type PruneResult = { candidates: { name: string; size: number; age_hours: number }[];
+                     removed: { name: string; size: number }[]; bytes: number };
 
 /** Scope shown the way the credential is granted: global has no id, team and
  *  project carry theirs. Needs `t` because it renders outside a component. */
@@ -85,6 +87,24 @@ export default function SecretsSection({ projects, teams, onChanged }: {
   const optionsFor = (scopeType: string) =>
     scopeType === "project" ? projects.map((p) => p.id)
     : scopeType === "team" ? teams : [];
+
+  const prune = async () => {
+    setError("");
+    try {
+      const preview = await post<PruneResult>("/api/secrets/prune",
+        { apply: false, minimum_age_hours: 24 });
+      if (!preview.candidates.length) {
+        window.alert(t("sec.pruneNone"));
+        return;
+      }
+      if (!window.confirm(t("sec.pruneConfirm", {
+        count: preview.candidates.length, bytes: preview.bytes }))) return;
+      const applied = await post<PruneResult>("/api/secrets/prune",
+        { apply: true, minimum_age_hours: 24 });
+      window.alert(t("sec.pruneDone", {
+        count: applied.removed.length, bytes: applied.bytes }));
+    } catch (e) { setError(String((e as Error).message)); }
+  };
 
   return (
     <Section title={t("sec.title")}>
@@ -186,6 +206,10 @@ export default function SecretsSection({ projects, teams, onChanged }: {
         ])} />
       <p className="muted">{t("sec.multilineHint")}</p>
       <p className="muted">{t("sec.hint")}</p>
+      <div className="row">
+        <button className="ghost" onClick={prune}>{t("sec.prune")}</button>
+        <span className="muted">{t("sec.pruneHint")}</span>
+      </div>
     </Section>
   );
 }

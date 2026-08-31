@@ -39,6 +39,11 @@ Last updated: 2026-08-31
   exact Agent and workflow template; the project page supports create, pause,
   resume, run-now and delete. Overlap is skipped while the previous job remains
   active, and maintenance mode retains the claim for retry after the fence opens.
+  Credential rotation no longer creates an unmanageable pile of retired files:
+  Admins can preview and then prune only Bastet-named regular files that are at
+  least 24 hours old and absent from every resource/channel reference. Arbitrary
+  files, user-managed `file:` paths, fresh files and symlinks are excluded; the
+  reference set is recomputed before unlink and both preview/apply are audited.
   Telegram now renders graph-node starts/passes, handoff reviews/challenges,
   delivery transitions and evidence-grounded completion summaries. `/job` reads
   the durable task snapshot; `/ask` gives the configured responder a task-scoped
@@ -215,7 +220,6 @@ feature is confirmed against real vendor CLIs before release:
 - **Non-development branch delivery**: analysis/content cards that deliberately
   request branch-only delivery still leave merge authority to a human. Development
   templates instead require the verified `integration` or `production` path.
-- **`~/.bastet/secrets` accumulates** rotated credential files.
 - **Telegram bot token** from an early session should still be rotated.
 - **A one-agent role dead-ends less gracefully than it should.** Dispatch now
   falls back to any funded agent on the project, but the stand-in may hold a

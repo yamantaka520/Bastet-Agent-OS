@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from pathlib import Path
 
 
@@ -124,6 +125,70 @@ def ensure_ref(value: str, home_root, hint: str) -> str:
     path.write_text(value)
     os.chmod(path, 0o600)
     return f"file:{path}"
+
+
+_MANAGED_FILE = re.compile(r"^.+-[0-9a-f]{8}$")
+
+
+def _referenced_files(db) -> set[Path]:
+    refs = [row["secret_ref"] for row in db.query(
+        "SELECT secret_ref FROM resources WHERE secret_ref IS NOT NULL "
+        "UNION ALL SELECT secret_ref FROM channels WHERE secret_ref IS NOT NULL")]
+    protected: set[Path] = set()
+    for ref in refs:
+        concrete = expand(db, ref) if ref.startswith("secret:") else ref
+        if concrete.startswith("file:"):
+            protected.add(Path(concrete[5:]).expanduser().resolve(strict=False))
+    return protected
+
+
+def prune_managed_files(db, home_root, *, apply: bool = False,
+                        minimum_age_s: int = 86400) -> dict:
+    """Preview or remove unreferenced files created by :func:`ensure_ref`.
+
+    Only regular, non-symlink, direct children matching Bastet's random-suffix
+    naming contract are eligible. A grace period protects a just-rotated file
+    from an operator or request race; references are recomputed before removal.
+    User-managed ``file:`` paths and arbitrary files in the directory are never
+    candidates.
+    """
+    if minimum_age_s < 0:
+        raise SecretError("minimum secret prune age cannot be negative")
+    root = (Path(home_root) / "secrets").resolve(strict=False)
+    if not root.exists():
+        return {"candidates": [], "removed": [], "protected": 0, "bytes": 0}
+    current = time.time()
+    protected = _referenced_files(db)
+    candidates = []
+    for path in sorted(root.iterdir(), key=lambda item: item.name):
+        if path.is_symlink() or not path.is_file() or not _MANAGED_FILE.fullmatch(path.name):
+            continue
+        resolved = path.resolve(strict=False)
+        if resolved.parent != root or resolved in protected:
+            continue
+        stat = path.stat()
+        age_s = max(0, int(current - stat.st_mtime))
+        if age_s < minimum_age_s:
+            continue
+        candidates.append({"name": path.name, "size": stat.st_size,
+                           "age_hours": round(age_s / 3600, 1)})
+    removed = []
+    if apply:
+        # Close the normal rotation/delete-to-prune gap once more immediately
+        # before unlink. The grace period is the backstop for concurrent writes.
+        protected = _referenced_files(db)
+        by_name = {item["name"]: item for item in candidates}
+        for name in list(by_name):
+            path = root / name
+            if path.is_symlink() or not path.is_file() \
+                    or path.resolve(strict=False) in protected:
+                continue
+            path.unlink()
+            removed.append(by_name[name])
+    return {"candidates": candidates, "removed": removed,
+            "protected": len(protected),
+            "bytes": sum(item["size"] for item in removed) if apply
+                     else sum(item["size"] for item in candidates)}
 
 
 def mask(value: str) -> str:
