@@ -50,3 +50,24 @@ async def test_orchestrator_shutdown_cancels_and_reaps_owned_tasks(orch):
 
     assert cancelled.is_set()
     assert not orch._tasks
+
+
+async def test_wait_idle_drains_tasks_spawned_while_waiting(orch):
+    """A completion callback must not strand the next generation of work."""
+    completed = []
+
+    async def child():
+        await asyncio.sleep(0)
+        completed.append("child")
+
+    async def parent():
+        await asyncio.sleep(0)
+        completed.append("parent")
+        orch._spawn(child())
+
+    for _ in range(100):
+        orch._spawn(parent())
+        await orch.wait_idle()
+
+    assert completed == [item for _ in range(100) for item in ("parent", "child")]
+    assert not orch._tasks

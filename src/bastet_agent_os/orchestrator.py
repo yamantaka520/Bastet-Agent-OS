@@ -1177,7 +1177,14 @@ class Orchestrator:
     async def wait_idle(self) -> None:
         """Await all in-flight job drivers (used by tests and shutdown)."""
         while self._tasks:
-            await asyncio.gather(*list(self._tasks), return_exceptions=True)
+            # Keep a strong, immutable snapshot while done callbacks mutate the
+            # owned-task set.  Python 3.12 exposed an indefinite stall in the
+            # gather-based drain during quota recovery; wait's ALL_COMPLETED
+            # barrier avoids coupling the drain to gather's callback aggregation.
+            done, _ = await asyncio.wait(tuple(self._tasks))
+            for task in done:
+                if not task.cancelled():
+                    task.exception()  # retrieve failures, as return_exceptions did
 
     async def shutdown(self) -> None:
         """Stop owned work promptly while leaving durable state restartable.

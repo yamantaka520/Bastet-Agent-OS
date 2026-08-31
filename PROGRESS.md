@@ -103,10 +103,12 @@ Last updated: 2026-08-31
   and recovery-time revalidation are recorded before review mutation. The same gate now
   proves exact App Info/version locale parity and requires provider-processed screenshot
   evidence per version locale, with configurable display types and no ambiguous App Info
-  guessing. Validation: 704 Python tests,
+  guessing. Python 3.12 task draining now uses an immutable `asyncio.wait`
+  barrier, avoiding the callback race that stalled the quota-resume path while
+  preserving recursively spawned work. Validation: 705 Python tests,
   ruff clean, Web production build clean.
 
-- Released: **v0.36.1**. Version arc v0.1.0 → v0.36.1 in one month
+- Released: **v0.36.2**. Version arc v0.1.0 → v0.36.2 in one month
   (2026-07-28 → 2026-08-31), ~170 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.

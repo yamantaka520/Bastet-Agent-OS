@@ -8,6 +8,15 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.36.2] - 2026-08-31
+
+### Fixed
+
+- Orchestrator idle draining now waits on immutable task snapshots and consumes
+  completed-task failures without relying on `asyncio.gather`. This prevents a
+  Python 3.12 callback race from indefinitely stalling quota recovery and other
+  task chains while still draining work spawned by an in-flight task.
+
 ## [0.36.1] - 2026-08-31
 
 ### Fixed
