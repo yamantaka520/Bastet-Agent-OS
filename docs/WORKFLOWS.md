@@ -262,6 +262,11 @@ exercise the provider-neutral contract in isolation. It proves one exact HTTP
 readback succeeds and one stale readback blocks. Then run the equivalent canary
 against the actual provider using that project's trusted deploy and verify commands.
 
+For the built-in mobile adapters, use `bastet store-canary --job <id>` to read the
+exact frozen submission with project-scoped credentials. If no Bastet submission exists
+yet, `--project <id> --submission <receipt.json>` can preflight an existing provider
+object, but that mode does not independently establish the file's commit provenance.
+
 Mobile store delivery is asynchronous. The built-in `mobile-app` workflow already
 ends at a release-manager `human-approve` stage, which is mandatory for
 `app_store_connect` and `google_play`. Store adapters must emit the common identity

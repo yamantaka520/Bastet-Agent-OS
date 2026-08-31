@@ -445,6 +445,27 @@ def production_rehearsal():
             raise typer.Exit(1) from exc
 
 
+@app.command("store-canary")
+def store_canary(
+    project_id: str = typer.Option("", "--project", help="Project for supplied receipt."),
+    job_id: str = typer.Option("", "--job", help="Use a frozen job delivery receipt."),
+    submission: str = typer.Option(
+        "", "--submission", help="Existing uploader submission-receipt JSON file."),
+):
+    """Read one exact Apple/Google release object without publishing changes."""
+    from .store_canary import StoreCanaryError, run
+
+    if submission and not project_id:
+        typer.echo("store canary failed: --project is required with --submission", err=True)
+        raise typer.Exit(1)
+    try:
+        _print(run(Home().root, project_id=project_id, job_id=job_id,
+                   submission_file=submission or None))
+    except StoreCanaryError as exc:
+        typer.echo(f"store canary failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
 @app.command("pricing-update")
 def pricing_update():
     """Refresh the local model price table from the public LiteLLM JSON."""

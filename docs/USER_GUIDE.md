@@ -158,6 +158,26 @@ The Apple adapter reads the exact App Store version and verifies its app relatio
 The Google adapter exchanges a signed service-account assertion, creates a temporary
 uncommitted edit, reads the configured track and exact `versionCode`, then deletes the
 read edit. Neither adapter uploads, submits, commits, releases, or changes rollout.
+
+After configuring credentials, run a provider canary before relying on automatic
+polling:
+
+```bash
+# Strongest mode: frozen profile + integrated commit + durable uploader receipt.
+bastet store-canary --job <waiting_external_job_id>
+
+# Preflight an already-existing TestFlight/internal-track object before a Bastet job.
+bastet store-canary --project <project_id> --submission submission-receipt.json
+```
+
+The second form checks credentials, provider identity and the exact provider object,
+but its commit/version/target provenance is supplied by that file; the JSON report
+therefore labels it `supplied_submission_receipt`. The job form labels the stronger
+case `frozen_job_delivery`. Both resolve only the provider's required, in-scope Secrets,
+audit each resolution without its value, write `store.canary.checked`, and return
+`meets_release_goal` separately from `ok`. Thus a rejected store object can still prove
+that authentication and exact-object lookup work while correctly reporting that the
+release goal is unmet.
 | 刪除 | remove the project (admin only) — see below |
 
 Expanded, a card shows the task plan (with provenance: which conversation it came
@@ -300,6 +320,7 @@ bastet doctor                     # health, executors, gate tools
 bastet reliability-rehearsal      # isolated multiprocess dispatch/restart acceptance
 bastet delivery-rehearsal         # parallel DAG/join/remote-main delivery acceptance
 bastet production-rehearsal       # tag/deploy/HTTP receipt + stale-provider canary
+bastet store-canary --job <id>    # credentialed read of one frozen mobile submission
 bastet usage                      # cost by project / agent / precision
 bastet audit                      # the trail
 bastet channel list

@@ -182,6 +182,7 @@ def _submission_receipt(output: str, *, commit_sha: str, version: str,
 
 def _verification_receipt(output: str | dict[str, Any], *, commit_sha: str, version: str,
                           target: str, profile: dict[str, Any] | None = None,
+                          allow_rejected: bool = False,
                           ) -> tuple[dict[str, Any], bool]:
     """Parse and bind provider-observed state to this exact release.
 
@@ -236,6 +237,8 @@ def _verification_receipt(output: str | dict[str, Any], *, commit_sha: str, vers
     milestone = str(receipt.get("milestone") or "")
     provider_status = str(receipt.get("provider_status") or "")
     if milestone == "rejected":
+        if allow_rejected:
+            return receipt, False
         raise DeliveryError(
             f"{provider} rejected release: {provider_status or 'no provider status'}")
     if milestone not in STORE_MILESTONES:

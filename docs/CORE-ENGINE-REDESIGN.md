@@ -301,6 +301,16 @@ secret environment variables; neither profile nor evidence contains them. Unknow
 provider states, ambiguous versions, wrong app relationships, missing credentials and
 HTTP failures all fail closed.
 
+The nineteenth adds `bastet store-canary` as the credentialed acceptance boundary.
+Job mode reloads the frozen profile, integrated SHA and durable submission receipt,
+resolves only the exact store credential variables granted to that project/team, and
+performs one official status read without mutating job or delivery state. Project/file
+mode supports preflight of an existing TestFlight/internal-track object but labels its
+weaker provenance explicitly. Secret resolution and the sanitized result are audited;
+secret values never enter output or audit. `ok` means authentication and exact-object
+observation succeeded, while `meets_release_goal` remains separate, so even a rejected
+object cannot be mistaken for a successful release.
+
 Provider adapters normalize official state into milestones while retaining the raw
 status. Apple distinguishes `WAITING_FOR_REVIEW`, `IN_REVIEW`,
 `PENDING_DEVELOPER_RELEASE`, and `READY_FOR_DISTRIBUTION`; Google Play track releases

@@ -59,6 +59,9 @@ advance, and an exact remote SHA receipt. It likewise uses temporary repositorie
 `bastet production-rehearsal` adds a temporary HTTP provider: one canary must deploy
 and read back its exact live receipt, while a second stale-provider canary must block
 without `job.deployed`. No configured project, remote, or production service is touched.
+For a configured mobile project, `bastet store-canary --job <id>` performs a
+credentialed status read against the exact frozen App Store/Google Play submission;
+it never uploads, submits or publishes.
 
 ## Why
 

@@ -24,3 +24,4 @@ def test_rehearsal_is_exposed_by_the_cli():
     assert "reliability-rehearsal" in result.stdout
     assert "delivery-rehearsal" in result.stdout
     assert "production-rehearsal" in result.stdout
+    assert "store-canary" in result.stdout

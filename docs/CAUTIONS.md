@@ -135,6 +135,10 @@
   receipt 指定的 Apple version ID／Google versionCode。上傳指令若沒有回傳綁定本次
   commit、version、target 與商店物件 ID 的 JSON，交付直接失敗；商店私鑰只能由專案
   Secrets 注入，不能放進 delivery profile、指令輸出或 evidence。
+- **商店 canary 的 `ok` 只代表查詢鏈成立。** `bastet store-canary` 不會改任務或發布狀態；
+  是否達到交付目標必須看獨立的 `meets_release_goal`。`--project --submission` 的 commit
+  provenance 是外部檔案自述，正式驗收應使用綁定 frozen delivery 的 `--job`。Google 查詢
+  會建立隨即刪除、絕不 commit 的 read edit；它不等於完全無 API-side object creation。
 - **審計是 hash 串接的 append-only。** 不要手動改 audit_log —— 鏈會斷，
   `verify_audit_chain()` 會抓到。刪任務/專案時的用量帳務會被拒絕或要求 force
   並記錄寫掉的金額，這是刻意的。
