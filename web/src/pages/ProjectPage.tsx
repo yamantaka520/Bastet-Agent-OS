@@ -59,6 +59,7 @@ type DeliveryProfile = { target_branch?: string; target?: string;
   submission_adapter?: "command" | "official_api";
   release_goal?: "uploaded" | "submitted" | "approved" | "published";
   app_id?: string; platform?: string; build_number?: string;
+  apple_release_type?: "MANUAL";
   package_name?: string; track?: string; version_code?: string;
   artifact_path?: string; artifact_sha256?: string;
   google_release_status?: "draft" | "completed";
@@ -765,6 +766,44 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
                                ...draft.deliveryProfile, [key]: e.target.value } })} />
                     </label>
                   ))}
+                  {(draft.deliveryProfile.status_adapter ?? "command")
+                    === "official_api" && (<>
+                    <label className="res-field">
+                      <span>{t("project.delivery.submission_adapter")}</span>
+                      <select value={draft.deliveryProfile.submission_adapter ?? "command"}
+                              disabled={!canOperate}
+                              onChange={(e) => patch({ deliveryProfile: {
+                                ...draft.deliveryProfile,
+                                submission_adapter:
+                                  e.target.value as DeliveryProfile["submission_adapter"],
+                                ...(e.target.value === "official_api"
+                                  ? { submission_recovery: "official_api" as const }
+                                  : {}),
+                              } })}>
+                        <option value="command">
+                          {t("project.delivery.submit.command")}
+                        </option>
+                        <option value="official_api">
+                          {t("project.delivery.submit.apple_official_api")}
+                        </option>
+                      </select>
+                    </label>
+                    {(draft.deliveryProfile.submission_adapter ?? "command")
+                      === "official_api" && (
+                      <label className="res-field">
+                        <span>{t("project.delivery.apple_release_type")}</span>
+                        <select value={draft.deliveryProfile.apple_release_type ?? "MANUAL"}
+                                disabled={!canOperate}
+                                onChange={(e) => patch({ deliveryProfile: {
+                                  ...draft.deliveryProfile,
+                                  apple_release_type:
+                                    e.target.value as DeliveryProfile["apple_release_type"],
+                                } })}>
+                          <option value="MANUAL">MANUAL</option>
+                        </select>
+                      </label>
+                    )}
+                  </>)}
                 </>
               ) : (<>
                 <label className="res-field">

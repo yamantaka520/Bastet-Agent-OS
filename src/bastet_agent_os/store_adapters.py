@@ -1,10 +1,12 @@
 """Authenticated status and crash-recovery adapters for mobile stores.
 
-Most upload/submission paths remain explicit trusted-host commands whose structured
+Binary upload paths remain explicit trusted-host commands whose structured
 receipt supplies the immutable provider object identifier. These adapters observe
 that exact object and can recover a receipt after provider success but before local
 persistence. A narrowly scoped Google Play internal-track adapter also owns its edit,
-AAB upload, validation, and safe commit. Status and lookup paths never mutate a release.
+AAB upload, validation, and safe commit. The Apple adapter promotes an already processed
+build through version attachment and review submission. Status and lookup paths never
+mutate a release.
 """
 
 from __future__ import annotations
@@ -57,6 +59,15 @@ GOOGLE_STATES = {
     "inProgress": "submitted",
     "halted": "approved",
     "completed": "published",
+}
+
+APPLE_SUBMITTED_REVIEW_STATES = {
+    "WAITING_FOR_REVIEW",
+    "IN_REVIEW",
+    "UNRESOLVED_ISSUES",
+    "CANCELING",
+    "COMPLETING",
+    "COMPLETE",
 }
 
 
@@ -123,6 +134,14 @@ def _response_json(response: httpx.Response, provider: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise StoreAdapterError(f"{provider} API returned a non-object response")
     return payload
+
+
+def _response_ok(response: httpx.Response, provider: str) -> None:
+    try:
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        status = getattr(response, "status_code", "unknown")
+        raise StoreAdapterError(f"{provider} API request failed ({status})") from exc
 
 
 def _google_artifact(profile: dict[str, Any], workdir: str) -> tuple[Path, int, str]:
@@ -260,6 +279,34 @@ class StoreStatusAdapter:
             env: dict[str, str]) -> dict[str, Any] | None:
         """Find the exact processed build already attached to an App Store version."""
         headers = self._apple_headers(env)
+        build_id, version_row = self._apple_build_and_version(profile, release, headers)
+        if not build_id or not version_row:
+            return None
+        attached = ((((version_row.get("relationships") or {}).get("build") or {})
+                     .get("data") or {}).get("id"))
+        if str(attached or "") != build_id:
+            if attached:
+                raise StoreAdapterError(
+                    "App Store Connect version is attached to a different build")
+            return None
+        version_id = str(version_row.get("id") or "")
+        fields = {
+            "app_store_version_id": version_id,
+            "build_number": str(profile["build_number"]),
+            "build_id": build_id,
+        }
+        if str(profile.get("submission_adapter") or "command") == "official_api" and \
+                str(profile.get("release_goal") or "published") != "uploaded":
+            review = self._apple_review_for_version(
+                str(profile["app_id"]), version_id, headers)
+            if review is None or review[1] not in APPLE_SUBMITTED_REVIEW_STATES:
+                return None
+            fields["review_submission_id"] = review[0]
+        return _submission_receipt(release, profile, fields)
+
+    def _apple_build_and_version(
+            self, profile: dict[str, Any], release: dict[str, Any],
+            headers: dict[str, str]) -> tuple[str, dict[str, Any] | None]:
         app_id = str(profile["app_id"])
         version = str(release["version"])
         build_number = str(profile["build_number"])
@@ -279,7 +326,7 @@ class StoreStatusAdapter:
         if len(builds) > 1:
             raise StoreAdapterError("App Store Connect lookup found multiple exact builds")
         if not builds:
-            return None
+            return "", None
         build_id = str((builds[0] or {}).get("id") or "")
         if not build_id:
             raise StoreAdapterError("App Store Connect build has no id")
@@ -298,19 +345,151 @@ class StoreStatusAdapter:
         if len(versions) > 1:
             raise StoreAdapterError("App Store Connect lookup found multiple exact versions")
         if not versions:
-            return None
-        version_row = versions[0] or {}
+            return build_id, None
+        return build_id, versions[0] or {}
+
+    def _apple_review_for_version(
+            self, app_id: str, version_id: str,
+            headers: dict[str, str]) -> tuple[str, str] | None:
+        payload = _response_json(self.client.get(
+            f"{self.apple_api_url}/v1/apps/{quote(app_id, safe='')}/reviewSubmissions",
+            params={
+                "include": "items",
+                "fields[reviewSubmissions]": "state,items",
+                "fields[reviewSubmissionItems]": "state,appStoreVersion",
+                "limit": "200",
+                "limit[items]": "50",
+            },
+            headers=headers), "App Store Connect")
+        submissions = payload.get("data") or []
+        included = payload.get("included") or []
+        if not isinstance(submissions, list) or not isinstance(included, list):
+            raise StoreAdapterError("App Store Connect review response is invalid")
+        submission_states = {
+            str(row.get("id") or ""): str((row.get("attributes") or {}).get("state") or "")
+            for row in submissions if isinstance(row, dict)
+        }
+        item_submissions: dict[str, str] = {}
+        for row in submissions:
+            if not isinstance(row, dict):
+                continue
+            submission_id = str(row.get("id") or "")
+            items = (((row.get("relationships") or {}).get("items") or {})
+                     .get("data") or [])
+            if not isinstance(items, list):
+                raise StoreAdapterError("App Store Connect review items are invalid")
+            for item_ref in items:
+                if isinstance(item_ref, dict) and item_ref.get("id"):
+                    item_submissions[str(item_ref["id"])] = submission_id
+        matches: list[tuple[str, str]] = []
+        for item in included:
+            if not isinstance(item, dict) or item.get("type") != "reviewSubmissionItems":
+                continue
+            relationships = item.get("relationships") or {}
+            linked_version = (((relationships.get("appStoreVersion") or {})
+                               .get("data") or {}).get("id"))
+            submission_id = item_submissions.get(str(item.get("id") or ""))
+            if not submission_id:
+                submission_id = (((relationships.get("reviewSubmission") or {})
+                                  .get("data") or {}).get("id"))
+            if str(linked_version or "") == version_id and submission_id:
+                submission_id = str(submission_id)
+                matches.append((submission_id, submission_states.get(submission_id, "")))
+        if len(matches) > 1:
+            raise StoreAdapterError(
+                "App Store Connect found multiple review items for the exact version")
+        return matches[0] if matches else None
+
+    def submit_app_store(
+            self, profile: dict[str, Any], release: dict[str, Any],
+            env: dict[str, str]) -> dict[str, Any]:
+        """Promote one exact processed build to a version and optional review submission."""
+        headers = self._apple_headers(env)
+        build_id, version_row = self._apple_build_and_version(profile, release, headers)
+        if not build_id:
+            raise StoreAdapterError("exact processed App Store Connect build was not found")
+        app_id = str(profile["app_id"])
+        platform = str(profile.get("platform") or "IOS").upper()
+        if version_row is None:
+            created = _response_json(self.client.post(
+                f"{self.apple_api_url}/v1/appStoreVersions",
+                json={"data": {
+                    "type": "appStoreVersions",
+                    "attributes": {
+                        "platform": platform,
+                        "versionString": str(release["version"]),
+                        "releaseType": str(profile.get("apple_release_type") or "MANUAL"),
+                    },
+                    "relationships": {
+                        "app": {"data": {"type": "apps", "id": app_id}},
+                    },
+                }}, headers=headers), "App Store Connect")
+            version_row = created.get("data")
+            if not isinstance(version_row, dict) or not version_row.get("id"):
+                raise StoreAdapterError("App Store Connect did not create a version")
+        version_id = str(version_row["id"])
         attached = ((((version_row.get("relationships") or {}).get("build") or {})
                      .get("data") or {}).get("id"))
-        if str(attached or "") != build_id:
-            if attached:
+        if attached and str(attached) != build_id:
+            raise StoreAdapterError(
+                "App Store Connect version is attached to a different build")
+        if not attached:
+            _response_ok(self.client.patch(
+                f"{self.apple_api_url}/v1/appStoreVersions/"
+                f"{quote(version_id, safe='')}/relationships/build",
+                json={"data": {"type": "builds", "id": build_id}}, headers=headers),
+                "App Store Connect")
+        fields = {
+            "app_store_version_id": version_id,
+            "build_number": str(profile["build_number"]),
+            "build_id": build_id,
+        }
+        if str(profile.get("release_goal") or "published") == "uploaded":
+            return _submission_receipt(release, profile, fields)
+
+        review = self._apple_review_for_version(app_id, version_id, headers)
+        if review is None:
+            submission_payload = _response_json(self.client.post(
+                f"{self.apple_api_url}/v1/reviewSubmissions",
+                json={"data": {
+                    "type": "reviewSubmissions",
+                    "relationships": {
+                        "app": {"data": {"type": "apps", "id": app_id}},
+                    },
+                }}, headers=headers), "App Store Connect")
+            submission = submission_payload.get("data")
+            if not isinstance(submission, dict) or not submission.get("id"):
+                raise StoreAdapterError("App Store Connect did not create a review submission")
+            review_id = str(submission["id"])
+            _response_json(self.client.post(
+                f"{self.apple_api_url}/v1/reviewSubmissionItems",
+                json={"data": {
+                    "type": "reviewSubmissionItems",
+                    "relationships": {
+                        "reviewSubmission": {"data": {
+                            "type": "reviewSubmissions", "id": review_id}},
+                        "appStoreVersion": {"data": {
+                            "type": "appStoreVersions", "id": version_id}},
+                    },
+                }}, headers=headers), "App Store Connect")
+            review_state = str((submission.get("attributes") or {}).get("state") or "")
+        else:
+            review_id, review_state = review
+        if review_state not in APPLE_SUBMITTED_REVIEW_STATES:
+            submitted = _response_json(self.client.patch(
+                f"{self.apple_api_url}/v1/reviewSubmissions/"
+                f"{quote(review_id, safe='')}",
+                json={"data": {
+                    "type": "reviewSubmissions", "id": review_id,
+                    "attributes": {"submitted": True},
+                }}, headers=headers), "App Store Connect")
+            state = str(((submitted.get("data") or {}).get("attributes") or {})
+                        .get("state") or "")
+            if state and state not in APPLE_SUBMITTED_REVIEW_STATES:
                 raise StoreAdapterError(
-                    "App Store Connect version is attached to a different build")
-            return None
-        return _submission_receipt(release, profile, {
-            "app_store_version_id": str(version_row.get("id") or ""),
-            "build_number": build_number,
-        })
+                    f"App Store Connect review submission did not advance: {state}")
+        fields["review_submission_id"] = review_id
+        return _submission_receipt(release, profile, fields)
 
     def lookup_google_play_submission(
             self, profile: dict[str, Any], release: dict[str, Any],
@@ -531,6 +710,8 @@ def official_submit(
     provider = str(profile.get("provider") or "")
 
     def submit(client_adapter: StoreStatusAdapter) -> dict[str, Any]:
+        if provider == "app_store_connect":
+            return client_adapter.submit_app_store(profile, release, env)
         if provider == "google_play":
             return client_adapter.submit_google_play(profile, release, env, workdir)
         raise StoreAdapterError(f"no built-in submitter for provider: {provider}")

@@ -563,6 +563,8 @@ const zhHant = {
   "project.delivery.recovery.official_api": "官方 API 精確物件查找",
   "project.delivery.submit.command": "可信任主機指令",
   "project.delivery.submit.official_api": "內建 Google Play internal 提交器",
+  "project.delivery.submit.apple_official_api": "內建 Apple 已處理 build 送審",
+  "project.delivery.apple_release_type": "Apple 發佈方式",
   "project.delivery.provider": "發布 Provider",
   "project.delivery.release_goal": "完成里程碑",
   "project.delivery.app_id": "App Store app ID",

@@ -297,7 +297,16 @@ the configured versionCode to its computed SHA-256, preserves every existing tra
 release, appends only the requested `draft` or `completed` release, validates the edit,
 and commits with `ERROR_IF_IN_REVIEW`. Pre-commit failure deletes the edit; post-commit
 restart converges through the exact versionCode plus AAB digest recovery lookup.
-Production/open/closed tracks and Apple mutation deliberately remain command-owned.
+Production/open/closed tracks deliberately remain command-owned.
+
+App Store Connect may also use `submission_adapter=official_api`, but only after the
+binary is already a processed `VALID` build. The adapter converges on the exact
+app/version/platform/build-number tuple, creates the App Store version only when
+missing, attaches only the matching build, and for goals above `uploaded` creates or
+reuses the version's review submission item before setting `submitted=true`. A restart
+does not accept build attachment alone as proof of a submitted goal. Release type is
+restricted to `MANUAL`; binary upload and completion of Apple metadata remain outside
+this mutation boundary.
 
 Apple submission and review are separate operations, and approval can still leave a
 version at Pending Developer Release. Google Play edits are not live until committed;

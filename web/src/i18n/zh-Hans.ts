@@ -564,6 +564,8 @@ const zhHans: Dict = {
   "project.delivery.recovery.official_api": "官方 API 精确对象查找",
   "project.delivery.submit.command": "可信主机命令",
   "project.delivery.submit.official_api": "内置 Google Play internal 提交器",
+  "project.delivery.submit.apple_official_api": "内置 Apple 已处理 build 送审",
+  "project.delivery.apple_release_type": "Apple 发布方式",
   "project.delivery.provider": "发布 Provider",
   "project.delivery.release_goal": "完成里程碑",
   "project.delivery.app_id": "App Store app ID",

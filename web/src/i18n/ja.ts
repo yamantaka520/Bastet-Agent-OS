@@ -544,6 +544,8 @@ const ja: Dict = {
   "project.delivery.recovery.official_api": "公式 API の完全一致検索",
   "project.delivery.submit.command": "信頼済みホストコマンド",
   "project.delivery.submit.official_api": "組み込み Google Play internal 提出",
+  "project.delivery.submit.apple_official_api": "処理済み Apple build の組み込み審査提出",
+  "project.delivery.apple_release_type": "Apple リリース方式",
   "project.delivery.provider": "リリース Provider",
   "project.delivery.release_goal": "完了マイルストーン",
   "project.delivery.app_id": "App Store app ID",

@@ -176,9 +176,19 @@ Grant these exact secret environment names to the project:
 The Apple adapter reads the exact App Store version and verifies its app relationship.
 The Google adapter exchanges a signed service-account assertion, creates a temporary
 uncommitted edit, reads the configured track and exact `versionCode`, then deletes the
-read edit. Status and recovery adapters never upload, submit, commit, release, or
-change rollout; the trusted command remains responsible for creation when no exact
-provider object exists.
+read edit. Status and recovery adapters never mutate provider state. The separate
+built-in submission adapter performs only the explicitly configured, human-approved
+mutations described below.
+
+For an Apple release whose binary has already finished processing, set
+`submission_adapter=official_api`, freeze `app_id`, `platform`, and `build_number`, and
+leave `apple_release_type` as `MANUAL`. Bastet requires one exact `VALID` build, looks
+up or creates the matching App Store version, refuses a conflicting build attachment,
+then attaches the build. With `release_goal=uploaded` it stops there. Higher goals
+also look up or create one review submission and version item and set `submitted=true`.
+Recovery requires that exact review item to have reached a submitted-or-later state,
+so a crash between attachment and review submission resumes instead of falsely
+completing. This path does not upload the Apple binary or fill missing metadata.
 
 For a Google Play internal-track release, `submission_adapter=official_api` replaces
 that external command with Bastet's narrowly scoped submitter. Configure:
@@ -197,8 +207,8 @@ older releases, validates the edit, then commits with
 `changesInReviewBehavior=ERROR_IF_IN_REVIEW`. Any failure before commit deletes the
 uncommitted edit. A retry after commit uses official recovery and compares the provider
 bundle digest to the same worktree artifact before reconstructing the receipt. The
-built-in mutating adapter refuses every track except `internal`; Apple submission and
-Google public-track mutation remain explicit trusted commands.
+built-in Google mutating adapter refuses every track except `internal`; Google
+public-track mutation and Apple binary upload remain explicit trusted commands.
 
 After configuring credentials, run a provider canary before relying on automatic
 polling:

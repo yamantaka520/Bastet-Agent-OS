@@ -544,6 +544,8 @@ const ko: Dict = {
   "project.delivery.recovery.official_api": "공식 API 정확한 객체 조회",
   "project.delivery.submit.command": "신뢰된 호스트 명령",
   "project.delivery.submit.official_api": "내장 Google Play internal 제출기",
+  "project.delivery.submit.apple_official_api": "처리된 Apple build 내장 심사 제출",
+  "project.delivery.apple_release_type": "Apple 출시 방식",
   "project.delivery.provider": "릴리스 Provider",
   "project.delivery.release_goal": "완료 마일스톤",
   "project.delivery.app_id": "App Store app ID",

@@ -70,7 +70,10 @@ Google Play internal delivery can opt into `submission_adapter=official_api`. Af
 the terminal human approval, Bastet hashes the worktree AAB, opens an edit, reuses or
 uploads the exact versionCode, preserves existing track releases, validates, and
 commits with `ERROR_IF_IN_REVIEW`. This built-in mutating path is intentionally limited
-to `internal`; App Store and public Google tracks still require an explicit submitter.
+to `internal`. App Store delivery may use the same adapter to promote one already
+processed `VALID` build: Bastet looks up or creates the exact version, attaches that
+build, creates/reuses its review submission item, and submits it for review. Apple
+binary upload and public Google tracks still require an explicit submitter.
 
 ## Why
 

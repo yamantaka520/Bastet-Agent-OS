@@ -544,6 +544,8 @@ const en: Dict = {
   "project.delivery.recovery.official_api": "official exact-object lookup",
   "project.delivery.submit.command": "trusted host command",
   "project.delivery.submit.official_api": "built-in Google Play internal submitter",
+  "project.delivery.submit.apple_official_api": "built-in processed Apple build review",
+  "project.delivery.apple_release_type": "Apple release type",
   "project.delivery.provider": "release provider",
   "project.delivery.release_goal": "completion milestone",
   "project.delivery.app_id": "App Store app ID",

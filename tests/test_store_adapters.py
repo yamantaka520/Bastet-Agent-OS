@@ -217,6 +217,7 @@ def test_app_store_lookup_recovers_only_exact_attached_processed_build():
         **_submission("app_store_connect"),
         "idempotency_key": "stable-key",
         "build_number": "87",
+        "build_id": "build-87",
     }
 
 
@@ -291,6 +292,120 @@ def test_google_play_lookup_recovers_exact_track_version_without_committing():
         "track": "internal",
         "idempotency_key": "stable-key",
     }
+
+
+def test_app_store_builtin_submitter_creates_version_attaches_build_and_submits_review():
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        if path == "/v1/builds":
+            return httpx.Response(200, json={"data": [{"id": "build-87"}]})
+        if path == "/v1/appStoreVersions" and request.method == "GET":
+            return httpx.Response(200, json={"data": []})
+        if path == "/v1/appStoreVersions" and request.method == "POST":
+            payload = json.loads(request.content)["data"]
+            assert payload["attributes"] == {
+                "platform": "IOS", "versionString": "1.4.0", "releaseType": "MANUAL"}
+            assert payload["relationships"]["app"]["data"]["id"] == "123456"
+            return httpx.Response(201, json={"data": {
+                "type": "appStoreVersions", "id": "version-7"}})
+        if path.endswith("/appStoreVersions/version-7/relationships/build"):
+            assert json.loads(request.content) == {
+                "data": {"type": "builds", "id": "build-87"}}
+            return httpx.Response(204)
+        if path.endswith("/apps/123456/reviewSubmissions"):
+            assert request.url.params["include"] == "items"
+            assert request.url.params["fields[reviewSubmissionItems]"] == \
+                "state,appStoreVersion"
+            return httpx.Response(200, json={"data": [], "included": []})
+        if path == "/v1/reviewSubmissions" and request.method == "POST":
+            payload = json.loads(request.content)["data"]
+            assert payload["relationships"]["app"]["data"]["id"] == "123456"
+            return httpx.Response(201, json={"data": {
+                "type": "reviewSubmissions", "id": "review-1",
+                "attributes": {"state": "READY_FOR_REVIEW"}}})
+        if path == "/v1/reviewSubmissionItems":
+            payload = json.loads(request.content)["data"]["relationships"]
+            assert payload["reviewSubmission"]["data"]["id"] == "review-1"
+            assert payload["appStoreVersion"]["data"]["id"] == "version-7"
+            return httpx.Response(201, json={"data": {
+                "type": "reviewSubmissionItems", "id": "item-1"}})
+        if path == "/v1/reviewSubmissions/review-1" and request.method == "PATCH":
+            assert json.loads(request.content)["data"]["attributes"] == {"submitted": True}
+            return httpx.Response(200, json={"data": {
+                "id": "review-1", "attributes": {"state": "WAITING_FOR_REVIEW"}}})
+        return httpx.Response(404)
+
+    adapter = StoreStatusAdapter(
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        apple_api_url="https://apple.test", now=lambda: 1000)
+    receipt = adapter.submit_app_store({
+        "provider": "app_store_connect", "app_id": "123456",
+        "build_number": "87", "platform": "ios", "release_goal": "submitted",
+    }, {
+        "commit_sha": "a" * 40, "version": "1.4.0",
+        "target": "mobile-production", "idempotency_key": "stable-key",
+    }, {
+        "APP_STORE_CONNECT_KEY_ID": "key",
+        "APP_STORE_CONNECT_ISSUER_ID": "issuer",
+        "APP_STORE_CONNECT_PRIVATE_KEY": _pem(private_key),
+    })
+
+    assert [request.method for request in requests] == [
+        "GET", "GET", "POST", "PATCH", "GET", "POST", "POST", "PATCH"]
+    assert receipt["app_store_version_id"] == "version-7"
+    assert receipt["build_id"] == "build-87"
+    assert receipt["review_submission_id"] == "review-1"
+
+
+def test_app_store_builtin_recovery_requires_submitted_review_for_submitted_goal():
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    methods = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.url.path == "/v1/builds":
+            return httpx.Response(200, json={"data": [{"id": "build-87"}]})
+        if request.url.path == "/v1/appStoreVersions":
+            return httpx.Response(200, json={"data": [{
+                "id": "version-7",
+                "relationships": {"build": {"data": {"id": "build-87"}}},
+            }]})
+        return httpx.Response(200, json={
+            "data": [{
+                "type": "reviewSubmissions", "id": "review-1",
+                "attributes": {"state": "WAITING_FOR_REVIEW"},
+                "relationships": {"items": {"data": [{"id": "item-1"}]}},
+            }],
+            "included": [{
+                "type": "reviewSubmissionItems", "id": "item-1",
+                "relationships": {
+                    "appStoreVersion": {"data": {"id": "version-7"}},
+                },
+            }],
+        })
+
+    adapter = StoreStatusAdapter(
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        apple_api_url="https://apple.test", now=lambda: 1000)
+    receipt = adapter.lookup_app_store_submission({
+        "provider": "app_store_connect", "app_id": "123456",
+        "build_number": "87", "submission_adapter": "official_api",
+        "release_goal": "submitted",
+    }, {
+        "commit_sha": "a" * 40, "version": "1.4.0",
+        "target": "mobile-production", "idempotency_key": "stable-key",
+    }, {
+        "APP_STORE_CONNECT_KEY_ID": "key",
+        "APP_STORE_CONNECT_ISSUER_ID": "issuer",
+        "APP_STORE_CONNECT_PRIVATE_KEY": _pem(private_key),
+    })
+
+    assert methods == ["GET", "GET", "GET"]
+    assert receipt["review_submission_id"] == "review-1"
 
 
 def test_builtin_google_recovery_binds_version_code_to_local_aab_hash(tmp_path):
@@ -529,3 +644,21 @@ def test_builtin_google_submission_is_internal_only_and_needs_no_deploy_command(
     assert profile["submission_adapter"] == "official_api"
     with pytest.raises(ValueError, match="restricted to the internal track"):
         validate_profile({**profile, "track": "production"}, "production")
+
+
+def test_builtin_app_store_submission_promotes_processed_build_without_deploy_command():
+    profile = validate_profile({
+        "provider": "app_store_connect",
+        "status_adapter": "official_api",
+        "submission_recovery": "official_api",
+        "submission_adapter": "official_api",
+        "app_id": "123456",
+        "platform": "IOS",
+        "build_number": "87",
+        "release_goal": "submitted",
+        "predeploy_command": "run-mobile-tests",
+    }, "production")
+
+    assert profile["submission_adapter"] == "official_api"
+    with pytest.raises(ValueError, match="MANUAL"):
+        validate_profile({**profile, "apple_release_type": "SCHEDULED"}, "production")

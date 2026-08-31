@@ -351,6 +351,18 @@ versionCode and the provider bundle SHA-256 back to the same local artifact befo
 durable receipt is reconstructed. The adapter refuses production or any non-internal
 track, and Apple mutation remains outside this slice.
 
+The twenty-third adds the corresponding narrow Apple promotion path without pretending
+that processed-build promotion is binary upload. After the terminal human approval,
+an App Store profile may select `submission_adapter=official_api`; the adapter requires
+one exact `VALID` build for app, marketing version, platform and build number, looks up
+or creates the matching App Store version, and refuses any conflicting attachment. It
+then attaches that build and, unless the declared goal is only `uploaded`, looks up or
+creates a review submission plus version item and sets `submitted=true`. Recovery now
+requires the exact review item to be submitted-or-later for a submitted goal, closing
+the crash gap between build attachment and review submission. The release type is
+restricted to `MANUAL`; Apple binary upload, metadata authoring, and automated release
+remain separate failure domains.
+
 Provider adapters normalize official state into milestones while retaining the raw
 status. Apple distinguishes `WAITING_FOR_REVIEW`, `IN_REVIEW`,
 `PENDING_DEVELOPER_RELEASE`, and `READY_FOR_DISTRIBUTION`; Google Play track releases

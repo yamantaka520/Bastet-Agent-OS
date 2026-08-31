@@ -72,9 +72,8 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
     if submission_adapter not in {"command", "official_api"}:
         raise ValueError(
             "store submission_adapter must be command or official_api")
-    if submission_adapter == "official_api" and provider != "google_play":
-        raise ValueError(
-            "built-in submission currently supports google_play only")
+    if submission_adapter == "official_api" and provider not in STORE_PROVIDERS:
+        raise ValueError("built-in submission requires a mobile-store provider")
     required_commands = ["predeploy_command"]
     if mode == "production" and submission_adapter == "command":
         required_commands.append("deploy_command")
@@ -121,30 +120,39 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
                     f"{provider} official submission recovery is missing: "
                     + ", ".join(missing_recovery))
         if submission_adapter == "official_api":
-            if str(profile.get("track") or "") != "internal":
-                raise ValueError(
-                    "built-in Google Play submission is restricted to the internal track")
-            if not str(profile.get("artifact_path") or "").strip():
-                raise ValueError(
-                    "google_play built-in submission is missing: artifact_path")
-            version_code = str(profile.get("version_code") or "")
-            if not version_code.isdigit() or int(version_code) < 1:
-                raise ValueError("google_play version_code must be a positive integer")
-            artifact_digest = str(profile.get("artifact_sha256") or "")
-            if artifact_digest and (
-                    len(artifact_digest) != 64
-                    or any(char not in "0123456789abcdefABCDEF"
-                           for char in artifact_digest)):
-                raise ValueError("artifact_sha256 must be 64 hexadecimal characters")
-            release_status = str(
-                profile.get("google_release_status") or "completed")
-            if release_status not in {"draft", "completed"}:
-                raise ValueError(
-                    "google_release_status must be draft or completed")
-            review_flag = profile.get("google_changes_not_sent_for_review", True)
-            if not isinstance(review_flag, bool):
-                raise ValueError(
-                    "google_changes_not_sent_for_review must be a boolean")
+            if provider == "google_play":
+                if str(profile.get("track") or "") != "internal":
+                    raise ValueError(
+                        "built-in Google Play submission is restricted to the internal track")
+                if not str(profile.get("artifact_path") or "").strip():
+                    raise ValueError(
+                        "google_play built-in submission is missing: artifact_path")
+                version_code = str(profile.get("version_code") or "")
+                if not version_code.isdigit() or int(version_code) < 1:
+                    raise ValueError("google_play version_code must be a positive integer")
+                artifact_digest = str(profile.get("artifact_sha256") or "")
+                if artifact_digest and (
+                        len(artifact_digest) != 64
+                        or any(char not in "0123456789abcdefABCDEF"
+                               for char in artifact_digest)):
+                    raise ValueError("artifact_sha256 must be 64 hexadecimal characters")
+                release_status = str(
+                    profile.get("google_release_status") or "completed")
+                if release_status not in {"draft", "completed"}:
+                    raise ValueError(
+                        "google_release_status must be draft or completed")
+                review_flag = profile.get("google_changes_not_sent_for_review", True)
+                if not isinstance(review_flag, bool):
+                    raise ValueError(
+                        "google_changes_not_sent_for_review must be a boolean")
+            else:
+                platform = str(profile.get("platform") or "IOS").upper()
+                if platform not in {"IOS", "MAC_OS", "TV_OS", "VISION_OS"}:
+                    raise ValueError("unsupported App Store Connect platform")
+                release_type = str(profile.get("apple_release_type") or "MANUAL")
+                if release_type != "MANUAL":
+                    raise ValueError(
+                        "built-in App Store submission currently requires MANUAL release")
         try:
             interval = int(profile.get("poll_interval_seconds") or 300)
         except (TypeError, ValueError) as exc:
