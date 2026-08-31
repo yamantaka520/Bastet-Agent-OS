@@ -15,10 +15,11 @@ import base64
 import hashlib
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 from cryptography.hazmat.primitives import hashes, serialization
@@ -163,6 +164,39 @@ def _google_artifact(profile: dict[str, Any], workdir: str) -> tuple[Path, int, 
     return artifact, size, digest
 
 
+def _apple_artifact(profile: dict[str, Any], workdir: str) -> tuple[Path, int, str, str]:
+    artifact = (Path(workdir) / str(profile["artifact_path"])).resolve()
+    root = Path(workdir).resolve()
+    if not artifact.is_relative_to(root) or not artifact.is_file():
+        raise StoreAdapterError(
+            f"App Store artifact not found in delivery worktree: {profile['artifact_path']}")
+    uti_by_suffix = {".ipa": "com.apple.ipa", ".pkg": "com.apple.pkg"}
+    uti = uti_by_suffix.get(artifact.suffix.lower())
+    if not uti:
+        raise StoreAdapterError("App Store built-in uploader requires an .ipa or .pkg")
+    platform = str(profile.get("platform") or "IOS").upper()
+    if platform == "MAC_OS" and artifact.suffix.lower() != ".pkg":
+        raise StoreAdapterError("MAC_OS build upload requires a .pkg artifact")
+    if platform != "MAC_OS" and artifact.suffix.lower() != ".ipa":
+        raise StoreAdapterError(f"{platform} build upload requires an .ipa artifact")
+    size = artifact.stat().st_size
+    if size < 1:
+        raise StoreAdapterError("App Store artifact is empty")
+    with artifact.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    configured_digest = str(profile.get("artifact_sha256") or "").lower()
+    if configured_digest and configured_digest != digest:
+        raise StoreAdapterError("App Store artifact SHA-256 does not match delivery profile")
+    return artifact, size, digest, uti
+
+
+def _state(attributes: dict[str, Any], field: str) -> str:
+    value = attributes.get(field) or ""
+    if isinstance(value, dict):
+        return str(value.get("state") or "")
+    return str(value)
+
+
 @dataclass
 class StoreStatusAdapter:
     """Provider client with injectable endpoints/transport for deterministic tests."""
@@ -212,6 +246,39 @@ class StoreStatusAdapter:
     def app_store_connect(self, profile: dict[str, Any], submission: dict[str, Any],
                           env: dict[str, str]) -> dict[str, Any]:
         headers = self._apple_headers(env)
+        if submission.get("phase") == "build_upload":
+            upload_id = quote(str(submission["build_upload_id"]), safe="")
+            payload = _response_json(self.client.get(
+                f"{self.apple_api_url}/v1/buildUploads/{upload_id}",
+                params={
+                    "fields[buildUploads]": "state,build",
+                    "include": "build",
+                    "fields[builds]": "processingState",
+                }, headers=headers),
+                "App Store Connect")
+            data = payload.get("data")
+            if not isinstance(data, dict) or str(data.get("id") or "") != \
+                    str(submission["build_upload_id"]):
+                raise StoreAdapterError("App Store Connect returned the wrong build upload")
+            provider_status = _state(data.get("attributes") or {}, "state")
+            if provider_status == "FAILED":
+                raise StoreAdapterError("App Store Connect build upload failed")
+            if provider_status not in {"AWAITING_UPLOAD", "PROCESSING", "COMPLETE"}:
+                raise StoreAdapterError(
+                    f"unsupported App Store build upload state: {provider_status or 'missing'}")
+            included = payload.get("included") or []
+            if not isinstance(included, list):
+                raise StoreAdapterError("App Store Connect build upload include is invalid")
+            build_states = [
+                str((row.get("attributes") or {}).get("processingState") or "")
+                for row in included
+                if isinstance(row, dict) and row.get("type") == "builds"
+            ]
+            if len(build_states) > 1:
+                raise StoreAdapterError("App Store Connect build upload has multiple builds")
+            if build_states and build_states[0] == "INVALID":
+                return _receipt(submission, profile, "rejected", "INVALID_BINARY")
+            return _receipt(submission, profile, "uploaded", provider_status)
         version_id = quote(str(submission["app_store_version_id"]), safe="")
         response = self.client.get(
             f"{self.apple_api_url}/v1/appStoreVersions/{version_id}",
@@ -402,12 +469,14 @@ class StoreStatusAdapter:
 
     def submit_app_store(
             self, profile: dict[str, Any], release: dict[str, Any],
-            env: dict[str, str]) -> dict[str, Any]:
+            env: dict[str, str], workdir: str = ".") -> dict[str, Any]:
         """Promote one exact processed build to a version and optional review submission."""
         headers = self._apple_headers(env)
         build_id, version_row = self._apple_build_and_version(profile, release, headers)
         if not build_id:
-            raise StoreAdapterError("exact processed App Store Connect build was not found")
+            if not str(profile.get("artifact_path") or "").strip():
+                raise StoreAdapterError("exact processed App Store Connect build was not found")
+            return self._upload_app_store_build(profile, release, headers, workdir)
         app_id = str(profile["app_id"])
         platform = str(profile.get("platform") or "IOS").upper()
         if version_row is None:
@@ -490,6 +559,195 @@ class StoreStatusAdapter:
                     f"App Store Connect review submission did not advance: {state}")
         fields["review_submission_id"] = review_id
         return _submission_receipt(release, profile, fields)
+
+    def _upload_app_store_build(
+            self, profile: dict[str, Any], release: dict[str, Any],
+            headers: dict[str, str], workdir: str) -> dict[str, Any]:
+        artifact, artifact_size, digest, uti = _apple_artifact(profile, workdir)
+        app_id = str(profile["app_id"])
+        platform = str(profile.get("platform") or "IOS").upper()
+        build_number = str(profile["build_number"])
+        version = str(release["version"])
+        uploads_payload = _response_json(self.client.get(
+            f"{self.apple_api_url}/v1/apps/{quote(app_id, safe='')}/buildUploads",
+            params={
+                "filter[cfBundleShortVersionString]": version,
+                "filter[cfBundleVersion]": build_number,
+                "filter[platform]": platform,
+                "fields[buildUploads]": "cfBundleShortVersionString,cfBundleVersion,"
+                "platform,state,buildUploadFiles",
+                "limit": "2",
+            }, headers=headers), "App Store Connect")
+        uploads = uploads_payload.get("data") or []
+        if not isinstance(uploads, list):
+            raise StoreAdapterError("App Store Connect build uploads response is invalid")
+        if len(uploads) > 1:
+            raise StoreAdapterError("App Store Connect found multiple exact build uploads")
+        if uploads:
+            upload = uploads[0] or {}
+        else:
+            created = _response_json(self.client.post(
+                f"{self.apple_api_url}/v1/buildUploads",
+                json={"data": {
+                    "type": "buildUploads",
+                    "attributes": {
+                        "cfBundleShortVersionString": version,
+                        "cfBundleVersion": build_number,
+                        "platform": platform,
+                    },
+                    "relationships": {
+                        "app": {"data": {"type": "apps", "id": app_id}},
+                    },
+                }}, headers=headers), "App Store Connect")
+            upload = created.get("data")
+        if not isinstance(upload, dict) or not upload.get("id"):
+            raise StoreAdapterError("App Store Connect did not provide a build upload id")
+        upload_id = str(upload["id"])
+        upload_attributes = upload.get("attributes") or {}
+        upload_identity = {
+            "cfBundleShortVersionString": version,
+            "cfBundleVersion": build_number,
+            "platform": platform,
+        }
+        mismatches = [
+            field for field, wanted in upload_identity.items()
+            if upload_attributes.get(field) is not None
+            and str(upload_attributes[field]) != wanted
+        ]
+        if mismatches:
+            raise StoreAdapterError(
+                "App Store Connect build upload identity mismatch: "
+                + ", ".join(mismatches))
+        upload_state = _state(upload_attributes, "state")
+        if upload_state == "FAILED":
+            raise StoreAdapterError("exact App Store Connect build upload has failed")
+        if upload_state in {"PROCESSING", "COMPLETE"}:
+            return _submission_receipt(release, profile, {
+                "phase": "build_upload", "build_upload_id": upload_id,
+                "build_number": build_number, "artifact_sha256": digest,
+            })
+        if upload_state and upload_state != "AWAITING_UPLOAD":
+            raise StoreAdapterError(
+                f"unsupported App Store build upload state: {upload_state}")
+
+        files_payload = _response_json(self.client.get(
+            f"{self.apple_api_url}/v1/buildUploads/"
+            f"{quote(upload_id, safe='')}/buildUploadFiles",
+            params={"fields[buildUploadFiles]": "assetDeliveryState,fileName,fileSize,"
+                    "sourceFileChecksums,uploadOperations,uti", "limit": "2"},
+            headers=headers), "App Store Connect")
+        files = files_payload.get("data") or []
+        if not isinstance(files, list):
+            raise StoreAdapterError("App Store Connect build upload files response is invalid")
+        if len(files) > 1:
+            raise StoreAdapterError("App Store Connect build upload has multiple asset files")
+        if files:
+            upload_file = files[0] or {}
+        else:
+            reserved = _response_json(self.client.post(
+                f"{self.apple_api_url}/v1/buildUploadFiles",
+                json={"data": {
+                    "type": "buildUploadFiles",
+                    "attributes": {
+                        "fileName": artifact.name,
+                        "fileSize": artifact_size,
+                        "uti": uti,
+                        "assetType": "ASSET",
+                    },
+                    "relationships": {"buildUpload": {"data": {
+                        "type": "buildUploads", "id": upload_id,
+                    }}},
+                }}, headers=headers), "App Store Connect")
+            upload_file = reserved.get("data")
+        if not isinstance(upload_file, dict) or not upload_file.get("id"):
+            raise StoreAdapterError("App Store Connect did not reserve a build upload file")
+        attributes = upload_file.get("attributes") or {}
+        if str(attributes.get("fileName") or "") != artifact.name or \
+                int(attributes.get("fileSize") or 0) != artifact_size or \
+                str(attributes.get("uti") or "") != uti:
+            raise StoreAdapterError(
+                "App Store Connect build upload file does not match local artifact")
+        remote_checksum = (((attributes.get("sourceFileChecksums") or {}).get("file")
+                            or {}).get("hash"))
+        if remote_checksum and str(remote_checksum).lower() != digest:
+            raise StoreAdapterError(
+                "App Store Connect build upload file has a different SHA-256")
+        file_state = _state(attributes, "assetDeliveryState")
+        if file_state == "FAILED":
+            raise StoreAdapterError("App Store Connect build upload asset has failed")
+        if file_state not in {"UPLOAD_COMPLETE", "COMPLETE"}:
+            self._upload_apple_parts(
+                artifact, artifact_size, attributes.get("uploadOperations") or [],
+                int(profile.get("apple_upload_parallelism") or 4))
+            file_id = quote(str(upload_file["id"]), safe="")
+            _response_json(self.client.patch(
+                f"{self.apple_api_url}/v1/buildUploadFiles/{file_id}",
+                json={"data": {
+                    "type": "buildUploadFiles", "id": str(upload_file["id"]),
+                    "attributes": {
+                        "uploaded": True,
+                        "sourceFileChecksums": {"file": {
+                            "hash": digest, "algorithm": "SHA_256",
+                        }},
+                    },
+                }}, headers=headers), "App Store Connect")
+        return _submission_receipt(release, profile, {
+            "phase": "build_upload", "build_upload_id": upload_id,
+            "build_upload_file_id": str(upload_file["id"]),
+            "build_number": build_number, "artifact_sha256": digest,
+        })
+
+    def _upload_apple_parts(
+            self, artifact: Path, artifact_size: int,
+            operations: Any, parallelism: int) -> None:
+        if not isinstance(operations, list) or not operations:
+            raise StoreAdapterError("App Store Connect returned no build upload operations")
+        normalized = []
+        for operation in operations:
+            if not isinstance(operation, dict):
+                raise StoreAdapterError("App Store Connect upload operation is invalid")
+            method = str(operation.get("method") or "").upper()
+            url = str(operation.get("url") or "")
+            offset = int(operation.get("offset") or 0)
+            length = int(operation.get("length") or 0)
+            if method != "PUT" or urlparse(url).scheme != "https" or length < 1:
+                raise StoreAdapterError("App Store Connect upload operation is unsafe")
+            raw_headers = operation.get("requestHeaders") or []
+            if not isinstance(raw_headers, list):
+                raise StoreAdapterError("App Store Connect upload headers are invalid")
+            upload_headers = {}
+            for header in raw_headers:
+                if not isinstance(header, dict) or not header.get("name"):
+                    raise StoreAdapterError("App Store Connect upload header is invalid")
+                name = str(header["name"])
+                if name.lower() == "authorization":
+                    raise StoreAdapterError(
+                        "App Store Connect upload operation must not forward authorization")
+                upload_headers[name] = str(header.get("value") or "")
+            normalized.append((offset, length, url, upload_headers))
+        normalized.sort(key=lambda row: row[0])
+        cursor = 0
+        for offset, length, _, _ in normalized:
+            if offset != cursor or offset + length > artifact_size:
+                raise StoreAdapterError(
+                    "App Store Connect upload operations do not cover the artifact exactly")
+            cursor += length
+        if cursor != artifact_size:
+            raise StoreAdapterError(
+                "App Store Connect upload operations do not cover the artifact exactly")
+
+        def upload(operation: tuple[int, int, str, dict[str, str]]) -> None:
+            offset, length, url, upload_headers = operation
+            with artifact.open("rb") as stream:
+                stream.seek(offset)
+                chunk = stream.read(length)
+            if len(chunk) != length:
+                raise StoreAdapterError("could not read an App Store upload chunk")
+            _response_ok(self.client.put(url, content=chunk, headers=upload_headers),
+                         "App Store upload")
+
+        with ThreadPoolExecutor(max_workers=min(parallelism, len(normalized))) as pool:
+            list(pool.map(upload, normalized))
 
     def lookup_google_play_submission(
             self, profile: dict[str, Any], release: dict[str, Any],
@@ -711,7 +969,7 @@ def official_submit(
 
     def submit(client_adapter: StoreStatusAdapter) -> dict[str, Any]:
         if provider == "app_store_connect":
-            return client_adapter.submit_app_store(profile, release, env)
+            return client_adapter.submit_app_store(profile, release, env, workdir)
         if provider == "google_play":
             return client_adapter.submit_google_play(profile, release, env, workdir)
         raise StoreAdapterError(f"no built-in submitter for provider: {provider}")

@@ -72,8 +72,11 @@ uploads the exact versionCode, preserves existing track releases, validates, and
 commits with `ERROR_IF_IN_REVIEW`. This built-in mutating path is intentionally limited
 to `internal`. App Store delivery may use the same adapter to promote one already
 processed `VALID` build: Bastet looks up or creates the exact version, attaches that
-build, creates/reuses its review submission item, and submits it for review. Apple
-binary upload and public Google tracks still require an explicit submitter.
+build, creates/reuses its review submission item, and submits it for review. An optional
+worktree-contained `.ipa` or macOS `.pkg` lets the same adapter create/reuse an exact
+Build Upload, reserve the file, upload Apple-provided byte ranges concurrently, commit
+its SHA-256, and park durably while Apple processes it. Public Google tracks still
+require an explicit submitter.
 
 ## Why
 

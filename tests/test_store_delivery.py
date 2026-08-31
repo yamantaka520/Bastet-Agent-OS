@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from fake_executor import SCRIPT, add_template, req
 
-from bastet_agent_os.delivery import DeliveryError, _store_submit_once
+from bastet_agent_os.delivery import DeliveryError, _store_submit_once, poll
 from bastet_agent_os.executors.base import RunResult
 
 pytestmark = pytest.mark.asyncio
@@ -146,6 +146,86 @@ async def test_builtin_submitter_receipt_is_persisted_without_deploy_command(
     assert seeded.one(
         "SELECT status FROM delivery_actions WHERE job_id='job1'")["status"] == \
         "succeeded"
+
+
+async def test_pending_apple_build_upload_is_persisted_for_external_resume(
+        seeded, monkeypatch, tmp_path):
+    profile = {
+        "provider": "app_store_connect", "app_id": "123456",
+        "build_number": "87", "artifact_path": "release.ipa",
+        "submission_recovery": "official_api", "submission_adapter": "official_api",
+    }
+    monkeypatch.setattr(
+        "bastet_agent_os.store_adapters.official_submission_lookup",
+        lambda profile, release, env, workdir=None: None)
+    monkeypatch.setattr(
+        "bastet_agent_os.store_adapters.official_submit",
+        lambda profile, release, env, workdir: {
+            "provider": "app_store_connect", "app_id": "123456",
+            "phase": "build_upload", "build_upload_id": "upload-1", **release,
+        })
+
+    _, receipt = _store_submit_once(
+        seeded, "job1", profile, str(tmp_path), {}, commit_sha="a" * 40,
+        version="1.4.0", target="app-store:123456")
+
+    assert receipt["phase"] == "build_upload"
+    assert seeded.one(
+        "SELECT status FROM delivery_actions WHERE job_id='job1'")["status"] == \
+        "waiting_external"
+
+
+async def test_external_poll_resumes_pending_apple_upload_into_final_submission(
+        seeded, monkeypatch, tmp_path):
+    profile = {
+        "provider": "app_store_connect", "app_id": "123456",
+        "build_number": "87", "artifact_path": "release.ipa",
+        "status_adapter": "official_api", "submission_recovery": "official_api",
+        "submission_adapter": "official_api", "release_goal": "published",
+        "predeploy_command": "true", "poll_interval_seconds": 1,
+    }
+    release = {
+        "provider": "app_store_connect", "app_id": "123456",
+        "commit_sha": "a" * 40, "version": "1.4.0",
+        "target": "app-store:123456", "idempotency_key": "stable-key",
+    }
+    pending = {**release, "phase": "build_upload", "build_upload_id": "upload-1"}
+    final = {**release, "app_store_version_id": "version-7", "build_id": "build-87"}
+    seeded.write(
+        "INSERT INTO delivery_actions(job_id,action,provider,idempotency_key,status,"
+        "output,receipt_json,started_at) VALUES('job1','store-submit',"
+        "'app_store_connect','stable-key','waiting_external','','{}','now')")
+    calls = []
+    monkeypatch.setattr(
+        "bastet_agent_os.store_adapters.official_submit",
+        lambda actual_profile, actual_release, env, workdir: calls.append(actual_release)
+        or final)
+    monkeypatch.setattr(
+        "bastet_agent_os.store_adapters.official_status",
+        lambda actual_profile, submission, env: {
+            **release, "milestone": "published",
+            "provider_status": "READY_FOR_DISTRIBUTION",
+        })
+    delivery_row = {
+        "job_id": "job1", "commit_sha": release["commit_sha"],
+        "version": release["version"], "target": release["target"],
+        "evidence_json": json.dumps({"submission_receipt": pending}),
+    }
+
+    result = poll(str(tmp_path), {
+        "mode": "production", "version": "1.4.0", "profile": profile,
+    }, delivery_row, env={}, db=seeded)
+
+    assert result.complete is True
+    assert result.evidence["submission_receipt"] == final
+    assert calls == [{
+        "commit_sha": release["commit_sha"], "version": "1.4.0",
+        "target": release["target"], "idempotency_key": "stable-key",
+    }]
+    action = seeded.one(
+        "SELECT status,receipt_json FROM delivery_actions WHERE job_id='job1'")
+    assert action["status"] == "succeeded"
+    assert json.loads(action["receipt_json"])["app_store_version_id"] == "version-7"
 
 
 def store_profile(provider: str, live_file: Path) -> tuple[dict, dict]:

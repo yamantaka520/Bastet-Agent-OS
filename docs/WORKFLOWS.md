@@ -299,14 +299,20 @@ and commits with `ERROR_IF_IN_REVIEW`. Pre-commit failure deletes the edit; post
 restart converges through the exact versionCode plus AAB digest recovery lookup.
 Production/open/closed tracks deliberately remain command-owned.
 
-App Store Connect may also use `submission_adapter=official_api`, but only after the
-binary is already a processed `VALID` build. The adapter converges on the exact
+App Store Connect may also use `submission_adapter=official_api`. The adapter converges on the exact
 app/version/platform/build-number tuple, creates the App Store version only when
 missing, attaches only the matching build, and for goals above `uploaded` creates or
 reuses the version's review submission item before setting `submitted=true`. A restart
 does not accept build attachment alone as proof of a submitted goal. Release type is
-restricted to `MANUAL`; binary upload and completion of Apple metadata remain outside
-this mutation boundary.
+restricted to `MANUAL`; completion of Apple metadata remains outside this mutation boundary.
+
+If `artifact_path` names an `.ipa` (iOS/tvOS/visionOS) or `.pkg` (macOS), the adapter
+first creates or reuses the exact Build Upload and its single asset file. Apple-issued
+upload operations must form a gap-free, non-overlapping cover of the local file; Bastet
+executes up to eight ranges concurrently without forwarding the JWT, then commits the
+whole-file SHA-256. Build processing becomes a durable `waiting_external` phase rather
+than blocking a runner. Restart and scheduled polls reuse the upload/file and resume
+until the exact build is `VALID`, then continue the existing version/review path.
 
 Apple submission and review are separate operations, and approval can still leave a
 version at Pending Developer Release. Google Play edits are not live until committed;
@@ -316,6 +322,7 @@ rollout, or actual public publication.
 
 Official provider references: [Apple app and submission statuses](https://developer.apple.com/help/app-store-connect/reference/app-information/app-and-submission-statuses),
 [Apple review submissions](https://developer.apple.com/documentation/appstoreconnectapi/reviewsubmission),
+[Apple Build Uploads](https://developer.apple.com/documentation/appstoreconnectapi/build-uploads),
 [Google Play edits](https://developers.google.com/android-publisher/edits),
 [Google Play track release states](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks),
 and [Google Play managed publishing](https://support.google.com/googleplay/android-developer/answer/9859654).

@@ -60,6 +60,7 @@ type DeliveryProfile = { target_branch?: string; target?: string;
   release_goal?: "uploaded" | "submitted" | "approved" | "published";
   app_id?: string; platform?: string; build_number?: string;
   apple_release_type?: "MANUAL";
+  apple_upload_parallelism?: string;
   package_name?: string; track?: string; version_code?: string;
   artifact_path?: string; artifact_sha256?: string;
   google_release_status?: "draft" | "completed";
@@ -790,18 +791,48 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
                     </label>
                     {(draft.deliveryProfile.submission_adapter ?? "command")
                       === "official_api" && (
-                      <label className="res-field">
-                        <span>{t("project.delivery.apple_release_type")}</span>
-                        <select value={draft.deliveryProfile.apple_release_type ?? "MANUAL"}
-                                disabled={!canOperate}
-                                onChange={(e) => patch({ deliveryProfile: {
-                                  ...draft.deliveryProfile,
-                                  apple_release_type:
-                                    e.target.value as DeliveryProfile["apple_release_type"],
-                                } })}>
-                          <option value="MANUAL">MANUAL</option>
-                        </select>
-                      </label>
+                      <>
+                        <label className="res-field">
+                          <span>{t("project.delivery.apple_release_type")}</span>
+                          <select value={draft.deliveryProfile.apple_release_type ?? "MANUAL"}
+                                  disabled={!canOperate}
+                                  onChange={(e) => patch({ deliveryProfile: {
+                                    ...draft.deliveryProfile,
+                                    apple_release_type:
+                                      e.target.value as DeliveryProfile["apple_release_type"],
+                                  } })}>
+                            <option value="MANUAL">MANUAL</option>
+                          </select>
+                        </label>
+                        <label className="res-field">
+                          <span>{t("project.delivery.apple_artifact_path")}</span>
+                          <input value={draft.deliveryProfile.artifact_path ?? ""}
+                                 disabled={!canOperate}
+                                 onChange={(e) => patch({ deliveryProfile: {
+                                   ...draft.deliveryProfile,
+                                   artifact_path: e.target.value,
+                                 } })} />
+                        </label>
+                        <label className="res-field">
+                          <span>{t("project.delivery.apple_artifact_sha256")}</span>
+                          <input value={draft.deliveryProfile.artifact_sha256 ?? ""}
+                                 disabled={!canOperate}
+                                 onChange={(e) => patch({ deliveryProfile: {
+                                   ...draft.deliveryProfile,
+                                   artifact_sha256: e.target.value,
+                                 } })} />
+                        </label>
+                        <label className="res-field">
+                          <span>{t("project.delivery.apple_upload_parallelism")}</span>
+                          <input type="number" min="1" max="8"
+                                 value={draft.deliveryProfile.apple_upload_parallelism ?? "4"}
+                                 disabled={!canOperate}
+                                 onChange={(e) => patch({ deliveryProfile: {
+                                   ...draft.deliveryProfile,
+                                   apple_upload_parallelism: e.target.value,
+                                 } })} />
+                        </label>
+                      </>
                     )}
                   </>)}
                 </>

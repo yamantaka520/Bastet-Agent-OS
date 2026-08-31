@@ -74,7 +74,9 @@ Last updated: 2026-08-31
   Official submission now includes a narrow App Store path for an already processed
   build: exact build/version lookup-or-create, conflict-safe attachment, review-item
   creation/reuse, submitted-state recovery, and manual-release-only validation.
-  Apple binary upload remains a separate trusted-host boundary. Validation: 671 Python tests,
+  Apple binary upload now uses exact Build Upload/file reservations, bounded concurrent
+  pre-signed ranges, SHA-256 commit, durable asynchronous processing receipts and
+  restart-safe continuation into the existing review path. Validation: 676 Python tests,
   ruff clean, Web production build clean.
 
 - Released: **v0.35.2**. Version arc v0.1.0 → v0.35.2 in one month

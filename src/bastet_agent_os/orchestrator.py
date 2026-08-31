@@ -500,7 +500,7 @@ class Orchestrator:
                     audit_actor=f"delivery-poll:{delivery_row['id']}")
                 env.update(access.env)
                 result = await asyncio.to_thread(
-                    delivery.poll, workdir, contract, delivery_row, env=env)
+                    delivery.poll, workdir, contract, delivery_row, env=env, db=self.db)
                 if result.complete:
                     self._record_delivery_success(job, delivery_row["id"], result)
                     completed.append(job["id"])

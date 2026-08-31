@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS delivery_actions (
   action TEXT NOT NULL,
   provider TEXT NOT NULL,
   idempotency_key TEXT NOT NULL,
-  status TEXT NOT NULL,              -- running|succeeded|failed
+  status TEXT NOT NULL,              -- running|waiting_external|succeeded|failed
   output TEXT NOT NULL DEFAULT '',
   receipt_json TEXT NOT NULL DEFAULT '{}',
   error TEXT NOT NULL DEFAULT '',

@@ -151,10 +151,11 @@
   與 Play API 的 SHA-256、保留原有 releases、先 validate，並固定使用
   `changesInReviewBehavior=ERROR_IF_IN_REVIEW`；不得改成 Google 的預設取消既有審核行為。
   `google_changes_not_sent_for_review` 預設為 true。Google production track 尚未內建。
-- **內建 Apple submitter 不等於 binary uploader。** 它只接受已處理完成的精確 `VALID` build，
-  lookup-or-create App Store version、核對或附掛 build，並在目標高於 uploaded 時建立／重用
-  review item 後送審；仍強制 terminal `human-approve`。送審目標的 recovery 必須看到同一版本
-  的 review submission 已進入 submitted-or-later，不能只因 build 已附掛就誤判成功。
+- **內建 Apple binary uploader 仍不是 metadata 自動補洞器。** 它只接受 worktree 內符合平台的
+  `.ipa`／`.pkg`，核對 exact Build Upload、檔名／大小／SHA-256 與 Apple byte ranges，且絕不把 JWT
+  轉送至 pre-signed upload URL。處理期間必須維持 `waiting_external`，直到 exact build 為 `VALID`
+  才能附掛與送審；仍強制 terminal `human-approve`。送審 recovery 也必須看到同一 review item
+  已進入 submitted-or-later，不能只因 build 已附掛就誤判成功。
 - **審計是 hash 串接的 append-only。** 不要手動改 audit_log —— 鏈會斷，
   `verify_audit_chain()` 會抓到。刪任務/專案時的用量帳務會被拒絕或要求 force
   並記錄寫掉的金額，這是刻意的。

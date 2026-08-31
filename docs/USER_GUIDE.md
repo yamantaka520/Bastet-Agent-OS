@@ -188,7 +188,24 @@ then attaches the build. With `release_goal=uploaded` it stops there. Higher goa
 also look up or create one review submission and version item and set `submitted=true`.
 Recovery requires that exact review item to have reached a submitted-or-later state,
 so a crash between attachment and review submission resumes instead of falsely
-completing. This path does not upload the Apple binary or fill missing metadata.
+completing. This path does not fill missing metadata.
+
+To upload the Apple binary through the same adapter, add a worktree-relative
+`artifact_path`: `.ipa` for iOS/tvOS/visionOS or `.pkg` for macOS. Optional
+`artifact_sha256` pins the expected file digest; `apple_upload_parallelism` accepts
+1–8 and defaults to 4. Bastet creates or reuses the exact app/marketing-version/build-
+number/platform Build Upload, reserves one matching file, validates that Apple's byte
+ranges cover the artifact exactly, then uploads those ranges concurrently using only
+Apple's pre-signed URL headers. It never forwards the App Store JWT to upload URLs.
+After all parts succeed it commits `uploaded=true` with SHA-256.
+
+Apple processing is asynchronous. The durable submission action and delivery move to
+`waiting_external` with a `build_upload_id`; service restart or a failed part reuses the
+same upload/file and safely retries ranges. Background polling recomputes the local
+digest, observes the exact Build Upload, and only when the exact build becomes `VALID`
+continues to version attachment and review submission. `FAILED`, duplicate identities,
+conflicting files/checksums, unsafe operations, gaps, overlaps, or provider errors fail
+closed instead of creating another upload.
 
 For a Google Play internal-track release, `submission_adapter=official_api` replaces
 that external command with Bastet's narrowly scoped submitter. Configure:
@@ -208,7 +225,7 @@ older releases, validates the edit, then commits with
 uncommitted edit. A retry after commit uses official recovery and compares the provider
 bundle digest to the same worktree artifact before reconstructing the receipt. The
 built-in Google mutating adapter refuses every track except `internal`; Google
-public-track mutation and Apple binary upload remain explicit trusted commands.
+public-track mutation remains an explicit trusted command.
 
 After configuring credentials, run a provider canary before relying on automatic
 polling:

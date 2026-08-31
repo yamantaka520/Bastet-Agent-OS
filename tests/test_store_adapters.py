@@ -361,6 +361,147 @@ def test_app_store_builtin_submitter_creates_version_attaches_build_and_submits_
     assert receipt["review_submission_id"] == "review-1"
 
 
+def test_app_store_builtin_uploader_reserves_and_uploads_parts_in_parallel(tmp_path):
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    artifact = tmp_path / "release.ipa"
+    artifact.write_bytes(b"abcdefgh")
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        if path == "/v1/builds":
+            return httpx.Response(200, json={"data": []})
+        if path == "/v1/apps/123456/buildUploads":
+            assert request.url.params["filter[cfBundleVersion]"] == "87"
+            return httpx.Response(200, json={"data": []})
+        if path == "/v1/buildUploads" and request.method == "POST":
+            body = json.loads(request.content)["data"]
+            assert body["attributes"] == {
+                "cfBundleShortVersionString": "1.4.0",
+                "cfBundleVersion": "87", "platform": "IOS"}
+            return httpx.Response(201, json={"data": {
+                "type": "buildUploads", "id": "upload-1",
+                "attributes": {"state": "AWAITING_UPLOAD"}}})
+        if path == "/v1/buildUploads/upload-1/buildUploadFiles":
+            return httpx.Response(200, json={"data": []})
+        if path == "/v1/buildUploadFiles" and request.method == "POST":
+            body = json.loads(request.content)["data"]
+            assert body["attributes"] == {
+                "fileName": "release.ipa", "fileSize": 8,
+                "uti": "com.apple.ipa", "assetType": "ASSET"}
+            return httpx.Response(201, json={"data": {
+                "type": "buildUploadFiles", "id": "file-1",
+                "attributes": {
+                    **body["attributes"],
+                    "assetDeliveryState": {"state": "AWAITING_UPLOAD"},
+                    "uploadOperations": [
+                        {"method": "PUT", "url": "https://upload.test/part-1",
+                         "offset": 0, "length": 4,
+                         "requestHeaders": [{"name": "x-part", "value": "1"}]},
+                        {"method": "PUT", "url": "https://upload.test/part-2",
+                         "offset": 4, "length": 4,
+                         "requestHeaders": [{"name": "x-part", "value": "2"}]},
+                    ],
+                },
+            }})
+        if path == "/part-1":
+            assert request.headers["x-part"] == "1"
+            assert "Authorization" not in request.headers
+            assert request.content == b"abcd"
+            return httpx.Response(200)
+        if path == "/part-2":
+            assert request.headers["x-part"] == "2"
+            assert "Authorization" not in request.headers
+            assert request.content == b"efgh"
+            return httpx.Response(200)
+        if path == "/v1/buildUploadFiles/file-1" and request.method == "PATCH":
+            attrs = json.loads(request.content)["data"]["attributes"]
+            assert attrs == {"uploaded": True, "sourceFileChecksums": {
+                "file": {"hash": digest, "algorithm": "SHA_256"}}}
+            return httpx.Response(200, json={"data": {
+                "type": "buildUploadFiles", "id": "file-1"}})
+        return httpx.Response(404)
+
+    adapter = StoreStatusAdapter(
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        apple_api_url="https://apple.test", now=lambda: 1000)
+    receipt = adapter.submit_app_store({
+        "provider": "app_store_connect", "app_id": "123456",
+        "build_number": "87", "platform": "IOS", "release_goal": "submitted",
+        "artifact_path": "release.ipa", "apple_upload_parallelism": 2,
+    }, {
+        "commit_sha": "a" * 40, "version": "1.4.0",
+        "target": "mobile-production", "idempotency_key": "stable-key",
+    }, {
+        "APP_STORE_CONNECT_KEY_ID": "key",
+        "APP_STORE_CONNECT_ISSUER_ID": "issuer",
+        "APP_STORE_CONNECT_PRIVATE_KEY": _pem(private_key),
+    }, str(tmp_path))
+
+    assert receipt["phase"] == "build_upload"
+    assert receipt["build_upload_id"] == "upload-1"
+    assert receipt["artifact_sha256"] == digest
+    assert sorted(request.url.path for request in requests if request.method == "PUT") == \
+        ["/part-1", "/part-2"]
+
+
+def test_app_store_status_reports_pending_build_upload_without_version_lookup():
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"data": {
+            "type": "buildUploads", "id": "upload-1",
+            "attributes": {"state": "PROCESSING"},
+        }})
+
+    adapter = StoreStatusAdapter(
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        apple_api_url="https://apple.test", now=lambda: 1000)
+    receipt = adapter.app_store_connect({
+        "provider": "app_store_connect", "app_id": "123456",
+    }, {
+        **_submission("app_store_connect"),
+        "phase": "build_upload", "build_upload_id": "upload-1",
+    }, {
+        "APP_STORE_CONNECT_KEY_ID": "key",
+        "APP_STORE_CONNECT_ISSUER_ID": "issuer",
+        "APP_STORE_CONNECT_PRIVATE_KEY": _pem(private_key),
+    })
+
+    assert requests[0].url.path == "/v1/buildUploads/upload-1"
+    assert receipt["milestone"] == "uploaded"
+    assert receipt["provider_status"] == "PROCESSING"
+
+
+def test_app_store_status_rejects_completed_upload_with_invalid_build():
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    adapter = StoreStatusAdapter(httpx.Client(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={
+            "data": {"type": "buildUploads", "id": "upload-1",
+                     "attributes": {"state": "COMPLETE"}},
+            "included": [{"type": "builds", "id": "build-87",
+                          "attributes": {"processingState": "INVALID"}}],
+        }))), apple_api_url="https://apple.test", now=lambda: 1000)
+
+    receipt = adapter.app_store_connect({
+        "provider": "app_store_connect", "app_id": "123456",
+    }, {
+        **_submission("app_store_connect"),
+        "phase": "build_upload", "build_upload_id": "upload-1",
+    }, {
+        "APP_STORE_CONNECT_KEY_ID": "key",
+        "APP_STORE_CONNECT_ISSUER_ID": "issuer",
+        "APP_STORE_CONNECT_PRIVATE_KEY": _pem(private_key),
+    })
+
+    assert receipt["milestone"] == "rejected"
+    assert receipt["provider_status"] == "INVALID_BINARY"
+
+
 def test_app_store_builtin_recovery_requires_submitted_review_for_submitted_goal():
     private_key = ec.generate_private_key(ec.SECP256R1())
     methods = []
@@ -662,3 +803,10 @@ def test_builtin_app_store_submission_promotes_processed_build_without_deploy_co
     assert profile["submission_adapter"] == "official_api"
     with pytest.raises(ValueError, match="MANUAL"):
         validate_profile({**profile, "apple_release_type": "SCHEDULED"}, "production")
+
+    upload_profile = validate_profile({
+        **profile, "artifact_path": "release.ipa", "apple_upload_parallelism": 8,
+    }, "production")
+    assert upload_profile["artifact_path"] == "release.ipa"
+    with pytest.raises(ValueError, match="between 1 and 8"):
+        validate_profile({**upload_profile, "apple_upload_parallelism": 9}, "production")

@@ -153,6 +153,22 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
                 if release_type != "MANUAL":
                     raise ValueError(
                         "built-in App Store submission currently requires MANUAL release")
+                artifact_path = str(profile.get("artifact_path") or "")
+                if artifact_path and not artifact_path.lower().endswith((".ipa", ".pkg")):
+                    raise ValueError("App Store artifact_path must end in .ipa or .pkg")
+                artifact_digest = str(profile.get("artifact_sha256") or "")
+                if artifact_digest and (
+                        len(artifact_digest) != 64
+                        or any(char not in "0123456789abcdefABCDEF"
+                               for char in artifact_digest)):
+                    raise ValueError("artifact_sha256 must be 64 hexadecimal characters")
+                try:
+                    parallelism = int(profile.get("apple_upload_parallelism") or 4)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "apple_upload_parallelism must be an integer") from exc
+                if parallelism < 1 or parallelism > 8:
+                    raise ValueError("apple_upload_parallelism must be between 1 and 8")
         try:
             interval = int(profile.get("poll_interval_seconds") or 300)
         except (TypeError, ValueError) as exc:
@@ -240,7 +256,11 @@ def _submission_receipt(output: str, *, commit_sha: str, version: str,
     provider_id = ("app_store_version_id" if provider == "app_store_connect"
                    else "version_code")
     if not str(receipt.get(provider_id) or "").strip():
-        raise DeliveryError(f"store submission receipt is missing: {provider_id}")
+        pending_apple_upload = provider == "app_store_connect" and \
+            receipt.get("phase") == "build_upload" and \
+            str(receipt.get("build_upload_id") or "").strip()
+        if not pending_apple_upload:
+            raise DeliveryError(f"store submission receipt is missing: {provider_id}")
     return receipt
 
 
@@ -341,11 +361,13 @@ def _store_submit_once(db: Db, job_id: str, profile: dict[str, Any], workdir: st
             (f"{type(exc).__name__}: {exc}"[-8000:],
              datetime.now(UTC).isoformat(timespec="seconds"), job_id))
         raise
+    action_status = "waiting_external" if receipt.get("phase") == "build_upload" \
+        else "succeeded"
     db.write(
-        "UPDATE delivery_actions SET status='succeeded',output=?,receipt_json=?,"
+        "UPDATE delivery_actions SET status=?,output=?,receipt_json=?,"
         "error='',finished_at=? WHERE job_id=? AND action='store-submit'",
-        (output, json.dumps(receipt), datetime.now(UTC).isoformat(timespec="seconds"),
-         job_id))
+        (action_status, output, json.dumps(receipt),
+         datetime.now(UTC).isoformat(timespec="seconds"), job_id))
     return output, receipt
 
 
@@ -519,6 +541,8 @@ def execute(db: Db, job, workdir: str, contract: dict,
     receipt, complete = _verification_receipt(
         evidence["verify"], commit_sha=commit_sha, version=expected, target=target,
         profile=profile)
+    if evidence.get("submission_receipt", {}).get("phase") == "build_upload":
+        complete = False
     evidence["verification_receipt"] = receipt
     return DeliveryResult(
         mode, target, expected, commit_sha, evidence, complete=complete,
@@ -527,7 +551,7 @@ def execute(db: Db, job, workdir: str, contract: dict,
 
 
 def poll(workdir: str, contract: dict, delivery_row, *,
-         env: dict[str, str] | None = None) -> DeliveryResult:
+         env: dict[str, str] | None = None, db: Db | None = None) -> DeliveryResult:
     """Poll a previously submitted asynchronous store delivery without redeploying."""
     contract = normalize(contract)
     profile = validate_profile(contract.get("profile") or {}, contract["mode"])
@@ -548,11 +572,38 @@ def poll(workdir: str, contract: dict, delivery_row, *,
     }
     evidence = json.loads(delivery_row["evidence_json"] or "{}")
     if str(profile.get("status_adapter") or "command") == "official_api":
-        from .store_adapters import StoreAdapterError, official_status
+        from .store_adapters import StoreAdapterError, official_status, official_submit
 
         submission = evidence.get("submission_receipt")
         if not isinstance(submission, dict):
             raise DeliveryError("store delivery has no durable submission receipt")
+        if submission.get("phase") == "build_upload":
+            release = {
+                "commit_sha": commit_sha,
+                "version": version,
+                "target": target,
+                "idempotency_key": str(submission.get("idempotency_key") or ""),
+            }
+            try:
+                submission = official_submit(
+                    profile, release, {**os.environ, **(env or {})}, workdir)
+            except StoreAdapterError as exc:
+                raise DeliveryError(f"built-in store submission failed: {exc}") from exc
+            submission = _submission_receipt(
+                json.dumps(submission), commit_sha=commit_sha, version=version,
+                target=target, profile=profile,
+                idempotency_key=str(release["idempotency_key"]))
+            evidence["submission_receipt"] = submission
+            evidence["deploy"] = json.dumps(submission)
+            if db is not None:
+                action_status = "waiting_external" if \
+                    submission.get("phase") == "build_upload" else "succeeded"
+                db.write(
+                    "UPDATE delivery_actions SET status=?,output=?,receipt_json=?,"
+                    "error='',finished_at=? WHERE job_id=? AND action='store-submit'",
+                    (action_status, json.dumps(submission), json.dumps(submission),
+                     datetime.now(UTC).isoformat(timespec="seconds"),
+                     delivery_row["job_id"]))
         try:
             output = official_status(
                 profile, submission, {**os.environ, **(env or {})})
@@ -563,6 +614,8 @@ def poll(workdir: str, contract: dict, delivery_row, *,
                       "store status verification")
     receipt, complete = _verification_receipt(
         output, commit_sha=commit_sha, version=version, target=target, profile=profile)
+    if evidence.get("submission_receipt", {}).get("phase") == "build_upload":
+        complete = False
     evidence["verify"] = output
     evidence["verification_receipt"] = receipt
     return DeliveryResult(

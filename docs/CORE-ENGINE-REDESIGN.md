@@ -363,6 +363,19 @@ the crash gap between build attachment and review submission. The release type i
 restricted to `MANUAL`; Apple binary upload, metadata authoring, and automated release
 remain separate failure domains.
 
+The twenty-fourth closes that remaining binary boundary with Apple's Build Upload API
+without blocking a runner on asynchronous processing. A worktree-contained IPA or
+macOS PKG is bound to its size and SHA-256. The adapter looks up or creates one exact
+app/version/build/platform upload and one matching file reservation, validates that
+Apple's operations cover every byte exactly once, and executes the pre-signed PUTs with
+bounded concurrency while refusing to forward authorization. It then commits the file
+with `uploaded=true` and `SHA_256`. A durable `build_upload` receipt parks delivery in
+`waiting_external`; restart and scheduled polls reuse the same upload/file, retry safe
+ranges, and resume the already-approved mutation only after the exact build is `VALID`.
+Duplicate identities, conflicting files or checksums, unsafe/gapped ranges and provider
+failure all stop closed. This separates transfer, Apple processing and review state
+while still converging them through one delivery contract.
+
 Provider adapters normalize official state into milestones while retaining the raw
 status. Apple distinguishes `WAITING_FOR_REVIEW`, `IN_REVIEW`,
 `PENDING_DEVELOPER_RELEASE`, and `READY_FOR_DISTRIBUTION`; Google Play track releases
