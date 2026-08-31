@@ -61,7 +61,10 @@ and read back its exact live receipt, while a second stale-provider canary must 
 without `job.deployed`. No configured project, remote, or production service is touched.
 For a configured mobile project, `bastet store-canary --job <id>` performs a
 credentialed status read against the exact frozen App Store/Google Play submission;
-it never uploads, submits or publishes.
+it never uploads, submits or publishes. Profiles may additionally enable official
+submission recovery: after an interrupted submit command, Bastet looks up the exact
+Apple version/build or Google track/versionCode before deciding whether any command
+may run again.
 
 ## Why
 

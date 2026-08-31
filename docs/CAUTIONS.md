@@ -142,8 +142,10 @@
 - **submission command 必須真的使用 idempotency key。** 引擎會固定
   `BASTET_DELIVERY_IDEMPOTENCY_KEY`、要求 receipt 原樣回傳並保存成功 action；這能保證狀態
   查詢失敗後不重跑 command。但若 command 只是回傳 key、實際上沒有 lookup-or-create，主機
-  在外部成功而本機尚未保存 receipt 的極小 crash window 仍可能重複副作用。內建 submitter
-  完成前，不得把任意 shell script 宣稱為 exactly-once。
+  在外部成功而本機尚未保存 receipt 的極小 crash window 仍可能重複副作用。可設定
+  `submission_recovery=official_api`，並提供 Apple `build_number`（可選 `platform`）或 Google
+  `version_code`；重試會先查供應商上的精確版本，找到即重建收據，查詢錯誤則 fail closed，
+  不會執行 command。這仍不是任意外部副作用的通用 exactly-once 保證。
 - **審計是 hash 串接的 append-only。** 不要手動改 audit_log —— 鏈會斷，
   `verify_audit_chain()` 會抓到。刪任務/專案時的用量帳務會被拒絕或要求 force
   並記錄寫掉的金額，這是刻意的。

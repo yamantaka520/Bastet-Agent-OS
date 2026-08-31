@@ -171,6 +171,127 @@ def test_google_play_adapter_uses_oauth_read_edit_and_exact_version_code():
     assert receipt["commit_sha"] == "a" * 40
 
 
+def test_app_store_lookup_recovers_only_exact_attached_processed_build():
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/v1/builds":
+            assert request.url.params["filter[app]"] == "123456"
+            assert request.url.params["filter[version]"] == "87"
+            assert request.url.params["filter[preReleaseVersion.version]"] == "1.4.0"
+            assert request.url.params["filter[preReleaseVersion.platform]"] == "IOS"
+            assert request.url.params["filter[processingState]"] == "VALID"
+            return httpx.Response(200, json={"data": [{"id": "build-87"}]})
+        if request.url.path == "/v1/appStoreVersions":
+            assert request.url.params["filter[versionString]"] == "1.4.0"
+            return httpx.Response(200, json={"data": [{
+                "id": "version-7",
+                "relationships": {"build": {"data": {"id": "build-87"}}},
+            }]})
+        return httpx.Response(404)
+
+    adapter = StoreStatusAdapter(
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        apple_api_url="https://apple.test", now=lambda: 1000)
+    receipt = adapter.lookup_app_store_submission({
+        "provider": "app_store_connect",
+        "app_id": "123456",
+        "build_number": "87",
+        "platform": "ios",
+    }, {
+        "commit_sha": "a" * 40,
+        "version": "1.4.0",
+        "target": "mobile-production",
+        "idempotency_key": "stable-key",
+    }, {
+        "APP_STORE_CONNECT_KEY_ID": "key",
+        "APP_STORE_CONNECT_ISSUER_ID": "issuer",
+        "APP_STORE_CONNECT_PRIVATE_KEY": _pem(private_key),
+    })
+
+    assert [request.method for request in requests] == ["GET", "GET"]
+    assert receipt == {
+        **_submission("app_store_connect"),
+        "idempotency_key": "stable-key",
+        "build_number": "87",
+    }
+
+
+def test_app_store_lookup_refuses_version_attached_to_another_build():
+    private_key = ec.generate_private_key(ec.SECP256R1())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/builds":
+            return httpx.Response(200, json={"data": [{"id": "build-87"}]})
+        return httpx.Response(200, json={"data": [{
+            "id": "version-7",
+            "relationships": {"build": {"data": {"id": "different-build"}}},
+        }]})
+
+    adapter = StoreStatusAdapter(
+        httpx.Client(transport=httpx.MockTransport(handler)))
+    with pytest.raises(StoreAdapterError, match="different build"):
+        adapter.lookup_app_store_submission({
+            "provider": "app_store_connect", "app_id": "123456",
+            "build_number": "87",
+        }, {
+            "commit_sha": "a" * 40, "version": "1.4.0",
+            "target": "mobile-production", "idempotency_key": "stable-key",
+        }, {
+            "APP_STORE_CONNECT_KEY_ID": "key",
+            "APP_STORE_CONNECT_ISSUER_ID": "issuer",
+            "APP_STORE_CONNECT_PRIVATE_KEY": _pem(private_key),
+        })
+
+
+def test_google_play_lookup_recovers_exact_track_version_without_committing():
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/token":
+            return httpx.Response(200, json={"access_token": "oauth-token"})
+        if request.url.path.endswith("/edits") and request.method == "POST":
+            return httpx.Response(200, json={"id": "lookup-edit"})
+        if request.url.path.endswith("/tracks/internal"):
+            return httpx.Response(200, json={
+                "releases": [{"versionCodes": ["10400"], "status": "completed"}],
+            })
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(404)
+
+    adapter = StoreStatusAdapter(
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        google_api_url="https://google.test/androidpublisher/v3",
+        google_token_url="https://google.test/token")
+    receipt = adapter.lookup_google_play_submission({
+        "provider": "google_play",
+        "package_name": "com.example.canary",
+        "track": "internal",
+        "version_code": "10400",
+    }, {
+        "commit_sha": "a" * 40,
+        "version": "1.4.0",
+        "target": "mobile-production",
+        "idempotency_key": "stable-key",
+    }, {"GOOGLE_PLAY_SERVICE_ACCOUNT_JSON": json.dumps({
+        "client_email": "publisher@example.test",
+        "private_key_id": "rsa-1",
+        "private_key": _pem(private_key),
+    })})
+
+    assert [request.method for request in requests] == ["POST", "POST", "GET", "DELETE"]
+    assert receipt == {
+        **_submission("google_play"),
+        "track": "internal",
+        "idempotency_key": "stable-key",
+    }
+
+
 def test_official_adapter_requires_exact_structured_submission_receipt():
     profile = {
         "provider": "google_play",
@@ -210,3 +331,21 @@ def test_official_adapter_profile_does_not_require_verify_command():
     }, "production")
 
     assert profile["status_adapter"] == "official_api"
+
+
+@pytest.mark.parametrize("provider,identity,missing", [
+    ("app_store_connect", {"app_id": "123456"}, "build_number"),
+    ("google_play", {"package_name": "com.example.canary", "track": "internal"},
+     "version_code"),
+])
+def test_official_submission_recovery_requires_immutable_artifact_identity(
+        provider, identity, missing):
+    with pytest.raises(ValueError, match=missing):
+        validate_profile({
+            "provider": provider,
+            **identity,
+            "status_adapter": "official_api",
+            "submission_recovery": "official_api",
+            "predeploy_command": "test-release",
+            "deploy_command": "upload-release",
+        }, "production")

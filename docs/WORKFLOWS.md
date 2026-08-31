@@ -282,6 +282,14 @@ receipt independently of delivery attempts. A retry caused by a later status fai
 therefore skips submission and reuses the provider object ID; changing release identity
 under the same job is rejected.
 
+For crash recovery before that receipt reaches SQLite, set
+`submission_recovery=official_api` and freeze Apple `build_number`/`platform` or Google
+`version_code`. Bastet then performs a non-mutating provider lookup before every
+not-yet-succeeded action. An exact Apple app/version/build attachment or Google
+track/versionCode reconstructs the receipt and suppresses the command. Provider errors,
+multiple matches and conflicting Apple build attachments stop the delivery instead of
+riskily retrying a side effect.
+
 Apple submission and review are separate operations, and approval can still leave a
 version at Pending Developer Release. Google Play edits are not live until committed;
 managed publishing can further hold reviewed changes before publication. Templates

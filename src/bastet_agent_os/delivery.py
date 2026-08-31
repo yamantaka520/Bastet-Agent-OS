@@ -80,6 +80,13 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
         status_adapter = str(profile.get("status_adapter") or "command").strip()
         if status_adapter not in {"command", "official_api"}:
             raise ValueError("store status_adapter must be command or official_api")
+        recovery = str(profile.get("submission_recovery") or "command").strip()
+        if recovery not in {"command", "official_api"}:
+            raise ValueError(
+                "store submission_recovery must be command or official_api")
+        if recovery == "official_api" and status_adapter != "official_api":
+            raise ValueError(
+                "official submission recovery requires status_adapter=official_api")
         if status_adapter == "command" and not str(profile.get("verify_command") or "").strip():
             missing.append("verify_command")
         goal = str(profile.get("release_goal") or "published").strip()
@@ -93,6 +100,15 @@ def validate_profile(profile: Any, mode: str) -> dict[str, Any]:
         if missing_identity:
             raise ValueError(
                 f"{provider} profile is missing: {', '.join(missing_identity)}")
+        if recovery == "official_api":
+            recovery_fields = (["build_number"] if provider == "app_store_connect"
+                               else ["version_code"])
+            missing_recovery = [field for field in recovery_fields
+                                if not str(profile.get(field) or "").strip()]
+            if missing_recovery:
+                raise ValueError(
+                    f"{provider} official submission recovery is missing: "
+                    + ", ".join(missing_recovery))
         try:
             interval = int(profile.get("poll_interval_seconds") or 300)
         except (TypeError, ValueError) as exc:
@@ -234,12 +250,32 @@ def _store_submit_once(db: Db, job_id: str, profile: dict[str, Any], workdir: st
             "finished_at=NULL WHERE job_id=? AND action='store-submit'",
             (stamp, job_id))
     try:
-        output = _run(str(profile.get("deploy_command") or ""), workdir, {
-            **env, "BASTET_DELIVERY_IDEMPOTENCY_KEY": key,
-        }, "store submission")
-        receipt = _submission_receipt(
-            output, commit_sha=commit_sha, version=version, target=target,
-            profile=profile, idempotency_key=key)
+        recovered = None
+        if str(profile.get("submission_recovery") or "command") == "official_api":
+            from .store_adapters import StoreAdapterError, official_submission_lookup
+
+            try:
+                recovered = official_submission_lookup(profile, {
+                    "commit_sha": commit_sha,
+                    "version": version,
+                    "target": target,
+                    "idempotency_key": key,
+                }, {**os.environ, **env})
+            except StoreAdapterError as exc:
+                raise DeliveryError(
+                    f"official submission recovery failed closed: {exc}") from exc
+        if recovered is not None:
+            output = "recovered exact submission from official provider lookup"
+            receipt = _submission_receipt(
+                json.dumps(recovered), commit_sha=commit_sha, version=version,
+                target=target, profile=profile, idempotency_key=key)
+        else:
+            output = _run(str(profile.get("deploy_command") or ""), workdir, {
+                **env, "BASTET_DELIVERY_IDEMPOTENCY_KEY": key,
+            }, "store submission")
+            receipt = _submission_receipt(
+                output, commit_sha=commit_sha, version=version, target=target,
+                profile=profile, idempotency_key=key)
     except Exception as exc:
         db.write(
             "UPDATE delivery_actions SET status='failed',error=?,finished_at=? "

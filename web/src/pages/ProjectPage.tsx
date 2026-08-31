@@ -55,8 +55,10 @@ type DeliveryProfile = { target_branch?: string; target?: string;
   predeploy_command?: string; deploy_command?: string; verify_command?: string;
   provider?: "web" | "app_store_connect" | "google_play";
   status_adapter?: "command" | "official_api";
+  submission_recovery?: "command" | "official_api";
   release_goal?: "uploaded" | "submitted" | "approved" | "published";
-  app_id?: string; package_name?: string; track?: string;
+  app_id?: string; platform?: string; build_number?: string;
+  package_name?: string; track?: string; version_code?: string;
   poll_interval_seconds?: string };
 type RoomMember = { id: string; name: string; role: string; executor_type: string };
 type RoomMessage = { id: string; author_type: string; author_id: string;
@@ -719,14 +721,38 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
                     .map((goal) => <option key={goal} value={goal}>{goal}</option>)}
                 </select>
               </label>
-              {draft.deliveryProfile.provider === "app_store_connect" ? (
+              {(draft.deliveryProfile.status_adapter ?? "command") === "official_api" && (
                 <label className="res-field">
-                  <span>{t("project.delivery.app_id")}</span>
-                  <input value={draft.deliveryProfile.app_id ?? ""}
-                         disabled={!canOperate}
-                         onChange={(e) => patch({ deliveryProfile: {
-                           ...draft.deliveryProfile, app_id: e.target.value } })} />
+                  <span>{t("project.delivery.submission_recovery")}</span>
+                  <select value={draft.deliveryProfile.submission_recovery ?? "command"}
+                          disabled={!canOperate}
+                          onChange={(e) => patch({ deliveryProfile: {
+                            ...draft.deliveryProfile,
+                            submission_recovery:
+                              e.target.value as DeliveryProfile["submission_recovery"],
+                          } })}>
+                    <option value="command">
+                      {t("project.delivery.recovery.command")}
+                    </option>
+                    <option value="official_api">
+                      {t("project.delivery.recovery.official_api")}
+                    </option>
+                  </select>
                 </label>
+              )}
+              {draft.deliveryProfile.provider === "app_store_connect" ? (
+                <>
+                  {(["app_id", "platform", "build_number"] as const).map((key) => (
+                    <label className="res-field" key={key}>
+                      <span>{t(`project.delivery.${key}`)}</span>
+                      <input value={draft.deliveryProfile[key]
+                                      ?? (key === "platform" ? "IOS" : "")}
+                             disabled={!canOperate}
+                             onChange={(e) => patch({ deliveryProfile: {
+                               ...draft.deliveryProfile, [key]: e.target.value } })} />
+                    </label>
+                  ))}
+                </>
               ) : (<>
                 <label className="res-field">
                   <span>{t("project.delivery.package_name")}</span>
@@ -741,6 +767,13 @@ function ContentEditor({ projectId, repo, desc, deliveryProfile, canOperate, onS
                          disabled={!canOperate}
                          onChange={(e) => patch({ deliveryProfile: {
                            ...draft.deliveryProfile, track: e.target.value } })} />
+                </label>
+                <label className="res-field">
+                  <span>{t("project.delivery.version_code")}</span>
+                  <input value={draft.deliveryProfile.version_code ?? ""}
+                         disabled={!canOperate}
+                         onChange={(e) => patch({ deliveryProfile: {
+                           ...draft.deliveryProfile, version_code: e.target.value } })} />
                 </label>
               </>)}
               <label className="res-field">

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from fake_executor import SCRIPT, add_template, req
 
+from bastet_agent_os.delivery import DeliveryError, _store_submit_once
 from bastet_agent_os.executors.base import RunResult
 
 pytestmark = pytest.mark.asyncio
@@ -36,6 +37,73 @@ def writes_mobile_release(task):
 
 def command(script: str) -> str:
     return f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+
+
+async def test_official_lookup_recovers_receipt_without_rerunning_submitter(
+        seeded, monkeypatch, tmp_path):
+    marker = tmp_path / "must-not-run"
+    profile = {
+        "provider": "google_play",
+        "package_name": "com.example.canary",
+        "track": "internal",
+        "version_code": "10400",
+        "submission_recovery": "official_api",
+        "deploy_command": command(f"import pathlib;pathlib.Path({str(marker)!r}).touch()"),
+    }
+
+    def lookup(actual_profile, release, env):
+        return {
+            "provider": "google_play",
+            "package_name": actual_profile["package_name"],
+            "track": actual_profile["track"],
+            "version_code": actual_profile["version_code"],
+            **release,
+        }
+
+    monkeypatch.setattr(
+        "bastet_agent_os.store_adapters.official_submission_lookup", lookup)
+    output, receipt = _store_submit_once(
+        seeded, "job1", profile, str(tmp_path), {}, commit_sha="a" * 40,
+        version="1.4.0", target="google-play:com.example.canary:internal")
+
+    assert output == "recovered exact submission from official provider lookup"
+    assert receipt["version_code"] == "10400"
+    assert not marker.exists()
+    action = seeded.one(
+        "SELECT * FROM delivery_actions WHERE job_id='job1' AND action='store-submit'")
+    assert action["status"] == "succeeded"
+    assert json.loads(action["receipt_json"])["idempotency_key"] == \
+        action["idempotency_key"]
+
+
+async def test_official_lookup_failure_stops_before_submitter(
+        seeded, monkeypatch, tmp_path):
+    from bastet_agent_os.store_adapters import StoreAdapterError
+
+    marker = tmp_path / "must-not-run"
+    profile = {
+        "provider": "app_store_connect",
+        "app_id": "123456",
+        "build_number": "87",
+        "submission_recovery": "official_api",
+        "deploy_command": command(f"import pathlib;pathlib.Path({str(marker)!r}).touch()"),
+    }
+
+    def lookup(profile, release, env):
+        raise StoreAdapterError("provider unavailable")
+
+    monkeypatch.setattr(
+        "bastet_agent_os.store_adapters.official_submission_lookup", lookup)
+    with pytest.raises(DeliveryError, match="failed closed"):
+        _store_submit_once(
+            seeded, "job1", profile, str(tmp_path), {}, commit_sha="a" * 40,
+            version="1.4.0", target="app-store:123456")
+
+    assert not marker.exists()
+    action = seeded.one(
+        "SELECT status,error FROM delivery_actions WHERE job_id='job1'")
+    assert action["status"] == "failed"
+    assert "provider unavailable" in action["error"]
 
 
 def store_profile(provider: str, live_file: Path) -> tuple[dict, dict]:

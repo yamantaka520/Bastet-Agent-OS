@@ -323,6 +323,20 @@ action status and a shortened key but not raw command output. This provides dura
 at-most-once orchestration after receipt persistence; the command's own idempotent
 lookup remains necessary for the narrow process-death interval during its execution.
 
+The twenty-first closes that remaining process-death interval for explicitly configured
+mobile profiles without taking ownership of upload or review mutation. With
+`submission_recovery=official_api`, every unfinished action first authenticates to the
+provider and performs an exact read-only lookup. Apple requires one `VALID` build bound
+to app, release version, platform and build number, plus an App Store version attached
+to that exact build. Google opens an uncommitted read edit and requires the configured
+track to contain the exact versionCode, then deletes the edit. A match reconstructs the
+submission receipt using the original deterministic action key; absence permits the
+trusted command, while API errors, ambiguity and conflicting build attachment fail
+closed before the command. The project UI exposes the recovery mode and immutable
+provider identifiers. This makes retries convergent across the external-success/local-
+crash boundary while leaving actual upload and review submission under the existing
+human-approved command contract.
+
 Provider adapters normalize official state into milestones while retaining the raw
 status. Apple distinguishes `WAITING_FOR_REVIEW`, `IN_REVIEW`,
 `PENDING_DEVELOPER_RELEASE`, and `READY_FOR_DISTRIBUTION`; Google Play track releases

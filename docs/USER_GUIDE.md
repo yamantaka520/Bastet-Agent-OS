@@ -157,6 +157,16 @@ same durable receipt and does not invoke the upload/submit command again. Changi
 commit, version, target or provider under an existing action is rejected. The task
 drawer shows the action status and a shortened key, but omits raw command output.
 
+Set `submission_recovery` to `official_api` to cover the narrower interruption where
+the provider accepted the command but the process died before Bastet stored its output.
+Apple profiles must freeze `build_number` and may set `platform` (default `IOS`);
+Google profiles must freeze `version_code`. Before a command can run, Bastet performs
+a read-only exact lookup: Apple requires one valid build for the app/version/build
+number and the matching App Store version must be attached to it; Google requires the
+versionCode on the configured track. An exact match reconstructs and persists the
+receipt without invoking the command. Missing objects allow the command to proceed;
+ambiguous, mismatched or unavailable provider state fails closed.
+
 Grant these exact secret environment names to the project:
 
 - Apple: `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, and
@@ -166,7 +176,9 @@ Grant these exact secret environment names to the project:
 The Apple adapter reads the exact App Store version and verifies its app relationship.
 The Google adapter exchanges a signed service-account assertion, creates a temporary
 uncommitted edit, reads the configured track and exact `versionCode`, then deletes the
-read edit. Neither adapter uploads, submits, commits, releases, or changes rollout.
+read edit. Status and recovery adapters never upload, submit, commit, release, or
+change rollout; the trusted command remains responsible for creation when no exact
+provider object exists.
 
 After configuring credentials, run a provider canary before relying on automatic
 polling:
