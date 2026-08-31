@@ -211,6 +211,10 @@ feature is confirmed against real vendor CLIs before release:
 - **Work preservation and delivery**: every completion commits to
   `bastet/<job_id>` and pushes to GitLab through the project's granted
   credential — both the driver-loop and human-approval completion paths.
+  Branch-only cards expose a bounded file/diff review in the drawer and an
+  operator can promote that exact branch through the normal verified integration
+  path. Promotion refetches the target, rejects conflicts/concurrent movement,
+  reruns the pre-deploy gate, atomically pushes, and verifies the remote SHA.
 - **Quota self-wait**: `resets 1:30am (Asia/Taipei)` parsed, card resumed itself
   after the vendor's clock passed.
 - **The media loop**: a chat agent read vendor docs (WebFetch), proposed a
@@ -226,9 +230,6 @@ feature is confirmed against real vendor CLIs before release:
 
 - **Async media fetcher**: generation that outlives its run has no background
   claimer; the rule today is poll-to-completion inside the run.
-- **Non-development branch delivery**: analysis/content cards that deliberately
-  request branch-only delivery still leave merge authority to a human. Development
-  templates instead require the verified `integration` or `production` path.
 - **Telegram bot token** from an early session should still be rotated.
 - **The Windows CI leg is red by declaration** (`continue-on-error`): ~35 tests
   assume POSIX fake-executor scripts, forward-slash paths and 0600 bits. Real

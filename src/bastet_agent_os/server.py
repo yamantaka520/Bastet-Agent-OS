@@ -2531,6 +2531,73 @@ def create_app(home: Home) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/jobs/{job_id}/branch-review",
+             dependencies=[Depends(require_role("viewer"))])
+    def review_job_delivery_branch(job_id: str):
+        from . import git_push
+
+        job = db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        try:
+            contract = json.loads(job["delivery_json"] or "{}")
+        except json.JSONDecodeError:
+            contract = {}
+        receipt = db.one(
+            "SELECT mode,status,commit_sha FROM deliveries WHERE job_id=? "
+            "ORDER BY rowid DESC LIMIT 1", (job_id,))
+        if (job["status"] != "done" or job["delivery_status"] != "succeeded"
+                or contract.get("mode") != "branch" or receipt is None
+                or receipt["mode"] != "branch" or receipt["status"] != "succeeded"):
+            raise HTTPException(
+                status_code=409,
+                detail="branch review requires a completed branch delivery")
+        project = db.one("SELECT config_json FROM projects WHERE id=?",
+                         (job["project_id"],))
+        try:
+            config = json.loads(project["config_json"] or "{}") if project else {}
+        except json.JSONDecodeError:
+            config = {}
+        target = str((config.get("delivery_profile") or {}).get(
+            "target_branch") or "main")
+        try:
+            return git_push.review_job_branch(
+                db, job, target_branch=target,
+                expected_commit=receipt["commit_sha"])
+        except git_push.BranchReviewError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/jobs/{job_id}/branch-review/merge")
+    async def merge_job_delivery_branch(
+        job_id: str, auth: Auth = Depends(require_role("operator")),
+    ):
+        job = db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        try:
+            contract = json.loads(job["delivery_json"] or "{}")
+        except json.JSONDecodeError:
+            contract = {}
+        receipt = db.one(
+            "SELECT mode,status,commit_sha FROM deliveries WHERE job_id=? "
+            "ORDER BY rowid DESC LIMIT 1", (job_id,))
+        if (job["status"] != "done" or job["delivery_status"] != "succeeded"
+                or contract.get("mode") != "branch" or receipt is None
+                or receipt["mode"] != "branch" or receipt["status"] != "succeeded"):
+            raise HTTPException(
+                status_code=409,
+                detail="merge requires a completed branch delivery")
+        try:
+            result = orch.configure_delivery(
+                job_id, {"mode": "integration",
+                         "source_commit": receipt["commit_sha"]},
+                user=auth.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        db.audit(auth.actor, "job.branch_merge_requested", "job", job_id,
+                 {"from": "branch", "to": "integration"})
+        return result
+
     @app.post("/api/jobs/{job_id}/archive")
     def archive_job(job_id: str, body: ArchiveIn,
                     auth: Auth = Depends(require_role("operator"))):

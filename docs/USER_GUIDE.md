@@ -127,6 +127,15 @@ blocked and keeps its worktree; it cannot be marked done. `git_auto_push: false`
 therefore applies only to legacy/best-effort `none` tasks, not to an explicit
 delivery promise.
 
+After a successful branch-only delivery, open the completed card to review its
+changed-file list, diff stat, and bounded patch preview. The preview is explicitly
+against the repository's local target snapshot. **Merge and verify target** promotes
+the branch through the integration contract: Bastet fetches the current remote
+target, merges without force, reruns the project's pre-deploy gate, atomically pushes,
+and verifies the remote commit. A conflict, failed gate, or concurrently advanced
+target blocks the card and preserves the worktree; double-clicking cannot start a
+second delivery driver.
+
 For App Store Connect or Google Play, choose that provider in the delivery profile,
 set the app ID or package name/track, choose a release goal, and configure a poll
 interval. The terminal workflow stage must be `human-approve`. Store verification

@@ -490,15 +490,21 @@ def execute(db: Db, job, workdir: str, contract: dict,
         raise DeliveryError("no delivery was requested")
     evidence: dict[str, Any] = {}
 
+    commit_sha = subprocess.run(
+        ["git", "-C", workdir, "rev-parse", "HEAD"], capture_output=True,
+        text=True).stdout.strip()
+    expected_source = str(contract.get("source_commit") or "")
+    if expected_source and commit_sha != expected_source:
+        raise DeliveryError(
+            "job branch moved after the reviewed delivery receipt: "
+            f"expected {expected_source}, got {commit_sha or 'missing'}")
+
     parked = git_push.push_job_branch(db, job, emit=emit)
     if not parked or not parked.get("pushed"):
         reason = (parked or {}).get("detail") or (parked or {}).get("reason") \
             or "job branch was not delivered"
         raise DeliveryError(str(reason))
     evidence["branch"] = {k: parked.get(k) for k in ("branch", "remote", "at")}
-    commit_sha = subprocess.run(
-        ["git", "-C", workdir, "rev-parse", "HEAD"], capture_output=True,
-        text=True).stdout.strip()
     if mode == "branch":
         return DeliveryResult(mode, parked["branch"], "", commit_sha, evidence)
 

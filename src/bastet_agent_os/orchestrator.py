@@ -700,6 +700,10 @@ class Orchestrator:
         job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
         if job is None:
             raise ValueError(f"unknown job {job_id!r}")
+        if (job["status"] == "in_progress"
+                and job["delivery_status"] in
+                ("pending", "running", "waiting_external")):
+            raise ValueError("delivery is already active")
         active = self.db.one(
             "SELECT COUNT(*) AS n FROM runs WHERE job_id=? AND status IN "
             "('queued','running','waiting_input')", (job_id,))

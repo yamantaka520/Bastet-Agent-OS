@@ -90,6 +90,18 @@ export type DeliveryReceipt = {
   commit_sha: string; error: string; started_at: string; finished_at: string | null;
 };
 
+export type BranchReview = {
+  target_branch: string;
+  comparison_scope: "local_target_snapshot";
+  base_commit: string;
+  branch_commit: string;
+  merge_base: string;
+  files: { status: string; path: string; previous_path?: string }[];
+  stat: string;
+  patch: string;
+  truncated: boolean;
+};
+
 export type UsageRow = {
   project_id: string;
   agent_id: string;

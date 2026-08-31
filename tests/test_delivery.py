@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from fake_executor import SCRIPT, add_template, req
 
+from bastet_agent_os import git_push
 from bastet_agent_os.executors.base import RunResult
 
 pytestmark = pytest.mark.asyncio
@@ -313,3 +314,97 @@ async def test_historic_repair_reuses_only_a_bastet_owned_worktree(
     assert orch._ensure_workdir(job, True) == str(repair_path.resolve())
     assert seeded.one("SELECT worktree_path FROM jobs WHERE id='job1'")[
         "worktree_path"] == str(repair_path.resolve())
+
+
+async def test_completed_branch_has_bounded_local_review(orch, seeded, origin):
+    add_template(seeded, "dev", [{"name": "implement", "gate": "auto"}])
+    SCRIPT.append(writes_release)
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True,
+                               delivery={"mode": "branch"}))
+    await orch.wait_idle()
+
+    job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+    review = git_push.review_job_branch(seeded, job, target_branch="main",
+                                        patch_limit=80)
+    assert review["comparison_scope"] == "local_target_snapshot"
+    assert review["base_commit"]
+    assert review["branch_commit"] != review["base_commit"]
+    assert review["merge_base"] == review["base_commit"]
+    assert {row["path"] for row in review["files"]} == {
+        "feature.txt", "package.json"}
+    assert "feature.txt" in review["stat"]
+    assert len(review["patch"].encode()) <= 80
+    assert review["truncated"] is True
+
+
+async def test_reviewed_branch_can_be_promoted_through_verified_integration(
+        orch, seeded, origin):
+    profile = {
+        "target_branch": "main",
+        "target": "origin/main",
+        "predeploy_command": "test -f feature.txt",
+    }
+    seeded.write("UPDATE projects SET config_json=? WHERE id='proj1'",
+                 (json.dumps({"delivery_profile": profile}),))
+    add_template(seeded, "dev", [{"name": "implement", "gate": "auto",
+                                   "delivery_modes": ["branch", "integration"]}])
+    SCRIPT.append(writes_release)
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True,
+                               delivery={"mode": "branch"}))
+    await orch.wait_idle()
+
+    branch_commit = seeded.one(
+        "SELECT commit_sha FROM deliveries WHERE job_id=?", (job_id,))["commit_sha"]
+    result = orch.configure_delivery(
+        job_id, {"mode": "integration", "source_commit": branch_commit},
+        user="reviewer")
+    assert result["status"] == "in_progress"
+    with pytest.raises(ValueError, match="delivery is already active"):
+        orch.configure_delivery(
+            job_id, {"mode": "integration", "source_commit": branch_commit},
+            user="duplicate-click")
+    await orch.wait_idle()
+
+    remote_main = subprocess.run(
+        ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/main"],
+        capture_output=True, text=True, check=True).stdout.strip()
+    job = seeded.one("SELECT status,delivery_status FROM jobs WHERE id=?", (job_id,))
+    assert dict(job) == {"status": "done", "delivery_status": "succeeded"}
+    latest = seeded.one(
+        "SELECT mode,status,commit_sha FROM deliveries WHERE job_id=? "
+        "ORDER BY rowid DESC LIMIT 1", (job_id,))
+    assert (latest["mode"], latest["status"], latest["commit_sha"]) == (
+        "integration", "succeeded", remote_main)
+
+
+async def test_reviewed_branch_promotion_rejects_a_moved_branch(
+        orch, seeded, origin, repo):
+    profile = {"target_branch": "main", "target": "origin/main",
+               "predeploy_command": "true"}
+    seeded.write("UPDATE projects SET config_json=? WHERE id='proj1'",
+                 (json.dumps({"delivery_profile": profile}),))
+    add_template(seeded, "dev", [{"name": "implement", "gate": "auto"}])
+    SCRIPT.append(writes_release)
+    job_id = orch.dispatch(req(template_id="dev", use_worktree=True,
+                               delivery={"mode": "branch"}))
+    await orch.wait_idle()
+    receipt = seeded.one(
+        "SELECT commit_sha FROM deliveries WHERE job_id=?", (job_id,))
+
+    subprocess.run(["git", "-C", str(repo), "branch", "-f", f"bastet/{job_id}",
+                    "main"], check=True)
+    job = seeded.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+    with pytest.raises(git_push.BranchReviewError, match="branch moved"):
+        git_push.review_job_branch(
+            seeded, job, expected_commit=receipt["commit_sha"])
+
+    orch.configure_delivery(
+        job_id, {"mode": "integration", "source_commit": receipt["commit_sha"]},
+        user="reviewer")
+    await orch.wait_idle()
+    assert dict(seeded.one(
+        "SELECT status,delivery_status FROM jobs WHERE id=?", (job_id,))) == {
+            "status": "blocked", "delivery_status": "failed"}
+    assert "branch moved" in seeded.one(
+        "SELECT error FROM deliveries WHERE job_id=? ORDER BY rowid DESC LIMIT 1",
+        (job_id,))["error"]

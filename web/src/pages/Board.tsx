@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  api, apiBlob, post, put, Interaction, Job, JobDetail, UsageRow,
+  api, apiBlob, post, put, BranchReview, Interaction, Job, JobDetail, UsageRow,
 } from "../api";
 import { useT, type T } from "../i18n";
 import { fmtAgo, fmtTime } from "../ui";
@@ -275,6 +275,9 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
     useState<"branch" | "integration" | "production">("integration");
   const [repairDeliveryVersion, setRepairDeliveryVersion] = useState("");
   const [repairDeliveryError, setRepairDeliveryError] = useState("");
+  const [branchReview, setBranchReview] = useState<BranchReview | null>(null);
+  const [branchReviewError, setBranchReviewError] = useState("");
+  const [mergeError, setMergeError] = useState("");
   const imagePreviewNames = useMemo(
     () => previews.filter((name) => /\.(png|jpe?g|gif|webp)$/i.test(name)),
     [previews]);
@@ -303,6 +306,30 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
     })();
     return () => { dead = true; Object.values(urls).forEach(URL.revokeObjectURL); };
   }, [imagePreviewNames, jobId]);
+
+  useEffect(() => {
+    let deliveryMode = "";
+    try { deliveryMode = JSON.parse(job?.delivery_json || "{}").mode || ""; }
+    catch { /* malformed historic contract cannot offer a merge */ }
+    const available = job?.status === "done"
+      && job.delivery_status === "succeeded" && deliveryMode === "branch";
+    if (!available) {
+      setBranchReview(null);
+      setBranchReviewError("");
+      return;
+    }
+    let dead = false;
+    setBranchReviewError("");
+    api<BranchReview>(`/api/jobs/${jobId}/branch-review`)
+      .then((review) => { if (!dead) setBranchReview(review); })
+      .catch((error) => {
+        if (!dead) {
+          setBranchReview(null);
+          setBranchReviewError(String((error as Error).message));
+        }
+      });
+    return () => { dead = true; };
+  }, [jobId, job?.status, job?.delivery_status, job?.delivery_json]);
 
   const addSupply = async () => {
     setSupplyError("");
@@ -391,6 +418,15 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
     } catch (e) { setRepairDeliveryError(String((e as Error).message)); }
   };
 
+  const mergeBranch = async () => {
+    setMergeError("");
+    try {
+      await post(`/api/jobs/${jobId}/branch-review/merge`, {});
+      onChanged();
+      load();
+    } catch (e) { setMergeError(String((e as Error).message)); }
+  };
+
   const answer = async (runId: string, requestId: string, allow: boolean) => {
     const message = (answerText[requestId] || "").trim();
     await post(`/api/runs/${runId}/respond`,
@@ -424,6 +460,38 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
               {a.error ? ` · ${a.error.slice(0, 240)}` : ""}
             </p>
           ))}
+        </div>
+      )}
+      {(branchReview || branchReviewError) && (
+        <div className="approval">
+          <h3>{t("board.branchReview")}</h3>
+          {branchReview && (
+            <>
+              <p className="muted">{t("board.branchReviewHint", {
+                branch: branchReview.target_branch,
+              })}</p>
+              <p className="card-meta">
+                {branchReview.base_commit.slice(0, 12)} → {branchReview.branch_commit.slice(0, 12)}
+                {` · ${branchReview.files.length} ${t("board.changedFiles")}`}
+              </p>
+              <ul>
+                {branchReview.files.map((file, index) => (
+                  <li className="card-meta" key={`${file.status}:${file.path}:${index}`}>
+                    <b>{file.status}</b> {file.previous_path
+                      ? `${file.previous_path} → ${file.path}` : file.path}
+                  </li>
+                ))}
+              </ul>
+              {!!branchReview.stat && <pre className="spec">{branchReview.stat}</pre>}
+              {!!branchReview.patch && <pre className="spec diff">{branchReview.patch}</pre>}
+              {branchReview.truncated && <p className="muted">{t("board.patchTruncated")}</p>}
+              {canOperate && (
+                <button onClick={mergeBranch}>{t("board.mergeBranch")}</button>
+              )}
+            </>
+          )}
+          {branchReviewError && <p className="error">{branchReviewError}</p>}
+          {mergeError && <p className="error">{mergeError}</p>}
         </div>
       )}
       {canOperate && job.status === "done"

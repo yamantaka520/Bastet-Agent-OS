@@ -45,6 +45,12 @@ from .db import Db, now
 log = logging.getLogger("bastet.gitpush")
 
 PUSH_TIMEOUT_S = 120
+REVIEW_TIMEOUT_S = 20
+REVIEW_PATCH_LIMIT = 200_000
+
+
+class BranchReviewError(RuntimeError):
+    """The requested local branch comparison cannot be produced safely."""
 
 
 def _host_of(url: str) -> str:
@@ -186,6 +192,101 @@ def push_job_branch(db: Db, job, *, emit=None) -> dict[str, Any] | None:
         log.warning("job %s: push failed (%s): %s", job["id"], detected, output[:200])
     return {"pushed": ok, "remote": detected, "branch": branch, "detail": output,
             "at": now()}
+
+
+def review_job_branch(db: Db, job, *, target_branch: str = "main",
+                      expected_commit: str = "",
+                      patch_limit: int = REVIEW_PATCH_LIMIT) -> dict[str, Any]:
+    """Return a bounded, read-only review of a Bastet branch.
+
+    The comparison deliberately uses the repository's *local* target snapshot.
+    A later integration delivery fetches the remote target again, merges it and
+    reruns its pre-push gate, so this preview can never authorize a stale merge.
+    """
+    valid_target = subprocess.run(
+        ["git", "check-ref-format", f"refs/heads/{target_branch}"],
+        capture_output=True, text=True)
+    if valid_target.returncode:
+        raise BranchReviewError("invalid target branch")
+    project = db.one("SELECT repo_path FROM projects WHERE id=?",
+                     (job["project_id"],))
+    if project is None:
+        raise BranchReviewError("project not found")
+    from .config import expand_repo_path
+    repo = expand_repo_path(project["repo_path"] or "")
+    if not repo or not os.path.isdir(repo):
+        raise BranchReviewError("project repository is unavailable")
+    branch = f"bastet/{job['id']}"
+    target_ref = f"refs/heads/{target_branch}"
+    branch_ref = f"refs/heads/{branch}"
+
+    def git(*args: str, binary: bool = False):
+        try:
+            return subprocess.run(
+                ["git", "-C", repo, *args], capture_output=True,
+                text=not binary, timeout=REVIEW_TIMEOUT_S)
+        except subprocess.TimeoutExpired as exc:
+            raise BranchReviewError("branch review timed out") from exc
+
+    def resolve(ref: str, label: str) -> str:
+        proc = git("rev-parse", "--verify", "-q", ref)
+        if proc.returncode:
+            raise BranchReviewError(f"{label} not found")
+        return proc.stdout.strip()
+
+    base_commit = resolve(target_ref, f"local target {target_branch}")
+    branch_commit = resolve(branch_ref, "job branch")
+    if expected_commit and branch_commit != expected_commit:
+        raise BranchReviewError(
+            "job branch moved after its successful delivery receipt")
+    merge = git("merge-base", target_ref, branch_ref)
+    if merge.returncode:
+        raise BranchReviewError("target and job branch have no merge base")
+    merge_base = merge.stdout.strip()
+    comparison = f"{target_ref}...{branch_ref}"
+
+    names = git("diff", "--no-ext-diff", "--name-status", "-z", comparison,
+                binary=True)
+    if names.returncode:
+        raise BranchReviewError("unable to enumerate branch changes")
+    fields = names.stdout.split(b"\0")
+    if fields and fields[-1] == b"":
+        fields.pop()
+    files: list[dict[str, str]] = []
+    index = 0
+    while index < len(fields):
+        status = fields[index].decode("utf-8", errors="replace")
+        index += 1
+        if index >= len(fields):
+            break
+        path = fields[index].decode("utf-8", errors="replace")
+        index += 1
+        item = {"status": status, "path": path}
+        if status.startswith(("R", "C")) and index < len(fields):
+            item["previous_path"] = path
+            item["path"] = fields[index].decode("utf-8", errors="replace")
+            index += 1
+        files.append(item)
+
+    stat_proc = git("diff", "--no-ext-diff", "--stat", comparison)
+    patch_proc = git("diff", "--no-ext-diff", "--unified=3", comparison,
+                     binary=True)
+    if stat_proc.returncode or patch_proc.returncode:
+        raise BranchReviewError("unable to render branch changes")
+    patch_bytes = patch_proc.stdout
+    truncated = len(patch_bytes) > patch_limit
+    patch = patch_bytes[:patch_limit].decode("utf-8", errors="replace")
+    return {
+        "target_branch": target_branch,
+        "comparison_scope": "local_target_snapshot",
+        "base_commit": base_commit,
+        "branch_commit": branch_commit,
+        "merge_base": merge_base,
+        "files": files,
+        "stat": stat_proc.stdout,
+        "patch": patch,
+        "truncated": truncated,
+    }
 
 
 def integrate_job_branch(db: Db, job, *, workdir: str,
