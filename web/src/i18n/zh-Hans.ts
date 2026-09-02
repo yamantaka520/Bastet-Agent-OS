@@ -61,6 +61,9 @@ const zhHans: Dict = {
   // ---- board ---------------------------------------------------------------
   "board.dispatch": "＋ 派发",
   "board.dispatchTitle": "派发一个任务",
+  "board.executionHost": "执行主机",
+  "board.localHost": "本地主机",
+  "board.hostBlocked": "不可派发",
   "board.titlePh": "标题",
   "board.promptPh": "任务说明 / 规格",
   "board.singleStage": "单阶段（不套模板）",
@@ -219,6 +222,16 @@ const zhHans: Dict = {
   "org.bindOpen": "绑定…",
   "org.localOnly": "只存在本机的项目（AMOS 无记录）：{list}",
   "org.federationHint": "Teams / projects / members 通过 AMOS federation 在各节点间收敛；从其他节点同步过来的项目会显示为 ◌，绑定本机 repo 后变成 🔗。资源、授权与任务仍是各节点独立的。",
+  "org.executionHosts": "执行主机与任务放置",
+  "org.hostIdPh": "主机 ID（例如 build-02）",
+  "org.hostNamePh": "显示名称",
+  "org.hostCapacity": "最大并发容量",
+  "org.registerHost": "登记 peer",
+  "org.hostKind": "类型",
+  "org.hostLoad": "负载／容量",
+  "org.hostCapabilities": "Executor／能力",
+  "org.hostReason": "放置限制",
+  "org.executionHostsHint": "每次派发都会冻结主机选择与候选快照。本机已可执行；peer 只有登记并不代表可信，必须等经过验证的传输与目的端 admission 完成后才会开放远端派发。",
 
   // ---- org: role assignment ----------------------------------------------
   "role.assign": "角色指派（以项目为单位）",

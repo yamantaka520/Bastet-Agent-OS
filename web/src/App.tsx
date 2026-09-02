@@ -152,7 +152,8 @@ function Workbench({ me }: { me: Me }) {
         {tab === "project" && <ProjectPage canOperate={canOperate} isAdmin={isAdmin}
                                            refreshKey={refreshKey} />}
         {tab === "resources" && <ResourcesPage isAdmin={isAdmin} refreshKey={refreshKey} />}
-        {tab === "org" && <OrgPage canOperate={canOperate} refreshKey={refreshKey} />}
+        {tab === "org" && <OrgPage canOperate={canOperate} isAdmin={isAdmin}
+                                        refreshKey={refreshKey} />}
         {tab === "templates" && <TemplatesPage canOperate={canOperate} refreshKey={refreshKey} />}
         {tab === "memory" && <MemoryPage />}
         {tab === "admin" && isAdmin && <AdminPage refreshKey={refreshKey} />}

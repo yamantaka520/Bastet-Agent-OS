@@ -8,6 +8,25 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [Unreleased]
+
+### Added
+
+- A durable execution-host registry now gives the local node and registered peers
+  stable identities plus explicit capacity, Executor and host-capability inventory.
+  The Organisation UI exposes the inventory and lets administrators register only
+  credential-free HTTPS peer origins.
+- Every accepted local dispatch atomically records an immutable placement receipt
+  containing the requested and selected host, frozen workflow requirements and the
+  complete candidate snapshot. Host inventory and read-only placement previews are
+  available through the API.
+
+### Security
+
+- A registered peer is not treated as execution authority. Until authenticated
+  transport and destination-side whole-graph admission exist, remote placement
+  fails closed before job creation and persists a blocked, audited receipt instead.
+
 ## [0.37.0] - 2026-09-02
 
 ### Added

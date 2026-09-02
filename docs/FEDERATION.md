@@ -34,3 +34,18 @@ Bastet 呈現這份共享 org、並讓你把同步過來的專案綁定到本機
   本機的 Bastet 綁定與歷史（jobs/runs/ledger）保留，顯示於 local-only 清單。
 - Bastet 自有狀態（資源視圖、用量彙總）的跨節點同步是未來工作
   （SPEC §8），屆時預計借 AMOS bundle 通道。
+
+## Execution hosts 與任務放置（v0.38 控制面）
+
+Execution host registry 與 AMOS federation 是兩件事。AMOS 的共享專案只證明
+組織歸屬，不證明某台機器具備該專案的 repo 綁定、Agent、grant、Skill、容量或
+派工權限。`GET /api/execution-hosts` 因此獨立呈現穩定 host identity、Executor、
+能力、目前負載與容量。
+
+每次本機派工會把所選 host、完整候選快照與工作流需求凍結成不可變的
+`placement_receipts`，job 明確引用該 receipt。管理員可先用
+`POST /api/execution-hosts` 登錄 credential-free HTTPS peer origin，也可用
+`POST /api/placement/preview` 預覽選擇；但登錄不是信任。現階段 peer 會
+fail-closed：遠端請求只留下 `blocked` receipt，**不建立 job**。待後續版本完成
+相互驗證的傳輸、不可變 job envelope、目的端完整 admission、idempotency 與回執
+協定後，peer 才能成為 dispatchable。

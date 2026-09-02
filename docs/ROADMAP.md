@@ -30,12 +30,19 @@ artwork is previewed from the same immutable commit only after bounded size and
 magic-signature checks; generated-directory conflict copies are safely removed at
 both edges of the Web build.
 
+## In progress
+
+- **Cross-host job placement.** v0.38 implements the control-plane foundation:
+  stable local/peer host identities, capacity and capability inventory, immutable
+  placement receipts on every local dispatch, read-only previews, and fail-closed
+  peer requests that cannot create a job. The remaining data plane is authenticated
+  peer transport, immutable idempotent job envelopes, destination-side whole-graph
+  admission and exact completion receipts.
+
 ## Under consideration
 
 - **More executors.** The plugin interface exists precisely so this is cheap.
   Candidates are whatever vendors ship next; a new CLI should not touch the engine.
-- **Cross-host job placement.** Federation shares the org view; it does not yet
-  let one host dispatch onto another's executors.
 
 ## Deliberately not
 

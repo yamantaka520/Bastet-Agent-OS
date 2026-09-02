@@ -34,6 +34,7 @@ from .db import Db, new_id, now
 from .gateway import GatewayContext, build_router
 from .governance import QuotaError, Reservations
 from .orchestrator import DispatchRequest, Orchestrator
+from .placement import PlacementError
 from .pricing import PriceBook
 
 log = logging.getLogger("bastet.server")
@@ -189,6 +190,20 @@ class DispatchIn(BaseModel):
     timeout_s: int = 3600
     use_worktree: bool = True
     delivery: dict[str, Any] | None = None
+    execution_host_id: str = "local"
+
+
+class ExecutionHostIn(BaseModel):
+    id: str
+    name: str
+    endpoint: str
+    max_concurrency: int = 1
+
+
+class PlacementPreviewIn(BaseModel):
+    project_id: str
+    template_id: str | None = None
+    execution_host_id: str = "auto"
 
 
 class ScheduleIn(BaseModel):
@@ -2208,12 +2223,68 @@ def create_app(home: Home) -> FastAPI:
                 resource_id=d.resource_id, template_id=d.template_id,
                 timeout_s=d.timeout_s, use_worktree=d.use_worktree,
                 delivery=d.delivery,
+                execution_host_id=d.execution_host_id,
             ))
+        except PlacementError as exc:
+            raise HTTPException(status_code=409, detail=exc.receipt) from exc
         except QuotaError as exc:
             raise HTTPException(status_code=429, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"job_id": job_id}
+
+    @app.get("/api/execution-hosts",
+             dependencies=[Depends(require_role("viewer"))])
+    def execution_hosts():
+        from . import placement
+        return placement.list_hosts(db)
+
+    @app.post("/api/execution-hosts")
+    def create_execution_host(body: ExecutionHostIn,
+                              auth: Auth = Depends(require_role("admin"))):
+        from . import placement
+        try:
+            return placement.register_peer(
+                db, host_id=body.id, name=body.name, endpoint=body.endpoint,
+                max_concurrency=body.max_concurrency, actor=auth.actor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/placement/preview")
+    def placement_preview(body: PlacementPreviewIn,
+                          auth: Auth = Depends(require_role("operator"))):
+        del auth  # authorization is the only actor effect: previews are read-only
+        from . import placement
+        from .workflow import parse_stages
+        project = db.one("SELECT default_template_id FROM projects WHERE id=?",
+                         (body.project_id,))
+        if project is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        template_id = body.template_id or project["default_template_id"]
+        if template_id:
+            row = db.one("SELECT stages_json FROM workflow_templates WHERE id=?",
+                         (template_id,))
+            if row is None:
+                raise HTTPException(status_code=404, detail="template not found")
+            stages = parse_stages(json.loads(row["stages_json"]))
+        else:
+            stages = parse_stages([{"name": "work", "gate": "auto"}])
+        return placement.preview(
+            db, body.project_id, stages, body.execution_host_id)
+
+    @app.get("/api/placement-receipts",
+             dependencies=[Depends(require_role("viewer"))])
+    def placement_receipts(project_id: str = "", limit: int = 100):
+        limit = max(1, min(limit, 500))
+        if project_id:
+            rows = db.query(
+                "SELECT * FROM placement_receipts WHERE project_id=? "
+                "ORDER BY created_at DESC LIMIT ?", (project_id, limit))
+        else:
+            rows = db.query(
+                "SELECT * FROM placement_receipts ORDER BY created_at DESC LIMIT ?",
+                (limit,))
+        return [dict(row) for row in rows]
 
     @app.post("/api/templates")
     def create_template(t: TemplateIn, auth: Auth = Depends(require_role("operator"))):

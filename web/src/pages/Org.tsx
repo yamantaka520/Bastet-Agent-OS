@@ -26,8 +26,13 @@ type AccountUsage = { runs: number; tokens_in: number; tokens_out: number;
 type Account = { id: string; executor_type: string; name: string; status: string;
                  login_instruction: string;
                  usage_today: AccountUsage; usage_7d: AccountUsage };
+type ExecutionHost = { id: string; name: string; kind: "local" | "peer";
+  endpoint: string; status: string; enabled: number; max_concurrency: number;
+  active: number; available: number; dispatchable: boolean;
+  capabilities: string[]; executor_types: string[]; placement_blocker: string };
 
-export default function OrgPage(props: { canOperate: boolean; refreshKey: number }) {
+export default function OrgPage(props: { canOperate: boolean; isAdmin: boolean;
+                                         refreshKey: number }) {
   const [projects, reloadProjects] = useList<Project>("/api/projects");
   const [agents, reloadAgents] = useList<Agent>("/api/agents");
 
@@ -39,12 +44,69 @@ export default function OrgPage(props: { canOperate: boolean; refreshKey: number
       <AgentsSection canOperate={props.canOperate} agents={agents}
                      reloadAgents={reloadAgents} />
 
+      <ExecutionHostsSection isAdmin={props.isAdmin} refreshKey={props.refreshKey} />
+
       <FederationSection canOperate={props.canOperate} onBound={reloadProjects} />
 
       <RoleAssignBridge canOperate={props.canOperate} projects={projects}
                         agents={agents} />
 
     </div>
+  );
+}
+
+function ExecutionHostsSection({ isAdmin, refreshKey }:
+  { isAdmin: boolean; refreshKey: number }) {
+  const t = useT();
+  const [hosts, setHosts] = useState<ExecutionHost[]>([]);
+  const [form, setForm] = useState({ id: "", name: "", endpoint: "", capacity: "1" });
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    api<ExecutionHost[]>("/api/execution-hosts").then(setHosts).catch(() => setHosts([]));
+  }, []);
+  useEffect(load, [load, refreshKey]);
+
+  const register = async () => {
+    setError("");
+    try {
+      await post("/api/execution-hosts", {
+        id: form.id, name: form.name || form.id, endpoint: form.endpoint,
+        max_concurrency: Number(form.capacity),
+      });
+      setForm({ id: "", name: "", endpoint: "", capacity: "1" });
+      load();
+    } catch (e) { setError(String((e as Error).message)); }
+  };
+
+  return (
+    <Section title={t("org.executionHosts")}>
+      {isAdmin && (
+        <div className="inline-form">
+          <input placeholder={t("org.hostIdPh")} value={form.id}
+                 onChange={(e) => setForm({ ...form, id: e.target.value })} />
+          <input placeholder={t("org.hostNamePh")} value={form.name}
+                 onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <input placeholder="https://bastet-peer.example" value={form.endpoint}
+                 onChange={(e) => setForm({ ...form, endpoint: e.target.value })} />
+          <input type="number" min="1" max="1024" value={form.capacity}
+                 title={t("org.hostCapacity")}
+                 onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
+          <button onClick={register} disabled={!form.id || !form.endpoint}>
+            {t("org.registerHost")}</button>
+        </div>
+      )}
+      {error && <p className="error">{error}</p>}
+      <DataTable head={["id", t("c.name"), t("org.hostKind"), t("c.status"),
+                        t("org.hostLoad"), t("org.hostCapabilities"), t("org.hostReason")]}
+                 rows={hosts.map((h) => [
+        <code key="id">{h.id}</code>, h.name, h.kind,
+        h.dispatchable ? "✅ dispatchable" : `⛔ ${h.status}`,
+        `${h.active}/${h.max_concurrency} · ${h.available} free`,
+        [...h.executor_types, ...h.capabilities].join(", ") || "—",
+        h.placement_blocker || "—",
+      ])} />
+      <p className="muted">{t("org.executionHostsHint")}</p>
+    </Section>
   );
 }
 

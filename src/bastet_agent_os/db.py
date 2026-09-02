@@ -92,6 +92,44 @@ CREATE TABLE IF NOT EXISTS workflow_templates (
   stages_json TEXT NOT NULL
 );
 
+-- Execution hosts are a Bastet control-plane concept, deliberately separate
+-- from AMOS federation.  AMOS proves shared org membership; it does not prove
+-- that another machine can execute a job, owns the repo binding, or has free
+-- capacity.  Peer rows remain in ``registered`` state until a trusted remote
+-- transport is established by a later protocol layer.
+CREATE TABLE IF NOT EXISTS execution_hosts (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,                    -- local|peer
+  endpoint TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  max_concurrency INTEGER NOT NULL DEFAULT 1,
+  capabilities_json TEXT NOT NULL DEFAULT '[]',
+  executor_types_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'registered', -- local|registered|healthy|stale|disabled
+  last_heartbeat_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Every dispatch decision gets an immutable receipt, including blocked remote
+-- requests.  This prevents "which machine did we mean?" from being inferred
+-- later from mutable host inventory.
+CREATE TABLE IF NOT EXISTS placement_receipts (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  job_id TEXT UNIQUE,
+  requested_host_id TEXT NOT NULL,
+  selected_host_id TEXT,
+  status TEXT NOT NULL,                   -- selected|blocked
+  requirements_json TEXT NOT NULL DEFAULT '{}',
+  candidates_json TEXT NOT NULL DEFAULT '[]',
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_placement_receipts_project
+  ON placement_receipts(project_id, created_at);
+
 CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id),
@@ -106,6 +144,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   parent_job_id TEXT,
   default_agent_id TEXT,           -- fallback executor agent for stages without a role match
   resource_id TEXT,                -- LLM resource used by this job's runs (NULL = direct path)
+  execution_host_id TEXT REFERENCES execution_hosts(id),
+  placement_receipt_id TEXT UNIQUE REFERENCES placement_receipts(id),
   worktree_path TEXT,
   -- Explicit delivery contract.  Code execution and delivery are separate:
   -- a release job cannot become done until this contract is satisfied.
@@ -655,6 +695,10 @@ class Db:
             for col, decl in [("default_agent_id", "TEXT"), ("resource_id", "TEXT")]:
                 if col not in existing:
                     self._conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {decl}")
+            if "execution_host_id" not in existing:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN execution_host_id TEXT")
+            if "placement_receipt_id" not in existing:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN placement_receipt_id TEXT")
             agent_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(agents)")}
             if "account_id" not in agent_cols:
                 self._conn.execute("ALTER TABLE agents ADD COLUMN account_id TEXT")

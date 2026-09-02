@@ -123,6 +123,21 @@ inadmissible graph; direct dispatch scans later stages before inserting a job.
 Runtime checks remain as drift protection when a resource or agent changes after
 admission.
 
+## Implemented execution-host placement control plane
+
+Dispatch no longer leaves the execution machine implicit. A stable local host
+identity and explicit peer inventory describe capacity, executors and host
+capabilities independently from AMOS org federation. Every accepted local job and
+every rejected peer request receives an immutable placement receipt containing the
+requested host, selected host, workflow requirements and complete candidate
+snapshot. The receipt is committed atomically with an accepted job.
+
+Peer registration is deliberately not execution authority. Until authenticated
+transport and destination-side whole-graph admission can return an idempotent
+receipt, a peer remains non-dispatchable and a request stops before job creation.
+This preserves the local-first trust boundary while making the remaining remote
+protocol work explicit and testable.
+
 ## Target model
 
 ### Planning round

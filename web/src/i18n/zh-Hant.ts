@@ -60,6 +60,9 @@ const zhHant = {
   // ---- board ---------------------------------------------------------------
   "board.dispatch": "＋ 派工",
   "board.dispatchTitle": "派一個任務",
+  "board.executionHost": "執行主機",
+  "board.localHost": "本機",
+  "board.hostBlocked": "不可派工",
   "board.titlePh": "標題",
   "board.promptPh": "任務說明 / 規格",
   "board.singleStage": "單階段（不套範本）",
@@ -218,6 +221,16 @@ const zhHant = {
   "org.bindOpen": "綁定…",
   "org.localOnly": "只存在本機的專案（AMOS 無紀錄）：{list}",
   "org.federationHint": "Teams / projects / members 透過 AMOS federation 在各節點間收斂；從其他節點同步過來的專案會顯示為 ◌，綁定本機 repo 後變成 🔗。資源、授權與任務仍是各節點獨立的。",
+  "org.executionHosts": "執行主機與任務放置",
+  "org.hostIdPh": "主機 ID（例如 build-02）",
+  "org.hostNamePh": "顯示名稱",
+  "org.hostCapacity": "最大並發容量",
+  "org.registerHost": "登錄 peer",
+  "org.hostKind": "類型",
+  "org.hostLoad": "負載／容量",
+  "org.hostCapabilities": "Executor／能力",
+  "org.hostReason": "放置限制",
+  "org.executionHostsHint": "每次派工都會凍結主機選擇與候選快照。本機已可執行；peer 只有登錄並不代表可信任，必須等具驗證的傳輸與目的端 admission 完成後才會開放遠端派工。",
 
   // ---- org: role assignment ----------------------------------------------
   "role.assign": "角色指派（以專案為單位）",

@@ -638,6 +638,7 @@ M2 起 WS 推播支撐 Kanban 即時更新，M4 起 channel 訂閱。
 | D15 | 2026-07-31 | 關卡失敗預設**退回**能修的階段（`on_fail: rework`），而不是停下等人；退回時附上關卡原始輸出，並明文禁止改測試指令/刪測試/恆真斷言/skip/動工作流設定；上限 `max_cycles`（預設 3）；`on_fail: block`、前面無可寫階段、次數用完三種情況才停 | 寫程式的 agent 才是最有能力修測試失敗的人；讓關卡通過最便宜的做法是把關卡弄鬆，所以捷徑必須逐條寫死；有界迴圈避免「自癒」變成無上限花費 |
 | D16 | 2026-07-31 | 執行結束時把 worktree 成果 commit 到該 job 的 `bastet/<job_id>` 分支；永不寫入專案自己的分支 | 實機驗證發現 `worktree remove --force` 會把未 commit 的修正整批刪掉（迴圈跑完卻毫無產出）；合併保持為刻意的一步 |
 | D17 | 2026-07-31 | run 記憶寫入移到 orchestrator（不再只有 bastet-lite）；context pack 以執行中 agent 身分讀取 | 只有一個 executor 會寫記憶時，記憶庫是空的，讀取端等於裝飾；不帶 requester 讀取則 AMOS 完全不套 ACL，跨專案記憶互相污染 |
+| D18 | 2026-09-02 | Execution host identity 與 placement receipt 屬 Bastet 控制面，與 AMOS org federation 分離；peer registration 不等於執行授權 | 共享 project/member 不能證明目的主機具有 repo、grant、Skill、Agent、容量或可信傳輸。每次本機派工凍結候選與選擇；遠端協定未完成前 fail-closed 且不建立 job |
 | D12 | 2026-07-28 | v1.1 審查修訂：gate verdict 結構化協議、executor 雙向互動介面、run token 完整規格、逐請求 usage ledger（含 cache）、配額兩段式執行、SQLite 併發策略、威脅模型誠實聲明、worktree 屬 job、audit/佇列移入 M1、M1 內建 single-stage template、container 排 M3、事件模型、M5 判準降格 | 三方獨立審查（架構/資料模型/安全）共 13 high 發現全數落地 |
 
 ---
@@ -655,3 +656,6 @@ M2 起 WS 推播支撐 Kanban 即時更新，M4 起 channel 訂閱。
 - **Bastet 自有狀態（resources/grants/jobs）的跨節點同步機制**（M5 前；AMOS
   federation 只同步記憶 + org，「資源視圖」同步需自建或借 AMOS bundle 通道）
 - Federation 下資源 grant 的跨節點語意（M5 前）
+- Cross-host job data plane：相互驗證的 peer transport、不可變且冪等的 job
+  envelope、目的端 whole-graph admission、取消／狀態同步與完成 receipt。v0.38
+  已先建立 host registry 與 fail-closed placement receipt 控制面。

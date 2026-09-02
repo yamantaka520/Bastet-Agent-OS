@@ -1,8 +1,17 @@
 # Bastet Agent OS Progress
 
-Last updated: 2026-08-31
+Last updated: 2026-09-02
 
 ## Current project status
+
+- v0.38 cross-host placement control plane is implemented: the local node and
+  registered peers have durable execution-host identities with capacity, Executor
+  and capability inventory. Every accepted local dispatch commits an immutable
+  placement receipt with the job; peer requests remain fail-closed and create only
+  an audited blocked receipt until authenticated transport, immutable envelopes and
+  destination-side whole-graph admission are complete. The API supports inventory,
+  safe peer registration and read-only placement preview, and the Organisation UI
+  exposes the same state in all supported languages.
 
 - Released core engine redesign: durable planning rounds with frozen source
   sessions and next-round intake; bounded planning negotiation records; stable task

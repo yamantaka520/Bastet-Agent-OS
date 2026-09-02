@@ -158,8 +158,11 @@ function DispatchModal({ projectId, onClose }: { projectId: string; onClose: () 
   const [agents, setAgents] = useState<{ id: string }[]>([]);
   const [templates, setTemplates] = useState<{ id: string }[]>([]);
   const [resources, setResources] = useState<{ id: string; name: string; kind: string }[]>([]);
+  const [hosts, setHosts] = useState<{ id: string; name: string; kind: string;
+                                      dispatchable: boolean }[]>([]);
   const [form, setForm] = useState({ prompt: "", title: "", agent_id: "",
-                                     template_id: "", resource_id: "" });
+                                     template_id: "", resource_id: "",
+                                     execution_host_id: "local" });
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -171,6 +174,8 @@ function DispatchModal({ projectId, onClose }: { projectId: string; onClose: () 
     api<{ id: string; name: string; kind: string }[]>("/api/resources")
       .then((r) => setResources(r.filter((x) => x.kind === "llm")))
       .catch(() => setResources([]));  // non-admin cannot list resources
+    api<{ id: string; name: string; kind: string; dispatchable: boolean }[]>(
+      "/api/execution-hosts").then(setHosts).catch(() => setHosts([]));
   }, []);
 
   const go = async () => {
@@ -179,6 +184,7 @@ function DispatchModal({ projectId, onClose }: { projectId: string; onClose: () 
         project_id: projectId, prompt: form.prompt, title: form.title,
         agent_id: form.agent_id, template_id: form.template_id || null,
         resource_id: form.resource_id || null,
+        execution_host_id: form.execution_host_id,
       });
       onClose();
     } catch (e) {
@@ -208,6 +214,14 @@ function DispatchModal({ projectId, onClose }: { projectId: string; onClose: () 
                   onChange={(e) => setForm({ ...form, resource_id: e.target.value })}>
             <option value="">{t("board.direct")}</option>
             {resources.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+          <select value={form.execution_host_id} title={t("board.executionHost")}
+                  onChange={(e) => setForm({ ...form, execution_host_id: e.target.value })}>
+            <option value="local">{t("board.localHost")}</option>
+            {hosts.filter((h) => h.kind === "peer").map((h) =>
+              <option key={h.id} value={h.id} disabled={!h.dispatchable}>
+                {h.name} · {h.dispatchable ? "ready" : t("board.hostBlocked")}
+              </option>)}
           </select>
         </div>
         <div className="row">
@@ -473,6 +487,10 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
       <button className="ghost close" onClick={onClose}>✕</button>
       <h2>{job.title}</h2>
       <p className="card-meta">{job.id} · {t("board.jobStage")} <b>{job.stage}</b> · {job.status}</p>
+      {job.execution_host_id && (
+        <p className="card-meta">🖥 {t("board.executionHost")}: {job.execution_host_id}
+          {job.placement_receipt_id ? ` · receipt ${job.placement_receipt_id}` : ""}</p>
+      )}
       {job.delivery_status && job.delivery_status !== "not_required" && (
         <div className={job.delivery_status === "failed" ? "approval" : "notice"}>
           <b>🚚 {t("board.delivery")}: {job.delivery_status}</b>

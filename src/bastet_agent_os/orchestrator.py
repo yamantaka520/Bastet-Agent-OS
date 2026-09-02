@@ -74,6 +74,7 @@ class DispatchRequest:
     delivery: dict | None = None       # none|branch|integration|production contract
     plan_key: str | None = None        # frozen project-plan execution identity
     task_id: str | None = None         # node claimed atomically by a project runner
+    execution_host_id: str = "local"  # local|auto|durable execution_hosts.id
 
 
 def _failure_reason(result: RunResult, workdir: str) -> str:
@@ -218,15 +219,23 @@ class Orchestrator:
                     "delivered; choose a new version")
 
         job_id = new_id("job")
+        # Placement follows graph/route/delivery admission but precedes every
+        # durable job write.  A peer inventory row is not execution authority:
+        # until the authenticated remote protocol exists, requesting one leaves
+        # only a blocked receipt and never a half-created card.
+        from . import placement
+        placement_decision = placement.decide(
+            self.db, req.project_id, stages, req.execution_host_id, actor=actor)
         ts = now()
         job_insert = (
             "INSERT INTO jobs(id, project_id, template_id, stages_snapshot_json, title, "
-            "spec_md, stage, status, default_agent_id, resource_id, delivery_json, "
-            "delivery_status, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "spec_md, stage, status, default_agent_id, resource_id, execution_host_id, "
+            "placement_receipt_id, delivery_json, delivery_status, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (job_id, req.project_id, template_id or "single-stage",
              json.dumps(stages_raw), req.title, req.prompt, stages[0].name,
              "in_progress", req.agent_id, req.resource_id,
+             placement_decision.selected_host_id, placement_decision.receipt_id,
              json.dumps(delivery_contract),
              "pending" if delivery_contract["mode"] != "none"
              else "not_required", ts, ts),
@@ -238,7 +247,8 @@ class Orchestrator:
             # therefore observe either no dispatch or the complete dispatch,
             # never the former crash window (job exists but plan still says
             # pending). The PK is also the cross-process compare-and-set.
-            statements = [job_insert]
+            statements = [placement.receipt_statement(
+                placement_decision, req.project_id, job_id), job_insert]
             statements.extend([
                 ("INSERT INTO job_stage_nodes(job_id,stage,status,needs_json,"
                  "workspace,updated_at) VALUES(?,?,?,?,?,?)",
@@ -266,12 +276,21 @@ class Orchestrator:
                 self._spawn(self._drive_job(existing_job_id, req))
                 return existing_job_id
         else:
-            self.db.write(*job_insert)
-            seed_stage_nodes(self.db, job_id, stages)
+            self.db.write_many([
+                placement.receipt_statement(placement_decision, req.project_id, job_id),
+                job_insert,
+                *[("INSERT INTO job_stage_nodes(job_id,stage,status,needs_json,"
+                   "workspace,updated_at) VALUES(?,?,?,?,?,?)",
+                   (job_id, stage.name, "ready" if not stage.needs else "pending",
+                    json.dumps(stage.needs, ensure_ascii=False), stage.workspace, ts))
+                  for stage in stages],
+            ])
         self.db.audit(actor, "job.dispatch", "job", job_id,
                       {"project": req.project_id, "agent": req.agent_id,
                        "resource": req.resource_id, "template": req.template_id,
-                       "title": req.title})
+                       "title": req.title,
+                       "execution_host": placement_decision.selected_host_id,
+                       "placement_receipt": placement_decision.receipt_id})
         self._emit("job.created", req.project_id, job_id=job_id, title=req.title,
                    stage=stages[0].name)
         # the plan and the board must show the same work, and the light must move

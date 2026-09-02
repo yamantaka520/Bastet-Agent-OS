@@ -10,6 +10,8 @@ export type Job = {
   rework_count?: number;         // how many times a gate sent this card back
   delivery_status?: string;
   delivery_json?: string;
+  execution_host_id?: string | null;
+  placement_receipt_id?: string | null;
   // liveness (in_progress only): the latest run's last words and when
   run_status?: string;
   heartbeat_at?: string | null;
