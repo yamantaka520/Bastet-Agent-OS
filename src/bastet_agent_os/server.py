@@ -2442,6 +2442,33 @@ def create_app(home: Home) -> FastAPI:
                 pass
         return job
 
+    @app.get("/api/jobs/{job_id}/files",
+             dependencies=[Depends(require_role("viewer"))])
+    def browse_job_files(job_id: str, path: str = ""):
+        job = db.one("SELECT project_id FROM jobs WHERE id=?", (job_id,))
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        project = db.one("SELECT repo_path FROM projects WHERE id=?",
+                         (job["project_id"],))
+        # A successful delivery is the canonical joined result.  Before a job
+        # is delivered, expose the newest immutable stage commit as preview.
+        commit = db.one(
+            "SELECT commit_sha AS head_commit FROM deliveries WHERE job_id=? "
+            "AND status='succeeded' AND commit_sha<>'' ORDER BY rowid DESC LIMIT 1",
+            (job_id,))
+        if commit is None:
+            commit = db.one(
+                "SELECT head_commit FROM job_stage_nodes WHERE job_id=? "
+                "AND head_commit<>'' ORDER BY rowid DESC LIMIT 1", (job_id,))
+        if project is None or commit is None:
+            raise HTTPException(status_code=409,
+                                detail="job has no immutable Git evidence commit")
+        from .repo_browser import BrowseError, browse
+        try:
+            return browse(project["repo_path"], commit["head_commit"], path)
+        except BrowseError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/jobs/{job_id}/supplies")
     def add_supply(job_id: str, body: SupplyIn,
                    auth: Auth = Depends(require_role("operator"))):

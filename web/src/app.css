@@ -210,6 +210,7 @@ th, td { text-align: left; padding: .3rem .4rem; border-bottom: 1px solid var(--
 .flow-node.gate-human-approve { border-left-color: #f59e0b; }
 .flow-node.gate-agent-review { border-left-color: var(--accent); }
 .flow-node.gate-tests-pass { border-left-color: #10b981; }
+.flow-node.gate-metric-threshold { border-left-color: #06b6d4; }
 .flow-idx { color: var(--muted); font-size: .7rem; }
 .flow-role, .flow-gate { color: var(--muted); font-size: .72rem; }
 .flow-tag { justify-self: start; background: var(--line); border-radius: 4px;

@@ -349,6 +349,15 @@ const en: Dict = {
 
   "wfgate.auto": "Auto-pass",
   "wfgate.tests-pass": "Tests must pass",
+  "wfgate.metric-threshold": "Metric threshold",
+  "board.repoEvidence": "Repository evidence",
+  "board.repoParent": "parent",
+  "board.repoBinary": "Binary file",
+  "board.repoTooLarge": "File exceeds the 256 KiB preview limit.",
+  "tpl.metricCmdPh": "Metric command (last line JSON)",
+  "tpl.metricNamePh": "Metric name",
+  "tpl.metricThresholdPh": "Threshold",
+  "tpl.metricUnitPh": "Unit",
   "wfgate.agent-review": "AI review",
   "wfgate.human-approve": "Human approval",
 

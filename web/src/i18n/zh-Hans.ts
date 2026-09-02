@@ -366,6 +366,15 @@ const zhHans: Dict = {
 
   "wfgate.auto": "自动通过",
   "wfgate.tests-pass": "测试通过",
+  "wfgate.metric-threshold": "指标门槛",
+  "board.repoEvidence": "版本库验收证据",
+  "board.repoParent": "上一层",
+  "board.repoBinary": "二进制文件",
+  "board.repoTooLarge": "文件超过 256 KiB 预览上限。",
+  "tpl.metricCmdPh": "指标命令（最后一行输出 JSON）",
+  "tpl.metricNamePh": "指标名称",
+  "tpl.metricThresholdPh": "门槛",
+  "tpl.metricUnitPh": "单位",
   "wfgate.agent-review": "AI 审核",
   "wfgate.human-approve": "人工核准",
 

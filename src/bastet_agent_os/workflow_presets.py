@@ -42,6 +42,8 @@ GATES = [
      "hint": "階段跑完就進下一關，適合不需把關的工作"},
     {"id": "tests-pass", "label": "測試通過", "icon": "✓",
      "hint": "由引擎執行你指定的指令，exit code 0 才過關"},
+    {"id": "metric-threshold", "label": "指標門檻", "icon": "📊",
+     "hint": "指令輸出結構化數值，由引擎依運算子與門檻判定"},
     {"id": "agent-review", "label": "AI 審核", "icon": "🔍",
      "hint": "審查 agent 必須回傳結構化裁決；沒有裁決一律不通過"},
     {"id": "human-approve", "label": "人工核准", "icon": "⏸",

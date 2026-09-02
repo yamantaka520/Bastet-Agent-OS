@@ -105,11 +105,13 @@ Last updated: 2026-08-31
   evidence per version locale, with configurable display types and no ambiguous App Info
   guessing. Python 3.12 task draining now uses an immutable `asyncio.wait`
   barrier, avoiding the callback race that stalled the quota-resume path while
-  preserving recursively spawned work. Validation: 705 Python tests,
+  preserving recursively spawned work. v0.37.0 adds immutable Git evidence
+  browsing, deterministic structured metric gates and CI sync-conflict
+  detection. Validation: 714 Python tests,
   ruff clean, Web production build clean.
 
-- Released: **v0.36.2**. Version arc v0.1.0 → v0.36.2 in one month
-  (2026-07-28 → 2026-08-31), ~170 commits. See [CHANGELOG.md](CHANGELOG.md) for
+- Released: **v0.37.0**. Version arc v0.1.0 → v0.37.0 in just over one month
+  (2026-07-28 → 2026-09-02), ~170 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.
 - v0.35.0–v0.35.2 make delivery part of the completion contract: required branches

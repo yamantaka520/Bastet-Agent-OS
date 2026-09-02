@@ -349,6 +349,15 @@ const ko: Dict = {
 
   "wfgate.auto": "자동 통과",
   "wfgate.tests-pass": "테스트 통과 필수",
+  "wfgate.metric-threshold": "메트릭 임계값",
+  "board.repoEvidence": "저장소 승인 증거",
+  "board.repoParent": "상위 폴더",
+  "board.repoBinary": "바이너리 파일",
+  "board.repoTooLarge": "파일이 256 KiB 미리보기 제한을 초과합니다.",
+  "tpl.metricCmdPh": "메트릭 명령(마지막 줄 JSON)",
+  "tpl.metricNamePh": "메트릭 이름",
+  "tpl.metricThresholdPh": "임계값",
+  "tpl.metricUnitPh": "단위",
   "wfgate.agent-review": "AI 검토",
   "wfgate.human-approve": "사람 승인",
 

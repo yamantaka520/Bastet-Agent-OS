@@ -6,7 +6,9 @@ import { Section, useList } from "../ui";
 
 type Stage = {
   name: string; role?: string | null; gate: string;
-  gate_config?: { command?: string; precheck_command?: string }; read_only?: boolean;
+  gate_config?: { command?: string; precheck_command?: string; metric?: string;
+                  operator?: string; threshold?: number; unit?: string };
+  read_only?: boolean;
   requires?: string[];
   needs?: string[]; produces?: string[]; consumes?: string[]; evidence?: string[];
   challenge?: boolean; max_challenge_exchanges?: number;
@@ -86,6 +88,14 @@ export default function TemplatesPage(props: { canOperate: boolean; refreshKey: 
         gate: s.gate,
         ...(s.gate === "tests-pass"
           ? { gate_config: { command: s.gate_config?.command || "echo no-command" } }
+          : s.gate === "metric-threshold"
+            ? { gate_config: {
+                command: s.gate_config?.command || "echo '{\"value\": 0}'",
+                metric: s.gate_config?.metric || "metric",
+                operator: s.gate_config?.operator || ">=",
+                threshold: Number(s.gate_config?.threshold ?? 0),
+                ...(s.gate_config?.unit ? { unit: s.gate_config.unit } : {}),
+              } }
           : s.gate_config?.precheck_command
             ? { gate_config: { precheck_command: s.gate_config.precheck_command } }
             : {}),
@@ -310,7 +320,10 @@ function StageTable({ stages, roleLabel, gateInfo, t }: {
               <td>{roleLabel(s.role)}</td>
               <td>{gateInfo(s.gate).icon} {gateInfo(s.gate).label}
                 {s.gate === "tests-pass" && s.gate_config?.command
-                  ? <code className="detail"> {s.gate_config.command}</code> : null}</td>
+                  ? <code className="detail"> {s.gate_config.command}</code> : null}
+                {s.gate === "metric-threshold" && s.gate_config
+                  ? <code className="detail"> {s.gate_config.metric || "metric"} {s.gate_config.operator} {s.gate_config.threshold}{s.gate_config.unit || ""}</code>
+                  : null}</td>
               <td className="card-meta">
                 {s.needs?.length ? `needs: ${s.needs.join(", ")} · ` : ""}
                 {s.evidence?.length ? `evidence: ${s.evidence.join(", ")} · ` : ""}
@@ -433,6 +446,37 @@ function Builder({ builder, catalog, setBuilder, onSave, onCancel, roleLabel,
               <input placeholder={t("tpl.testCmdPh")} style={{ width: "16rem" }}
                      value={s.gate_config?.command ?? ""}
                      onChange={(e) => update(i, { gate_config: { command: e.target.value } })} />
+            )}
+            {s.gate === "metric-threshold" && (
+              <>
+                <input placeholder={t("tpl.metricCmdPh")} style={{ width: "18rem" }}
+                       value={s.gate_config?.command ?? ""}
+                       onChange={(e) => update(i, { gate_config: {
+                         ...s.gate_config, command: e.target.value,
+                       } })} />
+                <input placeholder={t("tpl.metricNamePh")} style={{ width: "8rem" }}
+                       value={s.gate_config?.metric ?? ""}
+                       onChange={(e) => update(i, { gate_config: {
+                         ...s.gate_config, metric: e.target.value,
+                       } })} />
+                <select value={s.gate_config?.operator ?? ">="}
+                        onChange={(e) => update(i, { gate_config: {
+                          ...s.gate_config, operator: e.target.value,
+                        } })}>
+                  {[">=", ">", "<=", "<", "=="].map((op) =>
+                    <option key={op} value={op}>{op}</option>)}
+                </select>
+                <input type="number" step="any" placeholder={t("tpl.metricThresholdPh")} style={{ width: "8rem" }}
+                       value={s.gate_config?.threshold ?? 0}
+                       onChange={(e) => update(i, { gate_config: {
+                         ...s.gate_config, threshold: Number(e.target.value),
+                       } })} />
+                <input placeholder={t("tpl.metricUnitPh")} style={{ width: "5rem" }}
+                       value={s.gate_config?.unit ?? ""}
+                       onChange={(e) => update(i, { gate_config: {
+                         ...s.gate_config, unit: e.target.value,
+                       } })} />
+              </>
             )}
             {s.gate === "agent-review" && s.requires?.length ? (
               <input placeholder="Bastet host precheck command" style={{ width: "18rem" }}

@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-08-31 · current version 0.36.x
+Last updated: 2026-09-02 · current version 0.37.x
 
 M0–M6 are done ([PROGRESS.md](../PROGRESS.md) says what was verified where). What
 follows is ordered by how much it would change daily use, not by how interesting
@@ -23,16 +23,16 @@ claims; the host polls, safely downloads the result into the run worktree and
 automatically resumes verification after an Agent process has exited. Details in
 [CHANGELOG.md](../CHANGELOG.md).
 
+The 0.37 visual acceptance layer adds immutable commit-bound repository browsing,
+structured numeric threshold gates, and CI detection of sync-conflict copies that
+would otherwise poison generated Web assets or TypeScript type discovery.
+
 ## Under consideration
 
 - **More executors.** The plugin interface exists precisely so this is cheap.
   Candidates are whatever vendors ship next; a new CLI should not touch the engine.
 - **Cross-host job placement.** Federation shares the org view; it does not yet
   let one host dispatch onto another's executors.
-- **Web-based repo browsing.** Today you inspect a worktree over SSH. A read-only
-  file view in the drawer would close the loop for reviewing what an agent did.
-- **Richer gate types.** A `metric-threshold` gate (coverage, bundle size,
-  latency) is the obvious next one after `tests-pass`.
 
 ## Deliberately not
 

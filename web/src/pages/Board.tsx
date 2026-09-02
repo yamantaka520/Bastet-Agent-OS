@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  api, apiBlob, post, put, BranchReview, Interaction, Job, JobDetail, UsageRow,
+  api, apiBlob, post, put, BranchReview, Interaction, Job, JobDetail, RepoBrowse,
+  UsageRow,
 } from "../api";
 import { useT, type T } from "../i18n";
 import { fmtAgo, fmtTime } from "../ui";
@@ -278,6 +279,8 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   const [branchReview, setBranchReview] = useState<BranchReview | null>(null);
   const [branchReviewError, setBranchReviewError] = useState("");
   const [mergeError, setMergeError] = useState("");
+  const [repoBrowse, setRepoBrowse] = useState<RepoBrowse | null>(null);
+  const [repoBrowseError, setRepoBrowseError] = useState("");
   const imagePreviewNames = useMemo(
     () => previews.filter((name) => /\.(png|jpe?g|gif|webp)$/i.test(name)),
     [previews]);
@@ -330,6 +333,15 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
       });
     return () => { dead = true; };
   }, [jobId, job?.status, job?.delivery_status, job?.delivery_json]);
+
+  const browseRepo = useCallback((path = "") => {
+    setRepoBrowseError("");
+    api<RepoBrowse>(`/api/jobs/${jobId}/files?path=${encodeURIComponent(path)}`)
+      .then(setRepoBrowse)
+      .catch((error) => { setRepoBrowse(null); setRepoBrowseError(String(error)); });
+  }, [jobId]);
+
+  useEffect(() => { browseRepo(); }, [browseRepo, job?.status]);
 
   const addSupply = async () => {
     setSupplyError("");
@@ -539,6 +551,40 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
         <p className="notice">🔧 {t("board.reworkNote", { n: job.rework_count })}</p>
       )}
       <pre className="spec">{job.spec_md}</pre>
+
+      {(repoBrowse || repoBrowseError) && (
+        <div className="notice">
+          <h3>{t("board.repoEvidence")}</h3>
+          {repoBrowse && (
+            <>
+              <p className="card-meta">
+                commit {repoBrowse.commit.slice(0, 12)} · /{repoBrowse.path}
+              </p>
+              {!!repoBrowse.path && (
+                <button className="ghost" onClick={() => browseRepo(
+                  repoBrowse.path.split("/").slice(0, -1).join("/"))}>← {t("board.repoParent")}</button>
+              )}
+              {repoBrowse.kind === "directory" ? (
+                <ul>{repoBrowse.entries?.map((entry) => (
+                  <li key={entry.path}>
+                    <button className="ghost" onClick={() => browseRepo(entry.path)}>
+                      {entry.kind === "directory" ? "📁" : "📄"} {entry.name}
+                      {entry.size != null ? ` · ${entry.size.toLocaleString()} B` : ""}
+                    </button>
+                  </li>
+                ))}</ul>
+              ) : repoBrowse.binary ? (
+                <p className="muted">{t("board.repoBinary")} · {repoBrowse.size?.toLocaleString()} B</p>
+              ) : repoBrowse.truncated ? (
+                <p className="muted">{t("board.repoTooLarge")}</p>
+              ) : (
+                <pre className="spec">{repoBrowse.content}</pre>
+              )}
+            </>
+          )}
+          {repoBrowseError && <p className="muted">{repoBrowseError}</p>}
+        </div>
+      )}
 
       {!!job.stage_nodes?.length && (
         <>

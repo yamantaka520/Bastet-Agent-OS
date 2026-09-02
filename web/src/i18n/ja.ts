@@ -349,6 +349,15 @@ const ja: Dict = {
 
   "wfgate.auto": "自動通過",
   "wfgate.tests-pass": "テスト合格が必須",
+  "wfgate.metric-threshold": "メトリクスしきい値",
+  "board.repoEvidence": "リポジトリ受入証拠",
+  "board.repoParent": "上の階層",
+  "board.repoBinary": "バイナリファイル",
+  "board.repoTooLarge": "ファイルが 256 KiB のプレビュー上限を超えています。",
+  "tpl.metricCmdPh": "メトリクスコマンド（最終行は JSON）",
+  "tpl.metricNamePh": "メトリクス名",
+  "tpl.metricThresholdPh": "しきい値",
+  "tpl.metricUnitPh": "単位",
   "wfgate.agent-review": "AI レビュー",
   "wfgate.human-approve": "人による承認",
 

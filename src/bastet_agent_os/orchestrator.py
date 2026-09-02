@@ -1306,7 +1306,8 @@ class Orchestrator:
         outcome = await asyncio.to_thread(
             self._judge, stage, workdir, result, job=job, run_id=run_id)
         self._record_gate(run_id, stage, outcome, reviewer_kind="agent",
-                          reviewer_id=("workflow-engine" if stage.gate == "tests-pass"
+                          reviewer_id=("workflow-engine" if stage.gate in
+                                       ("tests-pass", "metric-threshold")
                                        else self._run_agent(run_id)))
         self.db.audit("orchestrator", f"gate.{outcome.verdict}", "job", job["id"],
                       {"stage": stage.name, "gate": stage.gate,
@@ -1603,7 +1604,8 @@ class Orchestrator:
                 self._judge, stage, workdir, result, job=job, run_id=run_id)
             self._record_gate(run_id, stage, outcome,
                               reviewer_kind="agent",
-                              reviewer_id="workflow-engine" if stage.gate == "tests-pass"
+                              reviewer_id="workflow-engine" if stage.gate in
+                              ("tests-pass", "metric-threshold")
                               else (result and self._run_agent(run_id)) or "unknown")
             self.db.audit("orchestrator", f"gate.{outcome.verdict}", "job", job_id,
                           {"stage": stage.name, "gate": stage.gate,
@@ -1930,7 +1932,7 @@ class Orchestrator:
             return GateOutcome("pending", "waiting for human approval")
         gate_env: dict[str, str] = {}
         access = None
-        if stage.gate == "tests-pass" and job is not None:
+        if stage.gate in ("tests-pass", "metric-threshold") and job is not None:
             # A deterministic gate runs after the agent, but it is still part
             # of the same stage and must see the same granted resources. Live
             # failure: the agent completed, then npm's GitLab assertion failed

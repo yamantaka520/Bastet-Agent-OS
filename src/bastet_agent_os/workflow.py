@@ -5,6 +5,8 @@ Gate verdicts (SPEC §5.4.2):
   auto          unconditional pass
   tests-pass    deterministic: the engine runs gate_config.command in the job
                 worktree; exit code decides — no agent involved
+  metric-threshold deterministic command emits JSON with a numeric value;
+                the frozen operator and threshold decide
   agent-review  the stage run must return a STRUCTURED verdict; free-text
                 review prose never decides. Missing verdict => reject.
   human-approve pending until a human decides via API/CLI/channel
@@ -13,12 +15,15 @@ Gate verdicts (SPEC §5.4.2):
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-GATE_TYPES = {"auto", "tests-pass", "agent-review", "human-approve"}
+GATE_TYPES = {"auto", "tests-pass", "metric-threshold", "agent-review",
+              "human-approve"}
+METRIC_OPERATORS = {">=", ">", "<=", "<", "=="}
 DELIVERY_MODES = {"branch", "integration", "production"}
 
 # How much of a failing command's output is kept. It has two readers: the agent
@@ -142,6 +147,22 @@ def parse_stages(raw: list[dict]) -> list[StageDef]:
             raise ValueError(f"stage {name!r}: unknown gate {gate!r} (one of {sorted(GATE_TYPES)})")
         if gate == "tests-pass" and not (item.get("gate_config") or {}).get("command"):
             raise ValueError(f"stage {name!r}: tests-pass gate needs gate_config.command")
+        if gate == "metric-threshold":
+            config = item.get("gate_config") or {}
+            if not config.get("command"):
+                raise ValueError(
+                    f"stage {name!r}: metric-threshold needs gate_config.command")
+            if config.get("operator") not in METRIC_OPERATORS:
+                raise ValueError(
+                    f"stage {name!r}: metric-threshold operator must be one of "
+                    f"{sorted(METRIC_OPERATORS)}")
+            threshold = config.get("threshold")
+            if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+                raise ValueError(
+                    f"stage {name!r}: metric-threshold threshold must be numeric")
+            if not math.isfinite(threshold):
+                raise ValueError(
+                    f"stage {name!r}: metric-threshold threshold must be finite")
         on_fail = item.get("on_fail", "rework")
         if on_fail not in ON_FAIL:
             raise ValueError(f"stage {name!r}: on_fail must be one of {sorted(ON_FAIL)}")
@@ -506,6 +527,48 @@ def evaluate_gate(stage: StageDef, workdir: str,
                 f"或在專案裡補上它。指令：{command}\n{tail}",
                 config_error=True)
         return GateOutcome("failed", f"exit {proc.returncode}: {tail}")
+
+    if stage.gate == "metric-threshold":
+        config = stage.gate_config
+        command = config["command"]
+        try:
+            proc = subprocess.run(command, shell=True, cwd=workdir,
+                                  capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace",
+                                  env={**os.environ, **(env or {})}, timeout=1800)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return GateOutcome(
+                "failed", f"指標指令無法執行（{type(exc).__name__}: {exc}）：{command}",
+                config_error=True)
+        output = proc.stdout + proc.stderr
+        tail = output[-OUTPUT_TAIL:]
+        if proc.returncode != 0:
+            return GateOutcome("failed", f"metric command exit {proc.returncode}: {tail}")
+        lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+        try:
+            receipt = json.loads(lines[-1] if lines else "")
+            value = receipt["value"]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError("value must be numeric")
+            if not math.isfinite(value):
+                raise ValueError("value must be finite")
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            return GateOutcome(
+                "failed", "metric-threshold 指令最後一行必須是含 numeric value 的 JSON："
+                f"{exc}\n{tail}", config_error=True)
+        operator = config["operator"]
+        threshold = config["threshold"]
+        passed = {
+            ">=": value >= threshold, ">": value > threshold,
+            "<=": value <= threshold, "<": value < threshold,
+            "==": value == threshold,
+        }[operator]
+        name = str(receipt.get("metric") or config.get("metric") or "metric")
+        unit = str(receipt.get("unit") or config.get("unit") or "")
+        detail = json.dumps({"metric": name, "value": value, "unit": unit,
+                             "operator": operator, "threshold": threshold},
+                            ensure_ascii=False, sort_keys=True)
+        return GateOutcome("passed" if passed else "failed", detail)
 
     if stage.gate == "agent-review":
         # structured channel only — missing/malformed verdict rejects (§5.4.2)

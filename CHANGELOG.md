@@ -8,6 +8,26 @@ Every user-visible change bumps `__version__` in
 follows the same number and the WebUI prints it beside the title.
 `tests/test_version.py` fails the build if the three drift apart.
 
+## [0.37.0] - 2026-09-02
+
+### Added
+
+- Job drawers can browse the exact immutable Git tree accepted by delivery (or
+  the latest stage commit before delivery), with bounded text previews, binary
+  detection and traversal-safe paths. Uncommitted workspace content is never
+  exposed.
+- Workflow templates support deterministic `metric-threshold` gates. A command
+  emits a structured numeric receipt and the engine records the frozen metric,
+  operator, threshold, value and unit as gate evidence.
+- CI detects numbered sync-conflict copies in Web build output and TypeScript
+  type roots before they can silently corrupt a release build.
+
+### Changed
+
+- The Web template editor now configures and visualizes metric gates in all five
+  supported languages, and the generated Web UI includes immutable repository
+  evidence browsing.
+
 ## [0.36.2] - 2026-08-31
 
 ### Fixed

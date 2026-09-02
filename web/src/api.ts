@@ -110,6 +110,13 @@ export type BranchReview = {
   truncated: boolean;
 };
 
+export type RepoBrowse = {
+  kind: "directory" | "file"; path: string; commit: string;
+  entries?: { name: string; path: string; kind: "directory" | "file";
+              mode: string; sha: string; size: number | null }[];
+  content?: string; size?: number; binary?: boolean; truncated: boolean;
+};
+
 export type UsageRow = {
   project_id: string;
   agent_id: string;

@@ -31,7 +31,9 @@ jobs:
       - name: Install
         run: pip install -e '.[dev]'
       - name: Lint
-        run: ruff check src/ tests/
+        run: |
+          ruff check src/ tests/
+          python -m bastet_agent_os.workspace_hygiene .
       - name: Test
         run: pytest -q
 
