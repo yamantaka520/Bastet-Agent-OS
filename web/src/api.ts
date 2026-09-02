@@ -115,6 +115,7 @@ export type RepoBrowse = {
   entries?: { name: string; path: string; kind: "directory" | "file";
               mode: string; sha: string; size: number | null }[];
   content?: string; size?: number; binary?: boolean; truncated: boolean;
+  preview_mime?: string;
 };
 
 export type UsageRow = {

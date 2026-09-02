@@ -14,13 +14,16 @@ follows the same number and the WebUI prints it beside the title.
 
 - Job drawers can browse the exact immutable Git tree accepted by delivery (or
   the latest stage commit before delivery), with bounded text previews, binary
-  detection and traversal-safe paths. Uncommitted workspace content is never
-  exposed.
+  detection and traversal-safe paths. Allow-listed raster artwork can be
+  rendered only after file signatures are verified; active SVG and disguised
+  payloads are rejected. Uncommitted workspace content is never exposed.
 - Workflow templates support deterministic `metric-threshold` gates. A command
   emits a structured numeric receipt and the engine records the frozen metric,
   operator, threshold, value and unit as gate evidence.
 - CI detects numbered sync-conflict copies in Web build output and TypeScript
-  type roots before they can silently corrupt a release build.
+  type roots before they can silently corrupt a release build. Web builds also
+  remove only those recognized copies from reproducible directories before and
+  after compilation, leaving ordinary workspace files untouched.
 
 ### Changed
 

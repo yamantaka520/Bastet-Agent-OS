@@ -354,6 +354,7 @@ const en: Dict = {
   "board.repoParent": "parent",
   "board.repoBinary": "Binary file",
   "board.repoTooLarge": "File exceeds the 256 KiB preview limit.",
+  "board.repoImageRejected": "Image content does not match its extension; preview rejected.",
   "tpl.metricCmdPh": "Metric command (last line JSON)",
   "tpl.metricNamePh": "Metric name",
   "tpl.metricThresholdPh": "Threshold",

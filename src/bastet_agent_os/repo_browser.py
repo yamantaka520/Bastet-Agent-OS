@@ -6,7 +6,12 @@ import subprocess
 from pathlib import PurePosixPath
 
 MAX_TEXT_BYTES = 256 * 1024
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_ENTRIES = 1000
+IMAGE_MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp",
+}
 
 
 class BrowseError(ValueError):
@@ -33,6 +38,40 @@ def _git(repo: str, *args: str) -> bytes:
         # The browser is viewer-facing, so keep failures deliberately generic.
         raise BrowseError("path not found at evidence commit")
     return proc.stdout
+
+
+def _image_mime(path: str, content: bytes) -> str | None:
+    candidate = IMAGE_MIME.get(PurePosixPath(path).suffix.lower())
+    valid = {
+        "image/png": content.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg": content.startswith(b"\xff\xd8\xff"),
+        "image/gif": content.startswith((b"GIF87a", b"GIF89a")),
+        "image/webp": content.startswith(b"RIFF") and content[8:12] == b"WEBP",
+    }
+    return candidate if candidate and valid[candidate] else None
+
+
+def read_image(repo: str, commit: str, requested_path: str) -> tuple[bytes, str]:
+    """Read one allow-listed raster image from an immutable commit.
+
+    SVG is intentionally excluded because active SVG content served from the
+    control-plane origin would turn a visual preview into an XSS surface.
+    """
+    path = clean_path(requested_path)
+    if not path or PurePosixPath(path).suffix.lower() not in IMAGE_MIME:
+        raise BrowseError("path is not a supported raster image")
+    _git(repo, "cat-file", "-e", f"{commit}^{{commit}}")
+    spec = f"{commit}:{path}"
+    if _git(repo, "cat-file", "-t", spec).decode().strip() != "blob":
+        raise BrowseError("path is not a file at evidence commit")
+    size = int(_git(repo, "cat-file", "-s", spec).decode())
+    if size > MAX_IMAGE_BYTES:
+        raise BrowseError("image exceeds the 8 MiB preview limit")
+    content = _git(repo, "show", spec)
+    mime = _image_mime(path, content)
+    if mime is None:
+        raise BrowseError("image signature does not match its file type")
+    return content, mime
 
 
 def browse(repo: str, commit: str, requested_path: str = "") -> dict:
@@ -63,6 +102,11 @@ def browse(repo: str, commit: str, requested_path: str = "") -> dict:
     if object_type != "blob":
         raise BrowseError("unsupported Git object")
     size = int(_git(repo, "cat-file", "-s", spec).decode())
+    preview_mime = IMAGE_MIME.get(PurePosixPath(path).suffix.lower())
+    if preview_mime:
+        return {"kind": "file", "path": path, "commit": commit,
+                "size": size, "binary": True, "truncated": False,
+                "preview_mime": preview_mime, "content": ""}
     if size > MAX_TEXT_BYTES:
         return {"kind": "file", "path": path, "commit": commit,
                 "size": size, "binary": False, "truncated": True, "content": ""}

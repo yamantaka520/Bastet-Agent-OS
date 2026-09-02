@@ -107,7 +107,7 @@ Last updated: 2026-08-31
   barrier, avoiding the callback race that stalled the quota-resume path while
   preserving recursively spawned work. v0.37.0 adds immutable Git evidence
   browsing, deterministic structured metric gates and CI sync-conflict
-  detection. Validation: 714 Python tests,
+  detection plus signature-verified immutable raster evidence. Validation: 715 Python tests,
   ruff clean, Web production build clean.
 
 - Released: **v0.37.0**. Version arc v0.1.0 → v0.37.0 in just over one month

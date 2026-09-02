@@ -25,7 +25,10 @@ automatically resumes verification after an Agent process has exited. Details in
 
 The 0.37 visual acceptance layer adds immutable commit-bound repository browsing,
 structured numeric threshold gates, and CI detection of sync-conflict copies that
-would otherwise poison generated Web assets or TypeScript type discovery.
+would otherwise poison generated Web assets or TypeScript type discovery. Raster
+artwork is previewed from the same immutable commit only after bounded size and
+magic-signature checks; generated-directory conflict copies are safely removed at
+both edges of the Web build.
 
 ## Under consideration
 

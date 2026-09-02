@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "PYTHONPATH=../src python3 -m bastet_agent_os.workspace_hygiene --clean ..",
     "build": "tsc -b && eslint src && vite build",
+    "postbuild": "PYTHONPATH=../src python3 -m bastet_agent_os.workspace_hygiene --clean ..",
     "preview": "vite preview",
     "lint": "eslint src"
   },

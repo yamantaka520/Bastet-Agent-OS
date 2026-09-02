@@ -281,6 +281,8 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   const [mergeError, setMergeError] = useState("");
   const [repoBrowse, setRepoBrowse] = useState<RepoBrowse | null>(null);
   const [repoBrowseError, setRepoBrowseError] = useState("");
+  const [repoImageUrl, setRepoImageUrl] = useState("");
+  const [repoImageError, setRepoImageError] = useState("");
   const imagePreviewNames = useMemo(
     () => previews.filter((name) => /\.(png|jpe?g|gif|webp)$/i.test(name)),
     [previews]);
@@ -342,6 +344,23 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
   }, [jobId]);
 
   useEffect(() => { browseRepo(); }, [browseRepo, job?.status]);
+
+  useEffect(() => {
+    let dead = false;
+    let objectUrl = "";
+    setRepoImageUrl("");
+    setRepoImageError("");
+    if (repoBrowse?.kind === "file" && repoBrowse.preview_mime) {
+      apiBlob(`/api/jobs/${jobId}/files/image?path=${encodeURIComponent(repoBrowse.path)}`)
+        .then((blob) => {
+          if (dead) return;
+          objectUrl = URL.createObjectURL(blob);
+          setRepoImageUrl(objectUrl);
+        })
+        .catch(() => { if (!dead) setRepoImageError(t("board.repoImageRejected")); });
+    }
+    return () => { dead = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [jobId, repoBrowse, t]);
 
   const addSupply = async () => {
     setSupplyError("");
@@ -573,6 +592,11 @@ function JobDrawer({ jobId, canOperate, onClose, onChanged }:
                     </button>
                   </li>
                 ))}</ul>
+              ) : repoImageUrl ? (
+                <img className="repo-evidence-image" src={repoImageUrl}
+                     alt={repoBrowse.path} />
+              ) : repoImageError ? (
+                <p className="muted">{repoImageError}</p>
               ) : repoBrowse.binary ? (
                 <p className="muted">{t("board.repoBinary")} · {repoBrowse.size?.toLocaleString()} B</p>
               ) : repoBrowse.truncated ? (

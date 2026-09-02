@@ -370,6 +370,7 @@ const zhHant = {
   "board.repoParent": "上一層",
   "board.repoBinary": "二進位檔案",
   "board.repoTooLarge": "檔案超過 256 KiB 預覽上限。",
+  "board.repoImageRejected": "圖片內容與副檔名不符，已拒絕預覽。",
   "tpl.metricCmdPh": "指標指令（最後一行輸出 JSON）",
   "tpl.metricNamePh": "指標名稱",
   "tpl.metricThresholdPh": "門檻",

@@ -354,6 +354,7 @@ const ja: Dict = {
   "board.repoParent": "上の階層",
   "board.repoBinary": "バイナリファイル",
   "board.repoTooLarge": "ファイルが 256 KiB のプレビュー上限を超えています。",
+  "board.repoImageRejected": "画像内容と拡張子が一致しないため、プレビューを拒否しました。",
   "tpl.metricCmdPh": "メトリクスコマンド（最終行は JSON）",
   "tpl.metricNamePh": "メトリクス名",
   "tpl.metricThresholdPh": "しきい値",

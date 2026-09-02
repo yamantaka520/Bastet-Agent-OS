@@ -25,7 +25,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from . import secrets_store
@@ -2442,9 +2442,7 @@ def create_app(home: Home) -> FastAPI:
                 pass
         return job
 
-    @app.get("/api/jobs/{job_id}/files",
-             dependencies=[Depends(require_role("viewer"))])
-    def browse_job_files(job_id: str, path: str = ""):
+    def _job_evidence_ref(job_id: str) -> tuple[str, str]:
         job = db.one("SELECT project_id FROM jobs WHERE id=?", (job_id,))
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
@@ -2463,11 +2461,31 @@ def create_app(home: Home) -> FastAPI:
         if project is None or commit is None:
             raise HTTPException(status_code=409,
                                 detail="job has no immutable Git evidence commit")
+        return project["repo_path"], commit["head_commit"]
+
+    @app.get("/api/jobs/{job_id}/files",
+             dependencies=[Depends(require_role("viewer"))])
+    def browse_job_files(job_id: str, path: str = ""):
+        repo_path, commit = _job_evidence_ref(job_id)
         from .repo_browser import BrowseError, browse
         try:
-            return browse(project["repo_path"], commit["head_commit"], path)
+            return browse(repo_path, commit, path)
         except BrowseError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/jobs/{job_id}/files/image",
+             dependencies=[Depends(require_role("viewer"))])
+    def browse_job_image(job_id: str, path: str):
+        repo_path, commit = _job_evidence_ref(job_id)
+        from .repo_browser import BrowseError, read_image
+        try:
+            content, mime = read_image(repo_path, commit, path)
+        except BrowseError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return Response(content=content, media_type=mime, headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        })
 
     @app.post("/api/jobs/{job_id}/supplies")
     def add_supply(job_id: str, body: SupplyIn,

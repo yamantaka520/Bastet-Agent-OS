@@ -354,6 +354,7 @@ const ko: Dict = {
   "board.repoParent": "상위 폴더",
   "board.repoBinary": "바이너리 파일",
   "board.repoTooLarge": "파일이 256 KiB 미리보기 제한을 초과합니다.",
+  "board.repoImageRejected": "이미지 내용과 확장자가 일치하지 않아 미리보기를 거부했습니다.",
   "tpl.metricCmdPh": "메트릭 명령(마지막 줄 JSON)",
   "tpl.metricNamePh": "메트릭 이름",
   "tpl.metricThresholdPh": "임계값",
