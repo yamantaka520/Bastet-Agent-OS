@@ -59,6 +59,37 @@ def _role_agent(db, project_id: str, role: str):
         (project_id, role))
 
 
+def planning_admission_report(db, project_id: str) -> dict[str, Any]:
+    """Preflight the two roles required before task decomposition exists.
+
+    Workflow admission cannot cover these roles: negotiation happens before a
+    workflow/task graph is selected.  Keeping this as a separate report makes
+    the missing setup visible on every project, including projects whose
+    workflow has no PM or system-analysis stage.
+    """
+    from .admission import workflow_report
+    from .workflow import parse_stages
+
+    stages = parse_stages([
+        {"name": "規劃方案", "role": "pm", "gate": "auto", "read_only": True},
+        {"name": "方案挑戰", "role": "system-analyst", "gate": "auto",
+         "read_only": True},
+    ])
+    return workflow_report(db, project_id, stages, strict_roles=True)
+
+
+def _planning_agents(db, project_id: str) -> tuple[Any, Any]:
+    report = planning_admission_report(db, project_id)
+    if not report["ok"]:
+        detail = "；".join(item["detail"] for item in report["errors"])
+        raise PlanningRoundError(f"方案協商尚未就緒：{detail}")
+    by_role = {stage["role"]: stage for stage in report["stages"]}
+    pm_id = by_role["pm"]["viable"][0]["agent_id"]
+    analyst_id = by_role["system-analyst"]["viable"][0]["agent_id"]
+    return (db.one("SELECT * FROM agents WHERE id=?", (pm_id,)),
+            db.one("SELECT * FROM agents WHERE id=?", (analyst_id,)))
+
+
 async def _agent_turn(db, agent, *, prompt: str, workdir: str) -> str:
     from .executors.base import TaskSpec, get_executor
 
@@ -94,11 +125,7 @@ async def negotiate(db, home_root, round_id: str, actor: str = "",
         raise PlanningRoundError("planning round not found")
     if row["state"] not in ("discovery", "analysis"):
         raise PlanningRoundError("planning negotiation is not available in this state")
-    pm = _role_agent(db, row["project_id"], "pm")
-    analyst = _role_agent(db, row["project_id"], "system-analyst")
-    if pm is None or analyst is None:
-        missing = "pm" if pm is None else "system-analyst"
-        raise PlanningRoundError(f"project has no enabled {missing} agent")
+    pm, analyst = _planning_agents(db, row["project_id"])
     project = db.one("SELECT repo_path FROM projects WHERE id=?", (row["project_id"],))
     from .config import expand_repo_path
     candidate = expand_repo_path(project["repo_path"]) if project else ""
@@ -279,4 +306,5 @@ def overview(db, project_id: str) -> dict[str, Any]:
         result["task_graph"] = json.loads(result.pop("task_graph_json") or "[]")
     from .admission import project_workflow_report
     return {"round": result, "intake": intake,
-            "admission": project_workflow_report(db, project_id)}
+            "admission": project_workflow_report(db, project_id),
+            "planning_admission": planning_admission_report(db, project_id)}

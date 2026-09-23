@@ -1315,6 +1315,11 @@ def create_app(home: Home) -> FastAPI:
             if role:
                 needed.append({"stage": stage.get("name"), "role": role,
                                "agents": by_role.get(role, [])})
+        planning_roles = [
+            {"stage": "規劃方案", "role": "pm", "agents": by_role.get("pm", [])},
+            {"stage": "方案挑戰", "role": "system-analyst",
+             "agents": by_role.get("system-analyst", [])},
+        ]
 
         from . import admission as admission_mod
         from . import project_budget
@@ -1343,6 +1348,9 @@ def create_app(home: Home) -> FastAPI:
                         "template_id": project["default_template_id"]},
             "stages": stages,
             "role_coverage": needed,
+            "planning_role_coverage": planning_roles,
+            "planning_admission": planning_rounds_mod.planning_admission_report(
+                db, project_id),
             "admission": admission_report,
             "assignments": assignments,
             "resources": resources,

@@ -675,6 +675,8 @@ const en: Dict = {
   "chat.analysisStart": "Start solution negotiation",
   "chat.analysisRunning": "Negotiation running…",
   "chat.analysisRounds": "{n} rounds completed",
+  "project.planningRolesHint": "Solution negotiation always requires PM and system-analysis agents, independently of workflow stages.",
+  "project.planningBlocked": "Solution negotiation is not ready",
   "board.archive": "Archive card",
   "board.unarchive": "Restore card",
   "board.showArchived": "Show archived cards",

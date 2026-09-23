@@ -143,7 +143,11 @@ class AgyExecutor:
             cmd += ["--dangerously-skip-permissions"]
         if task.llm and task.llm.get("model"):
             cmd += ["--model", task.llm["model"]]
-        cmd += ["-p", prompt]
+        # Do not put the prompt in argv. A planning negotiation can grow past
+        # the host's per-argument limit before ARG_MAX itself is reached.
+        # agy's stream-json input mode carries the same turn over stdin without
+        # that kernel limit.
+        cmd += ["--input-format", "stream-json"]
 
         handle.process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -151,9 +155,16 @@ class AgyExecutor:
             limit=STREAM_LIMIT,
             cwd=task.workdir,
             env=run_env(task, AGY_CLI_DISABLE_AUTO_UPDATE="1"),
-            stdin=asyncio.subprocess.DEVNULL,   # nothing may wait on a prompt
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=(sys.platform != "win32"))
+        assert handle.process.stdin is not None
+        message = {"type": "user", "message": {"role": "user", "content": [
+            {"type": "text", "text": prompt},
+        ]}}
+        handle.process.stdin.write((json.dumps(message) + "\n").encode())
+        await handle.process.stdin.drain()
+        handle.process.stdin.close()
         return handle
 
     async def stream(self, handle: AgyHandle) -> AsyncIterator[RunEvent]:

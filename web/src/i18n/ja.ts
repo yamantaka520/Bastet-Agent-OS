@@ -675,6 +675,8 @@ const ja: Dict = {
   "chat.analysisStart": "方案協議を開始",
   "chat.analysisRunning": "協議中…",
   "chat.analysisRounds": "{n} ラウンド完了",
+  "project.planningRolesHint": "ソリューション協議には、ワークフローステージとは別に PM とシステムアナリストの割り当てが必要です。",
+  "project.planningBlocked": "ソリューション協議の準備ができていません",
   "board.archive": "カードをアーカイブ",
   "board.unarchive": "カードを復元",
   "board.showArchived": "アーカイブ済みカードを表示",

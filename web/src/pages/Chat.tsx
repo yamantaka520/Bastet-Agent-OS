@@ -23,7 +23,8 @@ type Planning = { round: null | { id: string; state: string; ordinal: number;
                                   solution_md: string;
                                   negotiation: { number: number; verdict: string }[] };
                   intake: { id: string; kind: string; content: string }[];
-                  admission: Admission };
+                  admission: Admission;
+                  planning_admission: Admission };
 
 export default function ChatPage(props: { canOperate: boolean; refreshKey: number }) {
   const t = useT();
@@ -361,7 +362,7 @@ function Conversation({ sessionId, responders, canOperate, refreshKey,
             <div className="chat-dispatch">
               <b>{t("chat.analysisTitle")}</b>
               <p className="muted">{t("chat.analysisHint")}</p>
-              <button disabled={busy} onClick={async () => {
+              <button disabled={busy || !planning.planning_admission.ok} onClick={async () => {
                 setBusy(true); setError("");
                 try {
                   await post(`/api/planning-rounds/${planning.round!.id}/negotiate`, {});
@@ -369,6 +370,12 @@ function Conversation({ sessionId, responders, canOperate, refreshKey,
                 } catch (e) { setError(String((e as Error).message)); load(); }
                 finally { setBusy(false); }
               }}>{busy ? t("chat.analysisRunning") : t("chat.analysisStart")}</button>
+              {!planning.planning_admission.ok && (
+                <ul className="danger-text">
+                  {planning.planning_admission.errors.map((item, i) =>
+                    <li key={`${item.code}-${i}`}>{item.detail}</li>)}
+                </ul>
+              )}
               {!!planning.round.negotiation?.length && (
                 <span className="card-meta"> {t("chat.analysisRounds",
                   { n: planning.round.negotiation.length })}</span>

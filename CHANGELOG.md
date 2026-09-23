@@ -10,6 +10,8 @@ follows the same number and the WebUI prints it beside the title.
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-09-23
+
 ### Added
 
 - A durable execution-host registry now gives the local node and registered peers
@@ -20,6 +22,16 @@ follows the same number and the WebUI prints it beside the title.
   containing the requested and selected host, frozen workflow requirements and the
   complete candidate snapshot. Host inventory and read-only placement previews are
   available through the API.
+
+### Fixed
+
+- Planning readiness now validates and displays the exact PM and system-analyst
+  assignments before negotiation starts, including disabled, depleted and
+  route-incompatible agents, instead of failing only after the user presses the
+  negotiation button.
+- Antigravity prompts are streamed over stdin instead of being placed in a
+  command-line argument, so accumulated multi-round negotiations no longer fail
+  at the operating system's argument-size limit during final PM convergence.
 
 ### Security
 

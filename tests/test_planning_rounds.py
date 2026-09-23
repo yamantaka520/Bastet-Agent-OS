@@ -105,3 +105,41 @@ async def test_pm_and_system_analyst_negotiate_visibly_within_five_rounds(
         "pm", "system-analyst", "pm", "system-analyst"]
     assert len(seeded.query("SELECT * FROM audit_log WHERE "
                             "action='planning.negotiation.exchange'")) == 2
+
+
+def test_planning_admission_requires_exact_visible_pm_and_sa_roles(orch, seeded):
+    del orch
+    seeded.write_many([
+        ("INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+         "VALUES('proj1','fakebot','pm',10)", ()),
+        ("INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+         "VALUES('proj1','fakebot','analyst',10)", ()),
+    ])
+    report = planning_rounds.planning_admission_report(seeded, "proj1")
+    assert report["ok"] is False
+    assert any(item.get("role") == "system-analyst"
+               for item in report["errors"])
+    assert [row["role"] for row in report["stages"]] == [
+        "pm", "system-analyst"]
+
+
+def test_planning_admission_uses_enabled_same_role_backup(orch, seeded):
+    del orch
+    ts = now()
+    seeded.write("INSERT INTO agents(id,amos_agent_id,name,executor_type,enabled,"
+                 "created_at,updated_at) VALUES('disabled-sa','disabled-sa',"
+                 "'Disabled SA','fake',0,?,?)", (ts, ts))
+    seeded.write_many([
+        ("INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+         "VALUES('proj1','fakebot','pm',10)", ()),
+        ("INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+         "VALUES('proj1','disabled-sa','system-analyst',20)", ()),
+        ("INSERT INTO project_agent_roles(project_id,agent_id,role,preference) "
+         "VALUES('proj1','fakebot','system-analyst',10)", ()),
+    ])
+    report = planning_rounds.planning_admission_report(seeded, "proj1")
+    assert report["ok"] is True
+    analyst = next(row for row in report["stages"]
+                   if row["role"] == "system-analyst")
+    assert analyst["viable"] == [{"agent_id": "fakebot",
+                                   "executor_type": "fake"}]

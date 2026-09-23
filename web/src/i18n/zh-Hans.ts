@@ -695,6 +695,8 @@ const zhHans: Dict = {
   "chat.analysisStart": "开始方案协商",
   "chat.analysisRunning": "协商进行中…",
   "chat.analysisRounds": "已完成 {n} 轮",
+  "project.planningRolesHint": "方案协商固定需要 PM 与系统分析师；这两个角色不依赖工作流阶段，必须先具备可用且兼容的 Agent。",
+  "project.planningBlocked": "方案协商尚未就绪",
   "board.archive": "归档卡片",
   "board.unarchive": "还原卡片",
   "board.showArchived": "显示已归档卡片",

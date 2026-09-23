@@ -119,7 +119,7 @@ Last updated: 2026-09-02
   detection plus signature-verified immutable raster evidence. Validation: 715 Python tests,
   ruff clean, Web production build clean.
 
-- Released: **v0.37.0**. Version arc v0.1.0 → v0.37.0 in just over one month
+- Released: **v0.38.0**. Version arc v0.1.0 → v0.38.0 in just over one month
   (2026-07-28 → 2026-09-02), ~170 commits. See [CHANGELOG.md](CHANGELOG.md) for
   the full trail and [docs/HISTORY.md](docs/HISTORY.md) for why each decision
   went the way it did.

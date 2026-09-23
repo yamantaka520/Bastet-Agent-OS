@@ -10,7 +10,7 @@ from bastet_agent_os.executors.agy import AgyExecutor
 from bastet_agent_os.executors.base import TaskSpec
 
 FAKE_AGY = """#!/bin/sh
-{ printf 'ARGS:'; printf ' %s' "$@"; printf '\\n'; printf 'CWD:%s\\n' "$(pwd)"; } > "$FAKE_LOG"
+{ printf 'ARGS:'; printf ' %s' "$@"; printf '\\n'; printf 'CWD:%s\\n' "$(pwd)"; printf 'STDIN:'; cat; } > "$FAKE_LOG"
 cat "$FAKE_ENVELOPE"
 exit ${FAKE_EXIT:-0}
 """
@@ -62,7 +62,21 @@ async def test_success_with_usage(fake_agy, tmp_path):
     # exits, which left long stages looking dead on the board for their whole
     # life (see tests/test_liveness.py)
     assert "--output-format stream-json" in args
+    assert "--input-format stream-json" in args
+    assert '\"text\": \"do it\"' in args
+    assert " -p " not in args
     assert f"CWD:{tmp_path}" in args or "CWD:/private" in args  # workdir = process cwd
+
+
+async def test_large_prompt_is_streamed_over_stdin_not_argv(fake_agy, tmp_path):
+    set_envelope, log = fake_agy
+    set_envelope({"status": "SUCCESS", "response": "ok", "usage": {}})
+    prompt = "x" * 200_000
+    result = await drive(spec(tmp_path, prompt=prompt))
+    recorded = log.read_text()
+    assert result.status == "succeeded"
+    assert prompt in recorded
+    assert prompt not in recorded.split("STDIN:", 1)[0]
 
 
 async def test_error_envelope_fails_even_with_rc0(fake_agy, tmp_path):

@@ -41,6 +41,17 @@ class _FakeProc:
     returncode = None
     stdout = None
     stderr = None
+    class _Stdin:
+        def write(self, data):
+            pass
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            pass
+
+    stdin = _Stdin()
 
 
 async def _argv_of(executor, task, monkeypatch) -> list[str]:

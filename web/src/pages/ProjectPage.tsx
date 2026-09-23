@@ -46,6 +46,10 @@ type Overview = {
   role_coverage: { stage: string; role: string;
                    agents: { agent_id: string; agent_name: string;
                              executor_type: string; preference: number }[] }[];
+  planning_role_coverage: { stage: string; role: string;
+                   agents: { agent_id: string; agent_name: string;
+                             executor_type: string; preference: number }[] }[];
+  planning_admission: Admission;
   admission: Admission;
   resources: { id: string; name: string; kind: string; grant_id: string;
                scope_type: string; budget_usd: number | null;
@@ -292,6 +296,46 @@ function ProjectDetail({ projectId, project, canOperate, refreshKey, onChanged, 
                      onSaved={() => { load(); onChanged(); }} />
 
       <h4>{t("project.workflowBlock")}</h4>
+      <p className="muted">{t("project.planningRolesHint")}</p>
+      <DataTable
+        head={[t("c.stage"), t("project.headRole"),
+               t("project.headAssigned"), ""]}
+        rows={ov.planning_role_coverage.map((cov) => {
+          const assigned = cov.agents;
+          return [
+            cov.stage,
+            roleLabel(cov.role),
+            assigned.length
+              ? (<span className="role-agents">{assigned.map((a) => (
+                  <span key={a.agent_id} className="role-chip">{a.agent_name}
+                    <span className="card-meta"> ({a.executor_type} · {
+                      t("role.prefShort", { n: a.preference })})</span>
+                    {canOperate && <button className="ghost chip-x"
+                      title={t("project.removeAssign")}
+                      onClick={() => guard(() => del(
+                        `/api/roles?project_id=${encodeURIComponent(projectId)}`
+                        + `&agent_id=${encodeURIComponent(a.agent_id)}`
+                        + `&role=${encodeURIComponent(cov.role)}`))}>✕</button>}
+                  </span>))}</span>)
+              : <span className="danger-text">{t("project.missing")}</span>,
+            canOperate ? (
+              <Picker options={agents.filter((a) => a.enabled
+                        && !assigned.some((x) => x.agent_id === a.id))
+                        .map((a) => ({ value: a.id, label: a.name }))}
+                      label={assigned.length ? t("project.assignSwap")
+                                             : t("project.assignPick")}
+                      empty={t("project.noOtherAgents")} t={t}
+                      onPick={(agentId) => guard(() => post("/api/roles",
+                        { project_id: projectId, agent_id: agentId,
+                          role: cov.role, preference: 0 }))} />
+            ) : null,
+          ];
+        })} />
+      {!ov.planning_admission.ok && <div className="notice">
+        <b>{t("project.planningBlocked")}</b>
+        <ul>{ov.planning_admission.errors.map((item, i) =>
+          <li key={`${item.code}-${i}`}>{item.detail}</li>)}</ul>
+      </div>}
       <div className="inline-form">
         <span className="muted">{t("project.workflowLabel")}</span>
         <select value={ov.project.template_id ?? ""} disabled={!canOperate}

@@ -694,6 +694,8 @@ const zhHant = {
   "chat.analysisStart": "開始方案協商",
   "chat.analysisRunning": "協商進行中…",
   "chat.analysisRounds": "已完成 {n} 輪",
+  "project.planningRolesHint": "方案協商固定需要 PM 與系統分析師；這兩個角色不依賴工作流程階段，必須先具備可用且相容的 Agent。",
+  "project.planningBlocked": "方案協商尚未就緒",
   "board.archive": "封存卡片",
   "board.unarchive": "還原卡片",
   "board.showArchived": "顯示已封存卡片",

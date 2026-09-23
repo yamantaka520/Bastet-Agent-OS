@@ -675,6 +675,8 @@ const ko: Dict = {
   "chat.analysisStart": "방안 협의 시작",
   "chat.analysisRunning": "협의 진행 중…",
   "chat.analysisRounds": "{n}라운드 완료",
+  "project.planningRolesHint": "방안 협의에는 워크플로 단계와 별도로 PM 및 시스템 분석 Agent가 필요합니다.",
+  "project.planningBlocked": "방안 협의가 준비되지 않았습니다",
   "board.archive": "카드 보관",
   "board.unarchive": "카드 복원",
   "board.showArchived": "보관된 카드 표시",
