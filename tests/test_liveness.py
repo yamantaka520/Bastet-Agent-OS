@@ -40,13 +40,19 @@ def _spawn_kwargs(source: str) -> list[dict[str, ast.expr]]:
 
 @pytest.mark.parametrize("filename", CLI_EXECUTORS)
 def test_no_child_can_wait_on_a_prompt(filename):
-    """stdin is /dev/null, so an interactive prompt reads EOF and fails fast."""
+    """A child either gets EOF, or one bounded machine message then EOF."""
     calls = _spawn_kwargs((EXEC_DIR / filename).read_text())
     assert calls, f"{filename}: no subprocess spawn found"
     for kwargs in calls:
         assert "stdin" in kwargs, f"{filename}: spawn inherits stdin — a child can hang on a prompt"
-        assert ast.unparse(kwargs["stdin"]).endswith("DEVNULL"), \
-            f"{filename}: stdin is not DEVNULL"
+        stdin = ast.unparse(kwargs["stdin"])
+        if filename == "agy.py":
+            assert stdin.endswith("PIPE"), "agy must stream its prompt instead of using argv"
+            source = (EXEC_DIR / filename).read_text()
+            assert "handle.process.stdin.close()" in source, \
+                "agy leaves stdin open and could wait for another interactive turn"
+        else:
+            assert stdin.endswith("DEVNULL"), f"{filename}: stdin is not DEVNULL"
 
 
 def _spawning_functions(source: str) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
